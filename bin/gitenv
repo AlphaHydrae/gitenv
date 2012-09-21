@@ -1,4 +1,4 @@
 #!/usr/bin/env ruby
 require File.join(File.dirname(__FILE__), '..', 'lib', 'gitenv')
 
-puts 'Not yet implemented...'
+Gitenv::Runner.new.run

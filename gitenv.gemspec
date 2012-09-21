@@ -5,7 +5,7 @@
 
 Gem::Specification.new do |s|
   s.name = "gitenv"
-  s.version = "0.0.1"
+  s.version = "0.0.2"
 
   s.required_rubygems_version = Gem::Requirement.new(">= 0") if s.respond_to? :required_rubygems_version=
   s.authors = ["AlphaHydrae"]
@@ -29,6 +29,7 @@ Gem::Specification.new do |s|
     "Rakefile",
     "VERSION",
     "bin/gitenv",
+    "gitenv.gemspec",
     "lib/gitenv.rb",
     "spec/helper.rb",
     "spec/version_spec.rb"
