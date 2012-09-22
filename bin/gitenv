@@ -1,4 +1,2 @@
 #!/usr/bin/env ruby
-require File.join(File.dirname(__FILE__), '..', 'lib', 'gitenv')
-
-Gitenv::Runner.new.run
+require File.join(File.dirname(__FILE__), '..', 'lib', 'program')
