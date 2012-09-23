@@ -5,11 +5,11 @@
 
 Gem::Specification.new do |s|
   s.name = "gitenv"
-  s.version = "0.0.2"
+  s.version = "0.0.3"
 
   s.required_rubygems_version = Gem::Requirement.new(">= 0") if s.respond_to? :required_rubygems_version=
   s.authors = ["AlphaHydrae"]
-  s.date = "2012-09-21"
+  s.date = "2012-09-23"
   s.description = "Creates symlinks to configuration files in a git repository."
   s.email = "hydrae.alpha@gmail.com"
   s.executables = ["gitenv"]
@@ -31,6 +31,16 @@ Gem::Specification.new do |s|
     "bin/gitenv",
     "gitenv.gemspec",
     "lib/gitenv.rb",
+    "lib/gitenv/actions.rb",
+    "lib/gitenv/all_files.rb",
+    "lib/gitenv/config.rb",
+    "lib/gitenv/context.rb",
+    "lib/gitenv/controller.rb",
+    "lib/gitenv/copy.rb",
+    "lib/gitenv/dot_files.rb",
+    "lib/gitenv/enumerator.rb",
+    "lib/gitenv/symlink.rb",
+    "lib/program.rb",
     "spec/helper.rb",
     "spec/version_spec.rb"
   ]
@@ -45,6 +55,7 @@ Gem::Specification.new do |s|
 
     if Gem::Version.new(Gem::VERSION) >= Gem::Version.new('1.2.0') then
       s.add_runtime_dependency(%q<paint>, ["~> 0.8.5"])
+      s.add_runtime_dependency(%q<commander>, ["~> 4.1.2"])
       s.add_development_dependency(%q<bundler>, [">= 0"])
       s.add_development_dependency(%q<rake>, [">= 0"])
       s.add_development_dependency(%q<rspec>, [">= 0"])
@@ -55,6 +66,7 @@ Gem::Specification.new do |s|
       s.add_development_dependency(%q<simplecov>, [">= 0"])
     else
       s.add_dependency(%q<paint>, ["~> 0.8.5"])
+      s.add_dependency(%q<commander>, ["~> 4.1.2"])
       s.add_dependency(%q<bundler>, [">= 0"])
       s.add_dependency(%q<rake>, [">= 0"])
       s.add_dependency(%q<rspec>, [">= 0"])
@@ -66,6 +78,7 @@ Gem::Specification.new do |s|
     end
   else
     s.add_dependency(%q<paint>, ["~> 0.8.5"])
+    s.add_dependency(%q<commander>, ["~> 4.1.2"])
     s.add_dependency(%q<bundler>, [">= 0"])
     s.add_dependency(%q<rake>, [">= 0"])
     s.add_dependency(%q<rspec>, [">= 0"])

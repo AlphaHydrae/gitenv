@@ -2,7 +2,7 @@
 require 'paint'
 
 module Gitenv
-  VERSION = '0.0.2'
+  VERSION = '0.0.3'
 end
 
 [ :context, :config, :controller, :symlink, :copy, :enumerator, :all_files, :dot_files, :actions ].each do |lib|
