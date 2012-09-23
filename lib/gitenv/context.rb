@@ -2,45 +2,38 @@
 module Gitenv
 
   module Context
+    attr_accessor :home, :repository
+    attr_accessor :from_paths, :to_paths
 
     def from path, &block
-      (@from_path ||= []) << path
+      (@from_paths ||= []) << path
       if block
         instance_eval &block
-        @from_path.pop
+        @from_paths.pop
       end
     end
 
     def from_path
-      @from_path ? File.join(*@from_path) : nil
-    end
-
-    def from_paths
-      @from_path || []
-    end
-
-    def from_paths= paths
-      @from_path = paths
+      @from_paths ? File.join(*@from_paths) : nil
     end
 
     def to path, &block
-      (@to_path ||= []) << path
+      (@to_paths ||= []) << path
       if block
         instance_eval &block
-        @to_path.pop
+        @to_paths.pop
       end
     end
 
     def to_path
-      @to_path ? File.join(*@to_path) : nil
+      @to_paths ? File.join(*@to_paths) : nil
     end
 
-    def to_paths
-      @to_path || []
-    end
-
-    def to_paths= paths
-      @to_path = paths
+    def copy! source
+      self.from_paths = source.from_paths ? source.from_paths.dup : []
+      self.to_paths = source.to_paths ? source.to_paths.dup : []
+      self.repository = source.repository
+      self.home = source.home
     end
   end
 end

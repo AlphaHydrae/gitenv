@@ -14,9 +14,13 @@ module Gitenv
 
     def run
       load_config_file!
-      @config.actions.each &:build!
-      @config.actions.each &:update! if @action == :update
-      @config.actions.each{ |a| puts a }
+      @config.actions.each do |a|
+        a.each do |impl|
+          impl.build!
+          impl.update! if @action == :update
+          puts impl
+        end
+      end
     end
 
     private

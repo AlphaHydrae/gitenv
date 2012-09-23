@@ -10,7 +10,7 @@ module Gitenv
 
     def initialize home
       @home = home
-      @actions = Actions.new
+      @actions = []
     end
 
     def repo path
@@ -18,16 +18,7 @@ module Gitenv
     end
 
     def symlink file
-
-      scope = self
-      current_actions = Actions.new
-      enumerator(file).each do |f|
-        current_actions << Symlink.new(scope, f).tap do |action|
-          @actions << action
-        end
-      end
-
-      current_actions
+      Action.new(self, Symlink, enumerator(file)).tap{ |a| @actions << a }
     end
 
     def all_files
@@ -42,11 +33,11 @@ module Gitenv
 
     def enumerator file
       if file == :all_files
-        AllFiles.new File.join(*[@repository, from_path].compact)
+        AllFiles.new
       elsif file == :dot_files
-        DotFiles.new File.join(*[@repository, from_path].compact)
+        DotFiles.new
       else
-        [ file ]
+        OneFile.new file
       end
     end
   end

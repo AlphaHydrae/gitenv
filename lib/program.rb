@@ -17,7 +17,8 @@ command :update do |c|
   end
 end
 
-global_option '-c', '--config FILE', 'Use a custom configuration file (defaults to ~/.gitenv.rb)'
+global_option '-r', '--repo PATH', 'Specify the path to the environment repository'
+global_option '-c', '--config PATH', 'Use a custom configuration file (defaults to ~/.gitenv.rb)'
 
 default_command :info
 

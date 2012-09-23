@@ -1,20 +1,3 @@
-
-module Gitenv
-
-  class FileEnumerator
-
-    def initialize path
-      @path = path
-    end
-
-    def files
-      raise '#files not implemented'
-    end
-
-    def each &block
-      files.each do |f|
-        block.call f
-      end
-    end
-  end
+[ :enumerator, :all_files, :dot_files, :one_file ].each do |lib|
+  require File.join(File.dirname(__FILE__), 'enumerator', lib.to_s)
 end

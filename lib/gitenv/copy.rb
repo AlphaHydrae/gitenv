@@ -6,8 +6,7 @@ module Gitenv
 
     def initialize config, file
       @config, @file = config, file
-      self.from_paths = config.from_paths.dup
-      self.to_paths = config.to_paths.dup
+      copy! config
     end
   end
 end
