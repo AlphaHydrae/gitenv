@@ -3,9 +3,12 @@
 module Gitenv
 
   class Symlink
+    include Context
 
     def initialize config, file
       @config, @file = config, file
+      self.from_paths = config.from_paths.dup
+      self.to_paths = config.to_paths.dup
     end
 
     def build!
@@ -38,10 +41,6 @@ module Gitenv
       %/ #{status_mark} #{Paint[link, :cyan]} -> #{target}   #{status_message}/
     end
 
-    def from path
-      (@from ||= []) << path
-    end
-
     private
 
     def status_mark
@@ -53,11 +52,11 @@ module Gitenv
     end
 
     def link
-      File.join @config.home, @file
+      File.join(*[ @config.home, to_path, @file].compact)
     end
 
     def target
-      File.join(*[ @config.repository, @from || [], @file ].flatten)
+      File.join(*[ @config.repository, from_path, @file ].compact)
     end
   end
 end

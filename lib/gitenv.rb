@@ -5,4 +5,6 @@ module Gitenv
   VERSION = '0.0.2'
 end
 
-Dir[File.join File.dirname(__FILE__), File.basename(__FILE__, '.*'), '*.rb'].each{ |lib| require lib }
+[ :context, :config, :controller, :symlink, :copy, :enumerator, :all_files, :dot_files, :actions ].each do |lib|
+  require File.join(File.dirname(__FILE__), 'gitenv', lib.to_s)
+end
