@@ -5,7 +5,7 @@
 
 Gem::Specification.new do |s|
   s.name = "gitenv"
-  s.version = "0.0.3"
+  s.version = "0.0.4"
 
   s.required_rubygems_version = Gem::Requirement.new(">= 0") if s.respond_to? :required_rubygems_version=
   s.authors = ["AlphaHydrae"]
@@ -31,14 +31,16 @@ Gem::Specification.new do |s|
     "bin/gitenv",
     "gitenv.gemspec",
     "lib/gitenv.rb",
-    "lib/gitenv/actions.rb",
-    "lib/gitenv/all_files.rb",
+    "lib/gitenv/action.rb",
     "lib/gitenv/config.rb",
     "lib/gitenv/context.rb",
     "lib/gitenv/controller.rb",
     "lib/gitenv/copy.rb",
-    "lib/gitenv/dot_files.rb",
     "lib/gitenv/enumerator.rb",
+    "lib/gitenv/enumerator/all_files.rb",
+    "lib/gitenv/enumerator/dot_files.rb",
+    "lib/gitenv/enumerator/enumerator.rb",
+    "lib/gitenv/enumerator/one_file.rb",
     "lib/gitenv/symlink.rb",
     "lib/program.rb",
     "spec/helper.rb",
