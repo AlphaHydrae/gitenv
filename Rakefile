@@ -17,8 +17,8 @@ Jeweler::Tasks.new do |gem|
   gem.name = "gitenv"
   gem.homepage = "http://github.com/AlphaHydrae/gitenv"
   gem.license = "MIT"
-  gem.summary = %Q{Git environment project manager.}
-  gem.description = %Q{Creates symlinks to configuration files in a git repository.}
+  gem.summary = %Q{Symlink manager for git repositories with configuration files.}
+  gem.description = %Q{Gitenv sets up symlinks to your configuration files in a git repository.}
   gem.email = "hydrae.alpha@gmail.com"
   gem.authors = ["AlphaHydrae"]
   # dependencies defined in Gemfile

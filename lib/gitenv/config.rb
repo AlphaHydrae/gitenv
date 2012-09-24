@@ -5,7 +5,7 @@ module Gitenv
     include Context
 
     attr_reader :actions
-    attr_reader :repository
+    attr_accessor :repository
     attr_reader :home
 
     def initialize home
@@ -19,6 +19,10 @@ module Gitenv
 
     def symlink file
       Action.new(self, Symlink, enumerator(file)).tap{ |a| @actions << a }
+    end
+
+    def copy file
+      Action.new(self, Copy, enumerator(file)).tap{ |a| @actions << a }
     end
 
     def all_files

@@ -10,8 +10,14 @@ module Gitenv
     end
 
     def each &block
-      @files.each File.join(*[repository, from_path].compact) do |f|
+      @files.each from_path do |f|
         block.call @type.new(self, f)
+      end
+    end
+
+    def each_file &block
+      @files.each from_path do |f|
+        block.call File.join(from_path, f)
       end
     end
   end

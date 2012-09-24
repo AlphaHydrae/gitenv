@@ -3,20 +3,31 @@
 module Gitenv
 
   class Symlink
-    include Context
 
     def initialize config, file
       @config, @file = config, file
-      copy! config
     end
 
-    def build!
-      @color, @mark, @message = if File.symlink? link
-        @current_target = File.expand_path File.readlink(link)
-        if @current_target == target
+    def update!
+      unless File.exists? link
+        File.symlink target, link
+      end
+    end
+
+    def to_s
+      color, mark, msg = status
+      %/ #{Paint[mark, color]} #{Paint[link, :cyan]} -> #{target}   #{Paint[msg, color]}/
+    end
+
+    private
+
+    def status
+      if File.symlink? link
+        current_target = File.expand_path File.readlink(link)
+        if current_target == target
           [ :green, "✓", "ok" ]
         else
-          [ :yellow, "✗", "currently points to #{@current_target}" ]
+          [ :yellow, "✗", "currently points to #{current_target}" ]
         end
       elsif File.file? link
         [ :red, "✗", "is a file" ]
@@ -29,33 +40,12 @@ module Gitenv
       end
     end
 
-    def update!
-      if !File.exists? link
-        File.symlink target, link
-        @color, @mark, @message = :green, "✓", "ok"
-      end
-    end
-
-    def to_s
-      %/ #{status_mark} #{Paint[link, :cyan]} -> #{target}   #{status_message}/
-    end
-
-    private
-
-    def status_mark
-      Paint["#{@mark}", @color]
-    end
-
-    def status_message
-      Paint["#{@message}", @color]
-    end
-
     def link
-      File.join(*[ @config.home, to_path, @file].compact)
+      @link ||= File.join(*[ @config.to_path, @file].compact)
     end
 
     def target
-      File.join(*[ @config.repository, from_path, @file ].compact)
+      @target ||= File.join(*[ @config.from_path, @file ].compact)
     end
   end
 end
