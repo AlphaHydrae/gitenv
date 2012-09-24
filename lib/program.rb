@@ -24,8 +24,8 @@ command :update do |c|
   end
 end
 
-# TODO: add a :format action to describe the configuration file DSL
 # TODO: add a verbose option (show repo, show config file path)
+# TODO: add link to documentation in help
 
 default_command :info
 

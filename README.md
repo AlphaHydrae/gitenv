@@ -2,9 +2,7 @@
 
 Creates symlinks to your configuration files in a git repository (<a href="https://github.com/AlphaHydrae/env">like mine</a>).
 
-    # Run gitenv without arguments to check the symlink configuration.
-    # First-time users will be prompted to enter the path to their
-    # environment repository so gitenv can set up its own config file.
+Run gitenv without arguments to check the symlink configuration. First-time users will be prompted to enter the path to their environment repository so gitenv can set up its own config file.
 
     #=> gitenv
 
@@ -12,7 +10,7 @@ Creates symlinks to your configuration files in a git repository (<a href="https
      ~/.gitconfig -> ~/projects/env/.gitconfig   not yet set up
      ~/.zshrc -> ~/projects/env/.zshrc           not yet set up
 
-    # Then run it with 'update' to set up the missing symlinks.
+Then run it with **update** to set up the missing symlinks.
 
     #=> gitenv update
 

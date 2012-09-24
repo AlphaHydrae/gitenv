@@ -33,13 +33,13 @@ module Gitenv
 
     def status
       if !File.exists?(target)
-        [ :blue, "✗", "is not yet set up" ]
+        [ :blue, "✗", "is not set up; update will create the copy" ]
       elsif digest(source) == digest(target)
         [ :green, "✓", "ok" ]
       elsif File.exists?(target_copy)
         [ :red, "✗", "already exists with backup copy" ]
       else
-        [ :red, "✗", "already exists" ]
+        [ :blue, "✗", "already exists; update will backup the file and create the copy" ]
       end
     end
 
