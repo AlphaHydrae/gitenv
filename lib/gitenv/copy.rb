@@ -21,7 +21,12 @@ module Gitenv
 
     def to_s
       color, mark, msg = status
-      %/ #{Paint[mark, color]} #{Paint[target, :cyan]} << #{source}   #{Paint[msg, color]}/
+      justification = @options[:justify] ? ' ' * (@options[:justify] - description.length) : ''
+      %/ #{Paint[mark, color]} #{Paint[target, :cyan]} << #{source}#{justification}#{Paint[msg, color]}/
+    end
+
+    def description
+      "#{target} << #{source}"
     end
 
     private

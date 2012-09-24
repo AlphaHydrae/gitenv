@@ -9,9 +9,9 @@ module Gitenv
       copy! config
     end
 
-    def each &block
+    def each options = {}, &block
       @files.each from_path do |f|
-        block.call @type.new(self, f, @options)
+        block.call @type.new(self, f, @options.merge(options))
       end
     end
 

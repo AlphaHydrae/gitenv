@@ -33,8 +33,11 @@ module Gitenv
 
       check_files!
 
+      longest = 0
+      @config.actions.each{ |a| a.each{ |impl| longest = impl.description.length if impl.description.length > longest } }
+
       @config.actions.each do |a|
-        a.each do |impl|
+        a.each :justify => longest + 3 do |impl|
           impl.update! if @action == :update
           puts impl
         end
