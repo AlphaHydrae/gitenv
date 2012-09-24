@@ -1,18 +1,24 @@
 # gitenv
 
-Symlink manager for git repositories with configuration files.
+Creates symlinks to your configuration files in a git repository (<a href="https://github.com/AlphaHydrae/env">like mine</a>).
 
-    # This will create symlinks in your home folder
-    # to all dot files in your environment repository.
-    gitenv --repo ~/projects/env update
+    # Run gitenv without arguments to check the symlink configuration.
+    # First-time users will be prompted to enter the path to their
+    # environment repository so gitenv can set up its own config file.
 
-If you create a <a href="#configuration">configuration file</a>, you can drop the repo option:
+    #=> gitenv
 
-    # Show current configuration.
-    gitenv
+     ~/.gemrc -> ~/projects/env/.gemrc           ok
+     ~/.gitconfig -> ~/projects/env/.gitconfig   not yet set up
+     ~/.zshrc -> ~/projects/env/.zshrc           not yet set up
 
-    # Creates the symlinks.
-    gitenv update
+    # Then run it with 'update' to set up the missing symlinks.
+
+    #=> gitenv update
+
+     ~/.gemrc -> ~/projects/env/.gemrc           ok
+     ~/.gitconfig -> ~/projects/env/.gitconfig   ok
+     ~/.zshrc -> ~/projects/env/.zshrc           ok
 
 Read on for <a href="#configuration">more advanced options</a>.
 
@@ -23,25 +29,17 @@ Read on for <a href="#configuration">more advanced options</a>.
 <a name="configuration"></a>
 ## Configuration
 
-If your repository is more complex than a bunch of dot files or you want to put the links somewhere other than in your home folder, you will have to create a configuration file. Gitenv looks for `~/.gitenv.rb` by default. You can override this with the `-c, --config` option or by setting the `GITENV_CONFIG` environment variable.
-
-To create a basic configuration file, call gitenv with the `config` action.
-
-    # Will prompt you for the path to your environment repository.
-    gitenv config
-
-    # Or you can provide it as an option.
-    gitenv --repo ~/projects/env config
+If your repository is more complex than a bunch of dot files or you want to put the links somewhere other than in your home folder, you will have to customize your configuration file. Gitenv prompts you to create one the first time you run it. It looks for `~/.gitenv.rb` by default. You can override this with the `-c, --config` option or by setting the `GITENV_CONFIG` environment variable.
 
 The following sections demonstrate the various options you can customize in the configuration file.
 
 ### Repository
 
 ```ruby
-# Allows you to call gitenv without specifying the -r, --repo option.
+# Path to your environment repository.
 repo '~/projects/env'
 
-# Note that you can also set the GITENV\_REPO environment variable.
+# Note that you can also set the GITENV_REPO environment variable.
 ```
 
 ### Symlinks
@@ -56,6 +54,9 @@ symlink all_files
 # You can also create symlinks one at a time.
 symlink '.zshrc'
 symlink 'my_config_file'
+
+# If you want the name of link to be different than that of the file, use the :as option.
+symlink 'zshconfig', :as => '.zshconfig'
 ```
 
 ### Sub-folders in the repository
@@ -93,7 +94,7 @@ end
 symlink('.zshrc').to('links')
 symlink(all_files).to('a/b/c')
 
-# Paths are relative to your home folder. If you need an absolute path, use #to\_abs.
+# Paths are relative to your home folder. If you need an absolute path, use #to_abs.
 symlink('my_config_file').to_abs('/opt/config')
 ```
 
@@ -107,6 +108,10 @@ copy dot_files
 copy(dot_files).from('zsh')
 copy('my_config_file').to('configs')
 ```
+
+### Symlinks or copies in system directories
+
+Just use `sudo`. Gitenv will happily set up your symlinks. You might have to add the `-E` switch to keep gitenv in the PATH.
 
 ## License (MIT)
 

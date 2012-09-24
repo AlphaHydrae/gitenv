@@ -6,8 +6,8 @@ module Gitenv
 
   class Copy
 
-    def initialize config, file
-      @config, @file = config, file
+    def initialize config, file, options = {}
+      @config, @file, @options = config, file, options
     end
 
     def update!
@@ -28,7 +28,7 @@ module Gitenv
 
     def status
       if !File.exists?(target)
-        [ :blue, "✓", "is not yet set up" ]
+        [ :blue, "✗", "is not yet set up" ]
       elsif digest(source) == digest(target)
         [ :green, "✓", "ok" ]
       elsif File.exists?(target_copy)
@@ -39,11 +39,15 @@ module Gitenv
     end
 
     def target
-      @target ||= File.join(*[ @config.to_path, @file].compact)
+      @target ||= File.join(*[ @config.to_path, target_name].compact)
     end
 
     def target_copy
       @target_copy ||= "#{target}.orig"
+    end
+
+    def target_name
+      @options[:as] || @file
     end
 
     def source

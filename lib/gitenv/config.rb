@@ -17,12 +17,12 @@ module Gitenv
       @repository = File.expand_path path
     end
 
-    def symlink file
-      Action.new(self, Symlink, enumerator(file)).tap{ |a| @actions << a }
+    def symlink file, options = {}
+      Action.new(self, Symlink, enumerator(file), options).tap{ |a| @actions << a }
     end
 
-    def copy file
-      Action.new(self, Copy, enumerator(file)).tap{ |a| @actions << a }
+    def copy file, options = {}
+      Action.new(self, Copy, enumerator(file), options).tap{ |a| @actions << a }
     end
 
     def all_files

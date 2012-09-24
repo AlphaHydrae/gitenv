@@ -4,8 +4,8 @@ module Gitenv
 
   class Symlink
 
-    def initialize config, file
-      @config, @file = config, file
+    def initialize config, file, options = {}
+      @config, @file, @options = config, file, options
     end
 
     def update!
@@ -36,16 +36,20 @@ module Gitenv
       elsif File.exists? link
         [ :red, "✗", "exists but is not a symlink" ]
       else
-        [ :blue, "✓", "is not set up" ]
+        [ :blue, "✗", "is not set up" ]
       end
     end
 
     def link
-      @link ||= File.join(*[ @config.to_path, @file].compact)
+      @link ||= File.join(*[ @config.to_path, link_name].compact)
     end
 
     def target
       @target ||= File.join(*[ @config.from_path, @file ].compact)
+    end
+
+    def link_name
+      @options[:as] || @file
     end
   end
 end

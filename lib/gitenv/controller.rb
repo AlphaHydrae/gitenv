@@ -15,13 +15,15 @@ module Gitenv
 
     def run
 
-      return create_config_file if @action == :config
-
       check_config_file!
+
+      if !File.exists?(config_file) and !repository
+        create_config_file!
+      end
+
       load_config_file!
 
-      @config.repository = ENV['GITENV_REPO'] if ENV['GITENV_REPO']
-      @config.repository = @options.repo if @options.repo
+      @config.repository = repository
       check_repository!
 
       # load dot files by default
@@ -41,31 +43,49 @@ module Gitenv
 
     private
 
-    def create_config_file
+    def create_config_file!
+
       file = config_file
-      if File.exists? file
-        return puts "You already have a config file (#{file})."
+      unless agree "You have no configuration file (#{file}); do you wish to create one? (y/n) "
+        puts
+        abort "To use gitenv, you must either create a configuration file\nor specify an environment repository with the -r, --repo option."
       end
+
       repo = @options.repo || ENV['GITENV_REPO']
       unless repo
         Readline.completion_append_character = '/'
-        repo = Readline.readline('Type the path to your environment repository: ', true)
-      end
-      repo_exists = repo && !repo.strip.empty? && File.directory?(File.expand_path(repo))
-      repo = repo_exists ? File.expand_path(repo) : nil
-      config = String.new.tap do |s|
-        s << "\n# Path to your environment repository."
-        if repo_exists
-          s << "\nrepo '#{repo}'"
-        else
-          s << "\n# repo ''"
+        Readline.completion_proc = Proc.new do |str|
+          Dir[str+'*'].grep /^#{Regexp.escape(str)}/
         end
-        s << "\n"
-        s << "\n# Create symlinks in the home folder."
-        s << "\nsymlink dot_files"
-        s << "\n"
+        begin
+          repo = Readline.readline('Type the path to your environment repository: ', true)
+        rescue Interrupt
+          exit 1
+        end
       end
+
+      if !repo or repo.strip.empty?
+        puts; abort "You must specify an environment repository."
+      elsif !File.directory?(File.expand_path(repo))
+        puts; abort "No such directory #{repo}."
+      end
+
+      config = String.new.tap do |s|
+        s << %|\n# Path to your environment repository.|
+        s << %|\nrepo "#{repo}"\n|
+        s << %|\n# Create symlinks in your home folder.|
+        s << %|\nsymlink dot_files\n\n|
+      end
+
       File.open(file, 'w'){ |f| f.write config }
+
+      puts
+      puts Paint["Successfully wrote configuration to #{file}", :green]
+      puts
+    end
+
+    def repository
+      @options.repo || @config.repository || ENV['GITENV_REPO']
     end
 
     def config_file
@@ -110,15 +130,11 @@ module Gitenv
 
     def check_config_file!
       file = config_file
-      return if !File.exists?(file) and !@options.config and !ENV['GITENV_CONFIG']
-      if !File.exists?(file) and @options.config
-        abort "No such configuration file.\n   (--config #{@options.config})"
-      elsif !File.exists?(file)
-        abort "No such configuration file.\n   ($GITENV_CONFIG = #{ENV['GITENV_CONFIG']})"
-      elsif !File.file?(file)
-        abort "#{file} is not a file."
+      return if !File.exists?(file)
+      if !File.file?(file)
+        abort "#{file} is not a file. It cannot be used as a configuration file."
       elsif !File.readable?(file)
-        abort "#{file} is not readable."
+        abort "#{file} is not readable. It cannot be used as a configuration file."
       end
     end
 

@@ -24,16 +24,7 @@ command :update do |c|
   end
 end
 
-command :config do |c|
-  c.syntax = 'gitenv config'
-  c.description = 'Create a basic configuration file'
-  c.action do |args,options|
-    Gitenv::Controller.new(:config, options).run
-  end
-end
-
 # TODO: add a :format action to describe the configuration file DSL
-# TODO: add a :config action to create a basic configuration file
 # TODO: add a verbose option (show repo, show config file path)
 
 default_command :info
