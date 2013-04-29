@@ -12,6 +12,7 @@ group :development do
   gem 'bundler'
   gem 'rake'
   gem 'rspec'
+  gem 'fakefs', '~> 0.4.2', :require => 'fakefs/safe'
   gem 'jeweler'
   gem 'gemcutter'
   gem 'gem-release'
