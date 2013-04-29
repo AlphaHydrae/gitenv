@@ -13,4 +13,6 @@ require 'simplecov'
 SimpleCov.start
 
 require 'rspec'
+require 'tmpdir'
+require 'fakefs/spec_helpers'
 require 'gitenv'
