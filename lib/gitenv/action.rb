@@ -10,14 +10,14 @@ module Gitenv
     end
 
     def each options = {}, &block
-      @files.each from_path do |f|
+      @files.each from do |f|
         block.call @type.new(self, f, @options.merge(options))
       end
     end
 
     def each_file &block
-      @files.each from_path do |f|
-        block.call File.join(from_path, f)
+      @files.each from do |f|
+        block.call File.join(from, f)
       end
     end
   end

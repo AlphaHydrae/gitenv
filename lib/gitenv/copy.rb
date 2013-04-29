@@ -15,18 +15,18 @@ module Gitenv
         FileUtils.mv target, target_copy
       end
       if !File.exists?(target)
-        FileUtils.copy source, target
+        FileUtils.copy origin, target
       end
     end
 
     def to_s
       color, mark, msg = status
       justification = @options[:justify] ? ' ' * (@options[:justify] - description.length) : ''
-      %/ #{Paint[mark, color]} #{Paint[target, :cyan]} << #{source}#{justification}#{Paint[msg, color]}/
+      %/ #{Paint[mark, color]} #{Paint[target, :cyan]} << #{origin}#{justification}#{Paint[msg, color]}/
     end
 
     def description
-      "#{target} << #{source}"
+      "#{target} << #{origin}"
     end
 
     private
@@ -44,7 +44,7 @@ module Gitenv
     end
 
     def target
-      @target ||= File.join(*[ @config.to_path, target_name].compact)
+      @target ||= File.join(*[ @config.to, target_name].compact)
     end
 
     def target_copy
@@ -55,8 +55,8 @@ module Gitenv
       @options[:as] || @file
     end
 
-    def source
-      @source ||= File.join(*[ @config.from_path, @file ].compact)
+    def origin
+      @origin ||= File.join(*[ @config.from, @file ].compact)
     end
 
     def digest file

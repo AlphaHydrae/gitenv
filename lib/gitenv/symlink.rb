@@ -46,11 +46,11 @@ module Gitenv
     end
 
     def link
-      @link ||= File.join(*[ @config.to_path, link_name].compact)
+      @link ||= File.join(*[ @config.to, link_name].compact)
     end
 
     def target
-      @target ||= File.join(*[ @config.from_path, @file ].compact)
+      @target ||= File.join(*[ @config.from, @file ].compact)
     end
 
     def link_name

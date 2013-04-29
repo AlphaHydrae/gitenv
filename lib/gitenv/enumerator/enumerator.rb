@@ -3,12 +3,22 @@ module Gitenv
 
   class FileEnumerator
 
+    def initialize options = {}
+      @options = options
+    end
+
     def files path
-      raise '#files not implemented'
+      []
     end
 
     def each path, &block
-      files(path).each{ |f| block.call f }
+      files(path).each &block
+    end
+
+    private
+
+    def ignores
+      @ignores ||= @options[:ignores] ? [ @options[:ignores] ].flatten : []
     end
   end
 end

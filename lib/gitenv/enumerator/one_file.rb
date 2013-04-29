@@ -3,7 +3,8 @@ module Gitenv
 
   class OneFile < FileEnumerator
 
-    def initialize file
+    def initialize file, options = {}
+      super options
       @file = file
     end
 

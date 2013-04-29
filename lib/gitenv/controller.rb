@@ -23,8 +23,8 @@ module Gitenv
 
       load_config_file!
 
-      @config.repository = repository
-      check_repository!
+      #@config.from repository
+      #check_repository!
 
       # load dot files by default
       if @config.actions.empty?
@@ -88,7 +88,7 @@ module Gitenv
     end
 
     def repository
-      @options.repo || @config.repository || ENV['GITENV_REPO']
+      @options.repo || @config.from || ENV['GITENV_REPO']
     end
 
     def config_file
@@ -142,21 +142,21 @@ module Gitenv
     end
 
     def check_repository!
-      if !@config.repository
+      if !@config.from
         msg = "You have not specified an environment repository."
         msg << "\nYou must either use the -r, --repo option or create"
         msg << "\na configuration file (~/.gitenv.rb by default) with"
         msg << "\nthe repo setting."
         abort msg
       end
-      return if File.directory? @config.repository
-      notice = File.exists?(@config.repository) ? 'is not a directory' : 'does not exist'
+      return if File.directory? @config.from
+      notice = File.exists?(@config.from) ? 'is not a directory' : 'does not exist'
       from = if @options.repo
         "--repo #{@options.repo}"
       elsif ENV['GITENV_REPO']
         "$GITENV_REPO = #{ENV['GITENV_REPO']}"
       else
-        %/repo "#{@config.repository}"/
+        %/repo "#{@config.from}"/
       end
       abort "The repository you have specified #{notice}.\n   (#{from})"
     end
