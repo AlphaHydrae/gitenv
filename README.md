@@ -10,9 +10,9 @@ Run gitenv without arguments to check the symlink configuration. First-time user
      ~/.gitconfig -> ~/projects/env/.gitconfig   not yet set up
      ~/.zshrc -> ~/projects/env/.zshrc           not yet set up
 
-Then run it with **update** to set up the missing symlinks.
+Then run it with **apply** to set up the missing symlinks.
 
-    #=> gitenv update
+    #=> gitenv apply
 
      ~/.gemrc -> ~/projects/env/.gemrc           ok
      ~/.gitconfig -> ~/projects/env/.gitconfig   ok

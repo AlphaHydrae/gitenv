@@ -16,11 +16,11 @@ command :info do |c|
   end
 end
 
-command :update do |c|
-  c.syntax = 'gitenv update'
+command :apply do |c|
+  c.syntax = 'gitenv apply'
   c.description = 'Create/update the symlinks'
   c.action do |args,options|
-    Gitenv::Controller.new(:update, options).run
+    Gitenv::Controller.new(:apply, options).run
   end
 end
 

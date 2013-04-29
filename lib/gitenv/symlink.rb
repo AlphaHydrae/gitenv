@@ -8,7 +8,7 @@ module Gitenv
       @config, @file, @options = config, file, options
     end
 
-    def update!
+    def apply
       unless File.exists? link
         File.symlink target, link
       end
@@ -32,16 +32,16 @@ module Gitenv
         if current_target == target
           [ :green, "✓", "ok" ]
         else
-          [ :yellow, "✗", "currently points to #{current_target}; update will overwrite" ]
+          [ :yellow, "✗", "currently points to #{current_target}; apply will overwrite" ]
         end
       elsif File.file? link
-        [ :red, "✗", "is a file; update will ignore" ]
+        [ :red, "✗", "is a file; apply will ignore" ]
       elsif File.directory? link
-        [ :red, "✗", "is a directory; update will ignore" ]
+        [ :red, "✗", "is a directory; apply will ignore" ]
       elsif File.exists? link
-        [ :red, "✗", "exists but is not a symlink; update will ignore" ]
+        [ :red, "✗", "exists but is not a symlink; apply will ignore" ]
       else
-        [ :blue, "✗", "is not set up; update will create the link" ]
+        [ :blue, "✗", "is not set up; apply will create the link" ]
       end
     end
 

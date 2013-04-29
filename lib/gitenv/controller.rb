@@ -38,7 +38,7 @@ module Gitenv
 
       @config.actions.each do |a|
         a.each :justify => longest + 3 do |impl|
-          impl.update! if @action == :update
+          impl.apply if @action == :apply
           puts impl
         end
       end

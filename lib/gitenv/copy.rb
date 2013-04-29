@@ -10,7 +10,7 @@ module Gitenv
       @config, @file, @options = config, file, options
     end
 
-    def update!
+    def apply
       if File.exists?(target) && !File.exists?(target_copy)
         FileUtils.mv target, target_copy
       end
@@ -33,13 +33,13 @@ module Gitenv
 
     def status
       if !File.exists?(target)
-        [ :blue, "✗", "is not set up; update will create the copy" ]
-      elsif digest(source) == digest(target)
+        [ :blue, "✗", "is not set up; apply will create the copy" ]
+      elsif digest(origin) == digest(target)
         [ :green, "✓", "ok" ]
       elsif File.exists?(target_copy)
         [ :red, "✗", "already exists with backup copy" ]
       else
-        [ :blue, "✗", "already exists; update will backup the file and create the copy" ]
+        [ :blue, "✗", "already exists; apply will backup the file and create the copy" ]
       end
     end
 
