@@ -9,8 +9,7 @@ module Gitenv
       @action = action
       @options = options
 
-      @home = File.expand_path '~'
-      @config = Config.new @home
+      @config = Config.new
     end
 
     def run
@@ -33,13 +32,11 @@ module Gitenv
 
       check_files!
 
-      longest = 0
-      @config.actions.each{ |a| a.each{ |impl| longest = impl.description.length if impl.description.length > longest } }
-
+      renderer = Renderer.new
       @config.actions.each do |a|
-        a.each :justify => longest + 3 do |impl|
+        a.each do |impl|
           impl.apply if @action == :apply
-          puts impl
+          puts renderer.render(impl)
         end
       end
     end
@@ -97,7 +94,7 @@ module Gitenv
       elsif ENV['GITENV_CONFIG']
         File.expand_path ENV['GITENV_CONFIG']
       else
-        File.join @home, '.gitenv.rb'
+        File.expand_path '~/.gitenv.rb'
       end
     end
 

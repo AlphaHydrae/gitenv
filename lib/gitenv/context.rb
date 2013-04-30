@@ -1,41 +1,49 @@
+require 'rbconfig'
 
 module Gitenv
 
-  module Context
+  class Context
     attr_accessor :ignores
+
+    def initialize config, options = {}
+      @config, @from, @ignores = config, options[:from], options[:ignores]
+
+      @to ||= File.expand_path('~')
+
+      @ignores = options[:ignores] || []
+      @ignores << '.DS_Store' if @ignores.empty? and RbConfig::CONFIG['host_os'] =~ /darwin/
+    end
 
     def from path = nil, &block
       return @from if path.nil?
+
       old = @from
       @from = @from ? File.expand_path(path, @from) : File.expand_path(path)
+
       if block
-        instance_eval &block
+        @config.instance_eval &block
         @from = old
       end
+
       self
     end
 
     def to path = nil, &block
-      return @to || home if path.nil?
+      return @to if path.nil?
+
       old = @to
       @to = @to ? File.expand_path(path, @to) : File.expand_path(path)
+
       if block
-        instance_eval &block
+        @config.instance_eval &block
         @to = old
       end
+
       self
     end
 
-    def copy! context
-      @from = context.from
-      @to = context.to
-      @ignores = context.ignores
-    end
-
-    private
-
-    def home
-      @@home ||= File.expand_path('~')
+    def dup
+      Context.new @config, from: @from, to: @to, ignores: @ignores.dup
     end
   end
 end

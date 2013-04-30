@@ -1,7 +1,7 @@
 
 module Gitenv
 
-  class OneFile < FileEnumerator
+  class OneFile < FilesMatcher
 
     def initialize file, options = {}
       super options
