@@ -26,11 +26,11 @@ module Gitenv
       #check_repository!
 
       # load dot files by default
-      if @config.actions.empty?
-        @config.symlink @config.dot_files
-      end
+      #if @config.actions.empty?
+      #  @config.symlink @config.dot_files
+      #end
 
-      check_files!
+      #check_files!
 
       renderer = Renderer.new
       @config.actions.each do |a|
@@ -111,8 +111,8 @@ module Gitenv
         a.each_file do |f|
           if !File.exists?(f)
             problems << { :file => f, :msg => "does not exist" }
-          elsif !File.file?(f)
-            problems << { :file => f, :msg => "is not a file" }
+          #elsif !File.file?(f)
+          #  problems << { :file => f, :msg => "is not a file" }
           elsif !File.readable?(f)
             problems << { :file => f, :msg => "is not readable" }
           end
