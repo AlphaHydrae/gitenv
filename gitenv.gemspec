@@ -9,7 +9,7 @@ Gem::Specification.new do |s|
 
   s.required_rubygems_version = Gem::Requirement.new(">= 0") if s.respond_to? :required_rubygems_version=
   s.authors = ["AlphaHydrae"]
-  s.date = "2012-09-24"
+  s.date = "2013-05-13"
   s.description = "Gitenv sets up symlinks to your configuration files in a git repository."
   s.email = "hydrae.alpha@gmail.com"
   s.executables = ["gitenv"]
@@ -18,38 +18,32 @@ Gem::Specification.new do |s|
     "README.md"
   ]
   s.files = [
-    ".rspec",
-    ".rvmrc",
-    ".screenrc",
-    ".travis.yml",
     "Gemfile",
-    "Gemfile.lock",
     "LICENSE.txt",
     "README.md",
-    "Rakefile",
     "VERSION",
     "bin/gitenv",
-    "gitenv.gemspec",
     "lib/gitenv.rb",
-    "lib/gitenv/action.rb",
+    "lib/gitenv/actions.rb",
+    "lib/gitenv/actions/copy.rb",
+    "lib/gitenv/actions/symlink.rb",
     "lib/gitenv/config.rb",
     "lib/gitenv/context.rb",
     "lib/gitenv/controller.rb",
-    "lib/gitenv/copy.rb",
-    "lib/gitenv/enumerator.rb",
-    "lib/gitenv/enumerator/all_files.rb",
-    "lib/gitenv/enumerator/dot_files.rb",
-    "lib/gitenv/enumerator/enumerator.rb",
-    "lib/gitenv/enumerator/one_file.rb",
-    "lib/gitenv/symlink.rb",
-    "lib/program.rb",
-    "spec/helper.rb",
-    "spec/version_spec.rb"
+    "lib/gitenv/files.rb",
+    "lib/gitenv/files/all_files.rb",
+    "lib/gitenv/files/dot_files.rb",
+    "lib/gitenv/files/matcher.rb",
+    "lib/gitenv/files/one_file.rb",
+    "lib/gitenv/renderer.rb",
+    "lib/gitenv/repository.rb",
+    "lib/gitenv/status.rb",
+    "lib/program.rb"
   ]
   s.homepage = "http://github.com/AlphaHydrae/gitenv"
   s.licenses = ["MIT"]
   s.require_paths = ["lib"]
-  s.rubygems_version = "1.8.24"
+  s.rubygems_version = "1.8.25"
   s.summary = "Symlink manager for git repositories with configuration files."
 
   if s.respond_to? :specification_version then
@@ -61,6 +55,7 @@ Gem::Specification.new do |s|
       s.add_development_dependency(%q<bundler>, [">= 0"])
       s.add_development_dependency(%q<rake>, [">= 0"])
       s.add_development_dependency(%q<rspec>, [">= 0"])
+      s.add_development_dependency(%q<fakefs>, ["~> 0.4.2"])
       s.add_development_dependency(%q<jeweler>, [">= 0"])
       s.add_development_dependency(%q<gemcutter>, [">= 0"])
       s.add_development_dependency(%q<gem-release>, [">= 0"])
@@ -72,6 +67,7 @@ Gem::Specification.new do |s|
       s.add_dependency(%q<bundler>, [">= 0"])
       s.add_dependency(%q<rake>, [">= 0"])
       s.add_dependency(%q<rspec>, [">= 0"])
+      s.add_dependency(%q<fakefs>, ["~> 0.4.2"])
       s.add_dependency(%q<jeweler>, [">= 0"])
       s.add_dependency(%q<gemcutter>, [">= 0"])
       s.add_dependency(%q<gem-release>, [">= 0"])
@@ -84,6 +80,7 @@ Gem::Specification.new do |s|
     s.add_dependency(%q<bundler>, [">= 0"])
     s.add_dependency(%q<rake>, [">= 0"])
     s.add_dependency(%q<rspec>, [">= 0"])
+    s.add_dependency(%q<fakefs>, ["~> 0.4.2"])
     s.add_dependency(%q<jeweler>, [">= 0"])
     s.add_dependency(%q<gemcutter>, [">= 0"])
     s.add_dependency(%q<gem-release>, [">= 0"])
