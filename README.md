@@ -2,6 +2,11 @@
 
 Creates symlinks to your configuration files in a git repository (<a href="https://github.com/AlphaHydrae/env">like mine</a>).
 
+[![Gem Version](https://badge.fury.io/rb/gitenv.svg)](http://badge.fury.io/rb/gitenv)
+[![Dependency Status](https://gemnasium.com/AlphaHydrae/gitenv.svg)](https://gemnasium.com/AlphaHydrae/gitenv)
+[![Build Status](https://travis-ci.org/AlphaHydrae/gitenv.svg?branch=master)](http://travis-ci.org/AlphaHydrae/gitenv)
+[![Coverage Status](https://coveralls.io/repos/AlphaHydrae/gitenv/badge.svg)](https://coveralls.io/r/AlphaHydrae/gitenv)
+
 Run gitenv without arguments to check the symlink configuration. First-time users will be prompted to enter the path to their environment repository so gitenv can set up its own config file.
 
     #=> gitenv
