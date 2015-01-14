@@ -21,7 +21,7 @@ module Gitenv
       end
 
       repo = repository
-      @config.from repo
+      @config.from repo if repo && !repo.empty?
 
       load_config_file!
 
