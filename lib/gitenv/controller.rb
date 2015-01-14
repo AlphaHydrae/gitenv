@@ -20,6 +20,9 @@ module Gitenv
         create_config_file!
       end
 
+      repo = repository
+      @config.from repo
+
       load_config_file!
 
       #@config.from repository
@@ -85,7 +88,7 @@ module Gitenv
     end
 
     def repository
-      @options.repo || @config.from || ENV['GITENV_REPO']
+      @options.repo || ENV['GITENV_REPO']
     end
 
     def config_file
