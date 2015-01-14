@@ -1,3 +1,7 @@
+# BUGS
+
+* apply doesn't work with repo and config options, but works when they are given through environment variables
+
 # TODO
 
 * implement git update of configured repositories
