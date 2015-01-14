@@ -30,11 +30,11 @@ RSpec::Matchers.define :contain do |expected|
     File.read(actual) == expected
   end
 
-  failure_message_for_should do |actual|
+  failure_message do |actual|
     "expected that #{actual} would contain #{contents expected}"
   end
 
-  failure_message_for_should_not do |actual|
+  failure_message_when_negated do |actual|
     "expected that #{actual} would not contain #{contents expected}"
   end
 
@@ -53,11 +53,11 @@ RSpec::Matchers.define :have_changed do |expected|
     File.mtime(actual) != expected
   end
 
-  failure_message_for_should do |actual|
+  failure_message do |actual|
     "expected that #{actual} would have changed since #{expected}"
   end
 
-  failure_message_for_should_not do |actual|
+  failure_message_when_negated do |actual|
     "expected that #{actual} would not have changed since #{expected}"
   end
 
@@ -75,11 +75,11 @@ RSpec::Matchers.define :be_status do |expected,*message|
     @type_matches and @message_matches
   end
 
-  failure_message_for_should do |actual|
+  failure_message do |actual|
     "expected that #{actual.inspect} would #{failures.join ' and '}"
   end
 
-  failure_message_for_should_not do |actual|
+  failure_message_when_negated do |actual|
     "expected that #{actual.inspect} would not be of type :#{@expected_type} and have a message matching #{@expected_messages.inspect}"
   end
 

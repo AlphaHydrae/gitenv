@@ -91,7 +91,7 @@ describe Gitenv::Symlink, fakefs: true do
     context "when applied" do
       before(:each){ subject.apply }
       its(:target){ should_not have_changed(@target_mtime) }
-      it("should not delete the file"){ expect(File.file? link).to be_true }
+      it("should not delete the file"){ expect(File.file? link).to be(true) }
     end
   end
 
@@ -102,7 +102,7 @@ describe Gitenv::Symlink, fakefs: true do
     context "when applied" do
       before(:each){ subject.apply }
       its(:target){ should_not have_changed(@target_mtime) }
-      it("should not delete the directory"){ expect(File.directory? link).to be_true }
+      it("should not delete the directory"){ expect(File.directory? link).to be(true) }
     end
   end
 end
