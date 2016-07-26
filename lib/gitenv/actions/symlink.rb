@@ -12,25 +12,29 @@ module Gitenv
 
       def overwrite overwrite = true
         @options[:overwrite] = overwrite
+        @options[:backup] = options[:backup] if options.key?(:backup)
         self
       end
 
       def once
         @options[:overwrite] = false
+        @options[:backup] = false
         self
       end
     end
 
     def initialize context, file, options = {}
       @context, @file = context, file
-      @as, @overwrite = options[:as], options[:overwrite]
+      @as, @overwrite, @backup = options[:as], options[:overwrite], options[:backup]
       @mkdir = options.fetch :mkdir, true
     end
 
     def apply
       FileUtils.mkdir_p File.dirname(target) if @mkdir
-      FileUtils.rm link if @overwrite && File.exists?(link) # FIXME: only if link points somewhere else
-      File.symlink target, link unless File.symlink?(link) or File.exists?(link)
+      backup_exists = File.exists? target_backup
+      FileUtils.mv target, target_backup if @backup && File.exists?(target) && !backup_exists
+      FileUtils.rm link if @overwrite && File.exists?(link) && !backup_exists # TODO: only if link points somewhere else
+      File.symlink target, link unless File.exists?(link)
     end
 
     def to_s
@@ -38,18 +42,21 @@ module Gitenv
     end
 
     def status
+      backup_notice = if @backup; " backup the file and"; end
       if File.symlink? link
         current_target = File.expand_path File.readlink(link)
-        if @overwrite == false or current_target == target
+        if @overwrite == false || current_target == target
           Status.ok 'ok'
         elsif !@overwrite
           Status.error "exists but points to #{current_target}; enable overwrite if you want to replace it"
+        elsif @backup && File.exists?(target_backup)
+          Status.error "already exists with backup copy"
         else
-          Status.warning "currently points to #{current_target}; apply will overwrite"
+          Status.warning "currently points to #{current_target}; apply will#{backup_notice} overwrite"
         end
       elsif File.exists? link
         if @overwrite
-          Status.warning "exists but is not a symlink; apply will overwrite"
+          Status.warning "exists but is not a symlink; apply will#{backup_notice} overwrite"
         else
           Status.error "exists but is not a symlink; apply will ignore"
         end
@@ -64,6 +71,10 @@ module Gitenv
 
     def target
       @target ||= File.join(*[ @context.from, @file ].compact)
+    end
+
+    def target_backup
+      @target_backup ||= "#{target}.orig"
     end
 
     private

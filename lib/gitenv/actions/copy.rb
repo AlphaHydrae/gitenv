@@ -31,14 +31,14 @@ module Gitenv
       @context, @file = context, file
       @as, @overwrite, @backup = options[:as], options[:overwrite], options[:backup]
       @mkdir = options.fetch :mkdir, true
-      @backup = true if @overwrite and !options.key?(:backup)
+      @backup = true if @overwrite && !options.key?(:backup)
     end
 
     def apply
       FileUtils.mkdir_p File.dirname(target) if @mkdir
       backup_exists = File.exists? target_backup
-      FileUtils.mv target, target_backup if @backup and File.exists?(target) and !backup_exists
-      FileUtils.rm target if @overwrite and File.exists?(target) and !backup_exists
+      FileUtils.mv target, target_backup if @backup && File.exists?(target) && !backup_exists
+      FileUtils.rm target if @overwrite && File.exists?(target) && !backup_exists
       FileUtils.cp origin, target unless File.exists?(target)
     end
 
@@ -49,11 +49,11 @@ module Gitenv
     def status
       if !File.exists?(target)
         Status.missing "is not set up; apply will create the copy"
-      elsif @overwrite == false or digest(origin) == digest(target)
+      elsif @overwrite == false || digest(origin) == digest(target)
         Status.ok 'ok'
       elsif !@overwrite
         Status.error "already exists; enable overwrite if you want to replace it"
-      elsif @backup and File.exists?(target_backup)
+      elsif @backup && File.exists?(target_backup)
         Status.error "already exists with backup copy"
       else
         backup_notice = if @backup; " backup the file and"; end
