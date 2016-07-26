@@ -49,7 +49,7 @@ module Gitenv
         end
       elsif File.exists? link
         if @overwrite
-          Status.missing "exists but is not a symlink; apply will overwrite"
+          Status.warning "exists but is not a symlink; apply will overwrite"
         else
           Status.error "exists but is not a symlink; apply will ignore"
         end
