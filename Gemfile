@@ -9,6 +9,7 @@ gem 'commander', '~> 4.2'
 # Add dependencies to develop your gem here.
 # Include everything needed to run rake, tests, features, etc.
 group :development do
+  require 'pp' # https://github.com/fakefs/fakefs/issues/99
   gem 'rake', '~> 11.0'
   gem 'rspec', '~> 3.1'
   gem 'rspec-its', '~> 1.1'
