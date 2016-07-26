@@ -29,9 +29,15 @@ describe Gitenv::Symlink::Action do
     its(:options){ should eq(overwrite: false) }
   end
 
+  context "after calling overwrite with the backup option set to false" do
+    subject{ super().overwrite backup: false }
+    it{ should be(action) }
+    its(:options){ should eq(overwrite: true, backup: false) }
+  end
+
   context "after calling once" do
     subject{ super().once }
     it{ should be(action) }
-    its(:options){ should eq(overwrite: false) }
+    its(:options){ should eq(overwrite: false, backup: false) }
   end
 end

@@ -16,7 +16,7 @@ module Gitenv
 
       check_config_file!
 
-      if !File.exists?(config_file) and !repository
+      if !File.exist?(config_file) and !repository
         create_config_file!
       end
 
@@ -103,7 +103,7 @@ module Gitenv
 
     def load_config_file!
       file = config_file
-      return unless File.exists? file
+      return unless File.exist? file
       contents = File.open(file, 'r').read
       @config.instance_eval contents, file
     end
@@ -112,7 +112,7 @@ module Gitenv
       problems = []
       @config.actions.each do |a|
         a.each_file do |f|
-          if !File.exists?(f)
+          if !File.exist?(f)
             problems << { :file => f, :msg => "does not exist" }
           #elsif !File.file?(f)
           #  problems << { :file => f, :msg => "is not a file" }
@@ -133,7 +133,7 @@ module Gitenv
 
     def check_config_file!
       file = config_file
-      return if !File.exists?(file)
+      return if !File.exist?(file)
       if !File.file?(file)
         abort "#{file} is not a file. It cannot be used as a configuration file."
       elsif !File.readable?(file)
@@ -150,7 +150,7 @@ module Gitenv
         abort msg
       end
       return if File.directory? @config.from
-      notice = File.exists?(@config.from) ? 'is not a directory' : 'does not exist'
+      notice = File.exist?(@config.from) ? 'is not a directory' : 'does not exist'
       from = if @options.repo
         "--repo #{@options.repo}"
       elsif ENV['GITENV_REPO']
