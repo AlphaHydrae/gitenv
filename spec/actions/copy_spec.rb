@@ -12,9 +12,7 @@ describe Gitenv::Copy, fakefs: true do
   subject{ Gitenv::Copy.new context, file, options }
 
   before :each do
-    # TODO: fakefs pull request to support giving mkdir_p a list of directories
-    FileUtils.mkdir_p source
-    FileUtils.mkdir_p target
+    FileUtils.mkdir_p [ source, target ]
     File.open(source_file, 'w'){ |f| f.write 'foo' }
     @source_mtime = File.mtime source_file
   end
