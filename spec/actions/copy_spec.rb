@@ -7,12 +7,14 @@ describe Gitenv::Copy, fakefs: true do
   let(:source_file){ File.join source, file }
   let(:target){ File.expand_path '~' }
   let(:target_file){ File.join target, file }
+  let(:target_mkdir){ true }
   let(:context){ OpenStruct.new from: source, to: target }
   let(:options){ {} }
   subject{ Gitenv::Copy.new context, file, options }
 
   before :each do
-    FileUtils.mkdir_p [ source, target ]
+    FileUtils.mkdir_p source
+    FileUtils.mkdir_p target if target_mkdir
     File.open(source_file, 'w'){ |f| f.write 'foo' }
     @source_mtime = File.mtime source_file
   end
@@ -25,6 +27,20 @@ describe Gitenv::Copy, fakefs: true do
 
   context "when applied" do
     before(:each){ subject.apply }
+    its(:origin){ should_not have_changed(@source_mtime) }
+    its(:target){ should have_changed(@target_mtime) }
+    its(:target){ should contain(File.read(source_file)) }
+  end
+
+  context "if the target directory does not exist" do
+    let(:target_mkdir){ false }
+    let(:target){ '/missing/target/directory' }
+
+    before(:each) do
+      expect(File.exists?(target)).to be(false)
+      subject.apply
+    end
+
     its(:origin){ should_not have_changed(@source_mtime) }
     its(:target){ should have_changed(@target_mtime) }
     its(:target){ should contain(File.read(source_file)) }

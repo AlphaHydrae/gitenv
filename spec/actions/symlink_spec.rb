@@ -6,6 +6,7 @@ describe Gitenv::Symlink, fakefs: true do
   let(:target){ '/source' }
   let(:target_file){ File.join target, file }
   let(:link_dir){ File.expand_path '~' }
+  let(:link_mkdir){ true }
   let(:link){ File.join link_dir, file }
   let(:context){ OpenStruct.new from: target, to: link_dir }
   let(:options){ {} }
@@ -13,7 +14,7 @@ describe Gitenv::Symlink, fakefs: true do
 
   before :each do
     FileUtils.mkdir_p target
-    FileUtils.mkdir_p link_dir
+    FileUtils.mkdir_p link_dir if link_mkdir
     File.open(target_file, 'w'){ |f| f.write 'foo' }
     @target_mtime = File.mtime target_file
   end
@@ -25,6 +26,19 @@ describe Gitenv::Symlink, fakefs: true do
 
   context "when applied" do
     before(:each){ subject.apply }
+    its(:target){ should_not have_changed(@target_mtime) }
+    its(:link){ should link_to(target_file) }
+  end
+
+  context "if the target directory does not exist" do
+    let(:link_mkdir){ false }
+    let(:link_dir){ '/missing/target/directory' }
+
+    before(:each) do
+      expect(File.exists?(link_dir)).to be(false)
+      subject.apply
+    end
+
     its(:target){ should_not have_changed(@target_mtime) }
     its(:link){ should link_to(target_file) }
   end

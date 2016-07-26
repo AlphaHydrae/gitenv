@@ -35,6 +35,7 @@ module Gitenv
     end
 
     def apply
+      # TODO: test with mkdir option set to false
       FileUtils.mkdir_p File.dirname(target) if @mkdir
       backup_exists = File.exist? target_backup
       FileUtils.mv target, target_backup if @backup && File.exist?(target) && !backup_exists

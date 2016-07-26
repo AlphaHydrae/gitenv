@@ -33,7 +33,7 @@ module Gitenv
     end
 
     def apply
-      FileUtils.mkdir_p File.dirname(target) if @mkdir
+      FileUtils.mkdir_p File.dirname(link) if @mkdir
       backup_exists = File.exist? link_backup
       FileUtils.mv link, link_backup if @backup && File.exist?(link) && !backup_exists
       FileUtils.rm link if @overwrite && File.exist?(link) && !backup_exists # TODO: only if link points somewhere else
