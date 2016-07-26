@@ -29,7 +29,7 @@ module Gitenv
 
     def apply
       FileUtils.mkdir_p File.dirname(target) if @mkdir
-      FileUtils.rm link if @overwrite and File.symlink?(link) # FIXME: only if link points somewhere else
+      FileUtils.rm link if @overwrite && File.exists?(link) # FIXME: only if link points somewhere else
       File.symlink target, link unless File.symlink?(link) or File.exists?(link)
     end
 
@@ -48,7 +48,11 @@ module Gitenv
           Status.warning "currently points to #{current_target}; apply will overwrite"
         end
       elsif File.exists? link
-        Status.error "exists but is not a symlink; apply will ignore"
+        if @overwrite
+          Status.missing "exists but is not a symlink; apply will overwrite"
+        else
+          Status.error "exists but is not a symlink; apply will ignore"
+        end
       else
         Status.missing "is not set up; apply will create the link"
       end
