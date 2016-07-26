@@ -3,7 +3,7 @@ module Gitenv
 
   class Action
     attr_reader :options
-    
+
     def initialize context, type, files, options
       @context, @type, @files, @options = context, type, files, options
     end

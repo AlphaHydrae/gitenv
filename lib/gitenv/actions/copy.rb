@@ -30,10 +30,12 @@ module Gitenv
     def initialize context, file, options = {}
       @context, @file = context, file
       @as, @overwrite, @backup = options[:as], options[:overwrite], options[:backup]
+      @mkdir = options.fetch :mkdir, true
       @backup = true if @overwrite and !options.key?(:backup)
     end
 
     def apply
+      FileUtils.mkdir_p File.dirname(target) if @mkdir
       backup_exists = File.exists? target_backup
       FileUtils.mv target, target_backup if @backup and File.exists?(target) and !backup_exists
       FileUtils.rm target if @overwrite and File.exists?(target) and !backup_exists

@@ -24,9 +24,11 @@ module Gitenv
     def initialize context, file, options = {}
       @context, @file = context, file
       @as, @overwrite = options[:as], options[:overwrite]
+      @mkdir = options.fetch :mkdir, true
     end
 
     def apply
+      FileUtils.mkdir_p File.dirname(target) if @mkdir
       FileUtils.rm link if @overwrite and File.symlink?(link) # FIXME: only if link points somewhere else
       File.symlink target, link unless File.symlink?(link) or File.exists?(link)
     end
