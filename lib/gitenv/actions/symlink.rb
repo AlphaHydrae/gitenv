@@ -35,8 +35,9 @@ module Gitenv
     def apply
       FileUtils.mkdir_p File.dirname(link) if @mkdir
       backup_exists = File.exist? link_backup
-      FileUtils.mv link, link_backup if @backup && File.exist?(link) && !backup_exists
-      FileUtils.rm link if @overwrite && File.exist?(link) && !backup_exists # TODO: only if link points somewhere else
+      FileUtils.mv link, link_backup if @backup && file_or_symlink_exists?(link) && !backup_exists
+      return if File.symlink?(link) && File.readlink(link) == target
+      FileUtils.rm link if @overwrite && file_or_symlink_exists?(link) && !backup_exists # TODO: only if link points somewhere else
       File.symlink target, link unless File.exist?(link)
     end
 
@@ -84,6 +85,12 @@ module Gitenv
 
     def link_name
       @link_name ||= @as || @file
+    end
+
+    private
+
+    def file_or_symlink_exists? path
+      File.symlink?(path) || File.exist?(path)
     end
   end
 end
