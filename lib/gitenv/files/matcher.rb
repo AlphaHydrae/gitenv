@@ -1,8 +1,5 @@
-
 module Gitenv
-
   class FilesMatcher
-
     def initialize options = {}
       @options = options
       @ignores = options[:ignores] ? [ options[:ignores] ].flatten : []

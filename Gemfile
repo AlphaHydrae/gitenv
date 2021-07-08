@@ -6,6 +6,7 @@ gem 'commander', '~> 4.6'
 group :development do
   gem 'rake', '~> 13.0'
   gem 'rspec', '~> 3.10'
+  gem 'rspec-collection_matchers', '~> 1.2'
   gem 'rspec-its', '~> 1.1'
   gem 'fakefs', '~> 1.3', :require => 'fakefs/safe'
   gem 'jeweler', '~> 2.0'

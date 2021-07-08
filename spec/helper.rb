@@ -27,6 +27,7 @@ RSpec.configure do |config|
 end
 
 require 'rspec'
+require 'rspec/collection_matchers'
 require 'rspec/its'
 
 Dir[File.dirname(__FILE__) + "/support/**/*.rb"].each{ |f| require f }

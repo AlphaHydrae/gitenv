@@ -6,7 +6,7 @@ module Gitenv
     attr_accessor :ignores
 
     def initialize config, options = {}
-      @config, @from, @ignores = config, options[:from], options[:ignores]
+      @config, @from = config, options[:from]
 
       @to ||= File.expand_path('~')
 
