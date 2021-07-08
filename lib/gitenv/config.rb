@@ -47,6 +47,17 @@ module Gitenv
       @context.ignores
     end
 
+    def include other_config_file, optional: false
+      absolute_path = File.expand_path(other_config_file)
+      unless File.exists?(absolute_path)
+        raise "Cannot find file to include #{absolute_path}" unless optional
+        return
+      end
+
+      contents = File.open(file, 'r').read
+      self.instance_eval contents, file
+    end
+
     private
 
     def matcher file, options = {}

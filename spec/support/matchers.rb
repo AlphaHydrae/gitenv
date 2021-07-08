@@ -67,7 +67,7 @@ RSpec::Matchers.define :have_changed do |expected|
 end
 
 RSpec::Matchers.define :be_status do |expected,*message|
-  
+
   match do |actual|
     @expected_type, @expected_messages = expected, message
     @type_matches = actual.type == expected
