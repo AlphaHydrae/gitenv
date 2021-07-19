@@ -4,7 +4,7 @@ Creates symlinks to your configuration files in a git repository (<a href="https
 
 [![Gem Version](https://badge.fury.io/rb/gitenv.svg)](http://badge.fury.io/rb/gitenv)
 [![Build](https://github.com/AlphaHydrae/gitenv/actions/workflows/build.yml/badge.svg)](https://github.com/AlphaHydrae/gitenv/actions/workflows/build.yml)
-[![Code Coverage](https://codecov.io/gh/AlphaHydrae/gitenv/branch/master/graph/badge.svg?token=PHYTXEW2MG)](https://codecov.io/gh/AlphaHydrae/gitenv)
+[![Code Coverage](https://codecov.io/gh/AlphaHydrae/gitenv/branch/main/graph/badge.svg?token=PHYTXEW2MG)](https://codecov.io/gh/AlphaHydrae/gitenv)
 
 Run gitenv without arguments to check the symlink configuration. First-time users will be prompted to enter the path to their environment repository so gitenv can set up its own config file.
 
