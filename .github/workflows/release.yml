@@ -35,10 +35,13 @@ jobs:
           gem build -o pkg/release.gem gitenv.gemspec
 
       - name: Create ~/.gem/credentials
+        env:
+          RUBYGEMS_API_KEY: "{{ secrets.RUBYGEMS_API_KEY }}"
         run: |
-          mkdir -p ~/.gem
-          (umask 066 && echo "$GEM_CREDENTIALS" > ~/.gem/credentials)
+          mkdir -p $HOME/.gem
+          printf -- "---\n:rubygems_api_key: ${RUBYGEMS_API_KEY}\n" > $HOME/.gem/credentials
+          chmod 600 $HOME/.gem/credentials
 
       - name: Release the gem
         run: |
-          gem push -k rubygems pkg/release.gem
+          gem push pkg/release.gem
