@@ -37,8 +37,8 @@ jobs:
       - name: Create ~/.gem/credentials
         run: |
           mkdir -p ~/.gem
-          echo "$GEM_CREDENTIALS" > ~/.gem/credentials
+          (umask 066 && echo "$GEM_CREDENTIALS" > ~/.gem/credentials)
 
       - name: Release the gem
         run: |
-          gem push pkg/release.gem
+          gem push -k rubygems pkg/release.gem
