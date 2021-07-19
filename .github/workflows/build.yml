@@ -7,8 +7,11 @@ on:
       - ".editorconfig"
       - ".gitignore"
       - ".screenrc"
+      - "scripts/**"
       - "TODO.md"
       - ".tool-versions"
+    tags-ignore:
+      - "**"
   schedule:
     # Minute (0-59), Hour (0-23), Day of the month (1-31), Month of the Year (1-12), Day of the week (0-6, 0 = Sunday)
     - cron: "0 6 * * 1"
