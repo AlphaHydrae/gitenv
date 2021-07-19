@@ -4,6 +4,7 @@
 
 # TODO
 
+* rubocop
 * implement git update of configured repositories
 * add option to file enumerators to include folders
 * add options to copy for overwriting/backup copy (also option to never overwrite)
