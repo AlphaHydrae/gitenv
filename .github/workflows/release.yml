@@ -1,4 +1,4 @@
-name: publish release
+name: release
 
 on:
   push:
@@ -36,7 +36,7 @@ jobs:
 
       - name: Create ~/.gem/credentials
         env:
-          RUBYGEMS_API_KEY: "{{ secrets.RUBYGEMS_API_KEY }}"
+          RUBYGEMS_API_KEY: "${{ secrets.RUBYGEMS_API_KEY }}"
         run: |
           mkdir -p $HOME/.gem
           printf -- "---\n:rubygems_api_key: ${RUBYGEMS_API_KEY}\n" > $HOME/.gem/credentials
