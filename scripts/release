@@ -12,7 +12,7 @@ bundle exec rake gemspec
 
 tag="v${version}"
 echo "Committing..."
-git commit -m "$tag"
+git commit -am "$tag"
 
 echo "Creating tag $tag..."
 git tag "$tag"
