@@ -1,12 +1,17 @@
-source "https://rubygems.org"
+# frozen_string_literal: true
 
-gem 'paint', '~> 2.2'
+source 'https://rubygems.org'
+
 gem 'commander', '~> 4.6'
+gem 'paint', '~> 2.2'
 
 group :development do
-  gem 'rake', '~> 13.0'
   gem 'jeweler', '~> 2.0'
+  gem 'rake', '~> 13.0'
   gem 'rake-version', '~> 1.0'
+  gem 'rubocop', '~> 1.18', require: false
+  gem 'rubocop-rake', '~> 0.6.0', require: false
+  gem 'rubocop-rspec', '~> 2.4', require: false
 end
 
 group :test do

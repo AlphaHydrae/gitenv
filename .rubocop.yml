@@ -1,0 +1,17 @@
+require:
+  - rubocop-rake
+  - rubocop-rspec
+
+AllCops:
+  Exclude:
+    - coverage/**/*
+    - gitenv.gemspec
+    - pkg/**/*
+    - vendor/**/*
+  NewCops: enable
+
+Layout/FirstArrayElementIndentation:
+  EnforcedStyle: consistent
+
+Layout/SpaceBeforeBlockBraces:
+  EnforcedStyle: no_space
