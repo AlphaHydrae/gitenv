@@ -1,12 +1,14 @@
+# frozen_string_literal: true
+
 module Gitenv
   class Repository
     attr_reader :path
 
-    def initialize path
+    def initialize(path)
       @path = path
     end
 
-    def == other
+    def ==(other)
       other.path == path
     end
   end

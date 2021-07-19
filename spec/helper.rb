@@ -1,11 +1,13 @@
+# frozen_string_literal: true
+
 require 'rubygems'
 require 'bundler'
 
 begin
   Bundler.setup(:default, :development)
 rescue Bundler::BundlerError => e
-  $stderr.puts e.message
-  $stderr.puts "Run `bundle install` to install missing gems"
+  warn e.message
+  warn 'Run `bundle install` to install missing gems'
   exit e.status_code
 end
 
@@ -28,11 +30,10 @@ unless ENV['COVERAGE_DISABLED']
 end
 
 RSpec.configure do |config|
-
   config.before :each, fakefs: true do
     FakeFS.activate!
     # necessary because fakefs doesn't implement readpartial
-    allow_any_instance_of(Gitenv::Copy).to receive(:digest){ |c,f| Digest::MD5.hexdigest File.read(f) }
+    allow_any_instance_of(Gitenv::Copy).to receive(:digest){ |_c, f| Digest::MD5.hexdigest File.read(f) }
   end
 
   config.after :each, fakefs: true do
@@ -45,7 +46,7 @@ require 'rspec'
 require 'rspec/collection_matchers'
 require 'rspec/its'
 
-Dir[File.dirname(__FILE__) + "/support/**/*.rb"].each{ |f| require f }
+Dir["#{File.dirname(__FILE__)}/support/**/*.rb"].sort.each{ |f| require f }
 
 require 'fakefs/spec_helpers'
 

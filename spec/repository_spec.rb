@@ -1,15 +1,17 @@
+# frozen_string_literal: true
+
 require 'helper'
 
 describe Gitenv::Repository do
   subject{ described_class.new '/source' }
 
-  its(:path){ should eq('/source') }
+  its(:path){ is_expected.to eq('/source') }
 
-  it "should be equal to another repository at the same path" do
+  it 'is equal to another repository at the same path' do
     expect(described_class.new(subject.path)).to eq(subject)
   end
 
-  it "should be different than another repository at a different path" do
-    expect(described_class.new("#{subject.path}/foo")).to_not eq(subject)
+  it 'is different than another repository at a different path' do
+    expect(described_class.new("#{subject.path}/foo")).not_to eq(subject)
   end
 end

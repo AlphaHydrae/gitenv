@@ -1,24 +1,27 @@
+# frozen_string_literal: true
+
 require 'helper'
 
 describe Gitenv::FilesMatcher, fakefs: true do
+  subject{ matcher.files(source) }
 
   let(:options){ {} }
-  let(:matcher){ Gitenv::FilesMatcher.new options }
+  let(:matcher){ described_class.new options }
   let(:source){ '/source' }
-  let(:dirs){ [ 'dir', '.vim' ] }
-  let(:files){ [ 'file.txt', '.dotfile', 'README' ] }
-  let(:extra){ [ '.', '..' ] }
+  let(:dirs){ ['dir', '.vim'] }
+  let(:files){ ['file.txt', '.dotfile', 'README'] }
+  let(:extra){ ['.', '..'] }
 
-  before :each do
+  before do
     dirs.each{ |d| FileUtils.mkdir_p File.join(source, d) }
     files.each{ |f| FileUtils.touch File.join(source, f) }
   end
 
-  subject{ matcher.files(source) }
-  it{ should match_array(dirs + files + extra) }
+  it{ is_expected.to match_array(dirs + files + extra) }
 
-  context "with an exception" do
+  context 'with an exception' do
     subject{ matcher.except('dir', 'README').files(source) }
-    it{ should match_array(dirs + files + extra - [ 'dir', 'README' ]) }
+
+    it{ is_expected.to match_array(dirs + files + extra - %w[dir README]) }
   end
 end

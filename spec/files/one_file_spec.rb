@@ -1,17 +1,19 @@
+# frozen_string_literal: true
+
 require 'helper'
 
 describe Gitenv::OneFile, fakefs: true do
+  subject{ matcher.files(source) }
 
-  let(:matcher){ Gitenv::OneFile.new file }
+  let(:matcher){ described_class.new file }
   let(:source){ '/source' }
-  let(:files){ [ 'file.txt', '.dotfile', 'README' ] }
+  let(:files){ ['file.txt', '.dotfile', 'README'] }
   let(:file){ 'README' }
 
-  before :each do
+  before do
     FileUtils.mkdir_p source
     files.each{ |f| FileUtils.touch File.join(source, f) }
   end
 
-  subject{ matcher.files(source) }
-  it{ should match_array([ file ]) }
+  it{ is_expected.to match_array([file]) }
 end

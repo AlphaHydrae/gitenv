@@ -1,17 +1,16 @@
-# encoding: UTF-8
+# frozen_string_literal: true
 
 module Gitenv
-
   class Status
-    TYPES = [ :ok, :missing, :warning, :error ]
-    COLORS = { ok: :green, missing: :blue, warning: :yellow, error: :red }
+    TYPES = %i[ok missing warning error].freeze
+    COLORS = { ok: :green, missing: :blue, warning: :yellow, error: :red }.freeze
 
     attr_reader :type, :message
 
     class << self
       TYPES.each do |m|
         define_method m do |message|
-          self.new m, message
+          new m, message
         end
       end
     end
@@ -23,7 +22,7 @@ module Gitenv
     end
 
     def marker
-      @type == :ok ? "✓" : "✗"
+      @type == :ok ? '✓' : '✗'
     end
 
     def color
@@ -32,8 +31,9 @@ module Gitenv
 
     private
 
-    def initialize type, message
-      @type, @message = type, message
+    def initialize(type, message)
+      @type = type
+      @message = message
     end
   end
 end
