@@ -1,0 +1,44 @@
+name: publish release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish-latest:
+    name: Test & release the gem
+    runs-on: ubuntu-20.04
+    steps:
+
+      - name: Checkout the repository
+        uses: actions/checkout@v2
+
+      - name: Install Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: 3.0.1
+          bundler-cache: true
+
+      - name: Install dependencies
+        run: |
+          bundle install
+
+      - name: Run automated tests
+        env:
+          COVERAGE_DISABLED: true
+        run: |
+          bundle exec rake
+
+      - name: Build the gem
+        run: |
+          gem build -o pkg/release.gem gitenv.gemspec
+
+      - name: Create ~/.gem/credentials
+        run: |
+          mkdir -p ~/.gem
+          echo "$GEM_CREDENTIALS" > ~/.gem/credentials
+
+      - name: Release the gem
+        run: |
+          gem push pkg/release.gem

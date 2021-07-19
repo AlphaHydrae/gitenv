@@ -9,20 +9,22 @@ rescue Bundler::BundlerError => e
   exit e.status_code
 end
 
-require 'simplecov'
-require 'codecov'
+unless ENV['COVERAGE_DISABLED']
+  require 'simplecov'
+  require 'codecov'
 
-coverage_formatters = [
-  SimpleCov::Formatter::HTMLFormatter,
-  SimpleCov::Formatter::SimpleFormatter
-]
+  coverage_formatters = [
+    SimpleCov::Formatter::HTMLFormatter,
+    SimpleCov::Formatter::SimpleFormatter
+  ]
 
-# Upload code coverage to https://codecov.io on continuous integration
-# environment.
-coverage_formatters.push(SimpleCov::Formatter::Codecov) if ENV['CI']
+  # Upload code coverage to https://codecov.io on continuous integration
+  # environment.
+  coverage_formatters.push(SimpleCov::Formatter::Codecov) if ENV['CI']
 
-SimpleCov.start do
-  formatter SimpleCov::Formatter::MultiFormatter.new(coverage_formatters)
+  SimpleCov.start do
+    formatter SimpleCov::Formatter::MultiFormatter.new(coverage_formatters)
+  end
 end
 
 RSpec.configure do |config|

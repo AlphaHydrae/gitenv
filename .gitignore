@@ -1,3 +1,4 @@
-/pkg
 /coverage
+/pkg/*
+!/pkg/.keep
 /vendor
