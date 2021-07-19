@@ -4,11 +4,11 @@ set -e
 bump="$1"
 
 echo "Bumping $bump version..."
-rake "version:bump:$bump"
+bundle exec rake "version:bump:$bump"
 version="$(cat VERSION)"
 
 echo "Updating gemspec..."
-rake gemspec
+bundle exec rake gemspec
 
 tag="v${version}"
 echo "Committing..."
