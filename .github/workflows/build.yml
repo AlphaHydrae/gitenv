@@ -5,6 +5,7 @@ on:
     paths-ignore:
       - ".ackrc"
       - ".editorconfig"
+      - ".github/workflows/release.yml"
       - ".gitignore"
       - ".screenrc"
       - "scripts/**"
