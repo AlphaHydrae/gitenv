@@ -54,7 +54,7 @@ GEM
     paint (2.2.1)
     psych (4.0.1)
     racc (1.5.2)
-    rack (2.2.3)
+    rack (2.2.6.4)
     rake (13.0.6)
     rake-version (1.0.1)
       rake (> 11.1)
