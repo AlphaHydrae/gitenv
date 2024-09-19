@@ -8,16 +8,16 @@ on:
 jobs:
   publish-latest:
     name: Test & release the gem
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     steps:
 
       - name: Checkout the repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Install Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: 3.0.1
+          ruby-version: 3.3.5
           bundler-cache: true
 
       - name: Install dependencies
