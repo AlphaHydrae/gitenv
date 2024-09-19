@@ -50,7 +50,7 @@ module Gitenv
     def include other_config_file, optional: false
       raise "Only absolute paths can be included" unless Pathname.new(other_config_file).absolute?
       absolute_path = File.expand_path(other_config_file)
-      unless File.exists?(absolute_path)
+      unless File.exist?(absolute_path)
         raise "Cannot find file to include #{absolute_path}" unless optional
         return
       end

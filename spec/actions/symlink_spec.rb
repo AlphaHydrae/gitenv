@@ -35,7 +35,7 @@ describe Gitenv::Symlink, fakefs: true do
     let(:link_dir){ '/missing/target/directory' }
 
     before(:each) do
-      expect(File.exists?(link_dir)).to be(false)
+      expect(File.exist?(link_dir)).to be(false)
       subject.apply
     end
 

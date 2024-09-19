@@ -37,7 +37,7 @@ describe Gitenv::Copy, fakefs: true do
     let(:target){ '/missing/target/directory' }
 
     before(:each) do
-      expect(File.exists?(target)).to be(false)
+      expect(File.exist?(target)).to be(false)
       subject.apply
     end
 
