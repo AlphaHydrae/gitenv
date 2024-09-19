@@ -31,6 +31,13 @@ jobs:
         run: |
           bundle install
 
-      - name: Run automated tests & generate code coverage report
+      - name: Run automated tests
         run: |
           bundle exec rake
+
+      - name: Upload code coverage
+        uses: codecov/codecov-action@v4
+        with:
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true

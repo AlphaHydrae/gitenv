@@ -1,4 +1,4 @@
-source "https://rubygems.org"
+source 'https://rubygems.org'
 
 gem 'commander', '~> 5.0'
 gem 'paint', '~> 2.2'
@@ -11,10 +11,10 @@ group :development do
 end
 
 group :test do
-  gem 'codecov', '~> 0.6.0', require: false
   gem 'fakefs', '~> 2.5', require: 'fakefs/safe'
   gem 'rspec', '~> 3.10'
   gem 'rspec-collection_matchers', '~> 1.2'
   gem 'rspec-its', '~> 1.1'
   gem 'simplecov', '~> 0.21.2'
+  gem 'simplecov-cobertura', '~> 2.1'
 end
