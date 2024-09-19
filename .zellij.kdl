@@ -1,0 +1,13 @@
+pane_frames false
+
+layout {
+  tab name="shell" focus=true split_direction="vertical" {
+    pane size="60%"
+    pane stacked=true {
+      pane command="bundle" expanded=true start_suspended=true {
+        args "exec" "rake"
+      }
+      pane command="rubocop" start_suspended=true
+    }
+  }
+}
