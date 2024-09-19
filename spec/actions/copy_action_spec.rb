@@ -1,43 +1,48 @@
 require 'helper'
 
 describe Gitenv::Copy::Action do
+  subject { action }
 
-  let(:from){ '/source' }
-  let(:to){ File.expand_path '~' }
-  let(:context){ OpenStruct.new from: from, to: to }
-  let(:files){ double }
-  let(:options){ {} }
-  let(:action){ Gitenv::Copy::Action.new context, files, options }
-  subject{ action }
+  let(:from) { '/source' }
+  let(:to) { File.expand_path '~' }
+  let(:context) { OpenStruct.new from:, to: }
+  let(:files) { double }
+  let(:options) { {} }
+  let(:action) { Gitenv::Copy::Action.new context, files, options }
 
-  it{ should be_a_kind_of(Gitenv::Action) }
+  it { is_expected.to be_a(Gitenv::Action) }
 
-  context "with custom options" do
-    let(:options){ { overwrite: true, backup: false, foo: :bar } }
-    its(:options){ should eq(overwrite: true, backup: false, foo: :bar) }
+  context 'with custom options' do
+    let(:options) { { overwrite: true, backup: false, foo: :bar } }
+
+    its(:options) { is_expected.to eq(overwrite: true, backup: false, foo: :bar) }
   end
 
-  context "after calling overwrite" do
-    subject{ super().overwrite }
-    it{ should be(action) }
-    its(:options){ should eq(overwrite: true) }
+  context 'after calling overwrite' do
+    subject { super().overwrite }
+
+    it { is_expected.to be(action) }
+    its(:options) { is_expected.to eq(overwrite: true) }
   end
 
-  context "after calling overwrite with false" do
-    subject{ super().overwrite false }
-    it{ should be(action) }
-    its(:options){ should eq(overwrite: false) }
+  context 'after calling overwrite with false' do
+    subject { super().overwrite false }
+
+    it { is_expected.to be(action) }
+    its(:options) { is_expected.to eq(overwrite: false) }
   end
 
-  context "after calling overwrite with the backup option set to false" do
-    subject{ super().overwrite backup: false }
-    it{ should be(action) }
-    its(:options){ should eq(overwrite: true, backup: false) }
+  context 'after calling overwrite with the backup option set to false' do
+    subject { super().overwrite backup: false }
+
+    it { is_expected.to be(action) }
+    its(:options) { is_expected.to eq(overwrite: true, backup: false) }
   end
 
-  context "after calling once" do
-    subject{ super().once }
-    it{ should be(action) }
-    its(:options){ should eq(overwrite: false, backup: false) }
+  context 'after calling once' do
+    subject { super().once }
+
+    it { is_expected.to be(action) }
+    its(:options) { is_expected.to eq(overwrite: false, backup: false) }
   end
 end

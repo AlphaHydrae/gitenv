@@ -1,6 +1,4 @@
-
 RSpec::Matchers.define :eq_unpainted do |expected|
-
   match do |actual|
     Paint.unpaint(actual) == expected
   end
@@ -11,21 +9,18 @@ RSpec::Matchers.define :eq_unpainted do |expected|
 end
 
 RSpec::Matchers.define :link_to do |expected|
-
   match do |actual|
     File.expand_path(File.readlink(actual)) == File.expand_path(expected)
   end
 end
 
 RSpec::Matchers.define :exist do
-
   match do |actual|
     File.exist? actual
   end
 end
 
 RSpec::Matchers.define :contain do |expected|
-
   match do |actual|
     File.read(actual) == expected
   end
@@ -42,13 +37,12 @@ RSpec::Matchers.define :contain do |expected|
     "contain #{contents expected}"
   end
 
-  def contents c
-    c.length > 20 ? %/"#{c[0,17]}..."/ : %/"#{c}"/
+  def contents(c)
+    c.length > 20 ? %("#{c[0, 17]}...") : %("#{c}")
   end
 end
 
 RSpec::Matchers.define :have_changed do |expected|
-
   match do |actual|
     File.mtime(actual) != expected
   end
@@ -62,16 +56,16 @@ RSpec::Matchers.define :have_changed do |expected|
   end
 
   description do
-    "have changed"
+    'have changed'
   end
 end
 
-RSpec::Matchers.define :be_status do |expected,*message|
-
+RSpec::Matchers.define :be_status do |expected, *message|
   match do |actual|
-    @expected_type, @expected_messages = expected, message
+    @expected_type = expected
+    @expected_messages = message
     @type_matches = actual.type == expected
-    @message_matches = @expected_messages.all?{ |m| actual.message.match(m) }
+    @message_matches = @expected_messages.all? { |m| actual.message.match(m) }
     @type_matches and @message_matches
   end
 
@@ -88,7 +82,7 @@ RSpec::Matchers.define :be_status do |expected,*message|
   end
 
   def failures
-    Array.new.tap do |a|
+    [].tap do |a|
       a << "be of type :#{@expected_type}" unless @type_matches
       a << "have a message matching #{@expected_messages.inspect}" unless @message_matches
     end

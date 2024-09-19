@@ -8,10 +8,10 @@ describe 'Digest' do
     9216 => '9f77974fb9bb00e7641a4b0787742ffd85261f78'
   }
 
-  subject{ Gitenv::Copy.new OpenStruct.new(from: '/source', to: File.expand_path('~')), '.zshlogin' }
+  subject { Gitenv::Copy.new OpenStruct.new(from: '/source', to: File.expand_path('~')), '.zshlogin' }
 
   DIGESTS.each_key do |bytes|
-    it "should correctly compute the SHA1 of a file with #{bytes} bytes" do
+    it "correctlies compute the SHA1 of a file with #{bytes} bytes" do
       file = File.join File.dirname(__FILE__), '..', 'fixtures', "file_with_#{bytes}_bytes"
       expect(subject.send(:digest, file)).to eq(DIGESTS[bytes])
     end

@@ -1,19 +1,15 @@
-# encoding: UTF-8
 require 'fileutils'
 require 'digest/sha1'
 
 module Gitenv
-
   class Copy
-
     class Action < Action
-
-      def initialize context, files, options
+      def initialize(context, files, options)
         super context, Copy, files, options
       end
 
       def overwrite *args
-        options = args.last.kind_of?(Hash) ? args.pop : {}
+        options = args.last.is_a?(Hash) ? args.pop : {}
         overwrite = args.empty? ? true : args.shift
         @options[:overwrite] = overwrite
         @options[:backup] = options[:backup] if options.key?(:backup)
@@ -27,9 +23,12 @@ module Gitenv
       end
     end
 
-    def initialize context, file, options = {}
-      @context, @file = context, file
-      @as, @overwrite, @backup = options[:as], options[:overwrite], options[:backup]
+    def initialize(context, file, options = {})
+      @context = context
+      @file = file
+      @as = options[:as]
+      @overwrite = options[:overwrite]
+      @backup = options[:backup]
       @mkdir = options.fetch :mkdir, true
       @backup = true if @overwrite && !options.key?(:backup)
     end
@@ -49,25 +48,25 @@ module Gitenv
 
     def status
       if !File.exist?(target)
-        Status.missing "is not set up; apply will create the copy"
+        Status.missing 'is not set up; apply will create the copy'
       elsif @overwrite == false || digest(origin) == digest(target)
         Status.ok 'ok'
       elsif !@overwrite
-        Status.error "already exists; enable overwrite if you want to replace it"
+        Status.error 'already exists; enable overwrite if you want to replace it'
       elsif @backup && File.exist?(target_backup)
-        Status.error "already exists with backup copy"
+        Status.error 'already exists with backup copy'
       else
-        backup_notice = if @backup; " backup the file and"; end
+        backup_notice = (' backup the file and' if @backup)
         Status.warning "already exists; apply will#{backup_notice} overwrite"
       end
     end
 
     def origin
-      @origin ||= File.join(*[ @context.from, @file ].compact)
+      @origin ||= File.join(*[@context.from, @file].compact)
     end
 
     def target
-      @target ||= File.join(*[ @context.to, target_name].compact)
+      @target ||= File.join(*[@context.to, target_name].compact)
     end
 
     def target_backup
@@ -80,9 +79,9 @@ module Gitenv
       @target_name ||= @as || @file
     end
 
-    def digest file
+    def digest(file)
       Digest::SHA1.new.tap do |dig|
-        File.open(file, 'rb'){ |io| dig.update io.readpartial(4096) while !io.eof }
+        File.open(file, 'rb') { |io| dig.update io.readpartial(4096) until io.eof }
       end
     end
   end

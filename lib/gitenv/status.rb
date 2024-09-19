@@ -1,9 +1,6 @@
-# encoding: UTF-8
-
 module Gitenv
-
   class Status
-    TYPES = [ :ok, :missing, :warning, :error ]
+    TYPES = %i[ok missing warning error]
     COLORS = { ok: :green, missing: :blue, warning: :yellow, error: :red }
 
     attr_reader :type, :message
@@ -11,7 +8,7 @@ module Gitenv
     class << self
       TYPES.each do |m|
         define_method m do |message|
-          self.new m, message
+          new m, message
         end
       end
     end
@@ -23,7 +20,7 @@ module Gitenv
     end
 
     def marker
-      @type == :ok ? "✓" : "✗"
+      @type == :ok ? '✓' : '✗'
     end
 
     def color
@@ -32,8 +29,9 @@ module Gitenv
 
     private
 
-    def initialize type, message
-      @type, @message = type, message
+    def initialize(type, message)
+      @type = type
+      @message = message
     end
   end
 end

@@ -11,7 +11,7 @@ global_option '-c', '--config PATH', 'Use a custom configuration file (defaults 
 command :info do |c|
   c.syntax = 'gitenv info'
   c.description = 'Display the current configuration (default action)'
-  c.action do |args,options|
+  c.action do |_args, options|
     Gitenv::Controller.new(:info, options).run
   end
 end
@@ -19,7 +19,7 @@ end
 command :apply do |c|
   c.syntax = 'gitenv apply'
   c.description = 'Create/update the symlinks'
-  c.action do |args,options|
+  c.action do |_args, options|
     Gitenv::Controller.new(:apply, options).run
   end
 end
@@ -28,4 +28,3 @@ end
 # TODO: add link to documentation in help
 
 default_command :info
-

@@ -25,13 +25,13 @@ unless ENV['COVERAGE_DISABLED']
 end
 
 RSpec.configure do |config|
-  config.before :each, fakefs: true do
+  config.before :each, :fakefs do
     FakeFS.activate!
     # necessary because fakefs doesn't implement readpartial
-    allow_any_instance_of(Gitenv::Copy).to receive(:digest) { |c, f| Digest::MD5.hexdigest File.read(f) }
+    allow_any_instance_of(Gitenv::Copy).to receive(:digest) { |_c, f| Digest::MD5.hexdigest File.read(f) }
   end
 
-  config.after :each, fakefs: true do
+  config.after :each, :fakefs do
     FakeFS.deactivate!
     FakeFS::FileSystem.clear
   end
