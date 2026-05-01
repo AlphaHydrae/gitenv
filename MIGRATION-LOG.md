@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-01: Define the canonical config model - Added canonical configuration
+  types in the Rust library (`Config`, `Defaults`, `Source`, and config item
+  variants) with explicit owned fields and default action semantics to lock the
+  internal vocabulary before parser work.
 - 2026-05-01: Add coverage workflow and reporting contract - Added a Rust
   coverage wrapper script and documentation rules to report previous/current
   coverage after each increment; aligned Rust test function names to

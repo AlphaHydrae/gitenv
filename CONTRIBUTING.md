@@ -86,10 +86,12 @@ Business modules must not print directly to terminal output.
 - Keep test names human-readable and avoid technical details that do not help
   explain the expected behavior. Put necessary technical context in inline
   comments instead.
-- For test function names, use sentence-style `snake_case` with an imperative
-  verb at the start (for example:
-  `show_the_default_message_on_stdout`). Avoid third-person singular forms such
-  as `shows_...`.
+- For test function names, use sentence-style `snake_case`. Prefer an
+  imperative verb at the start (for example:
+  `show_the_default_message_on_stdout`), but declarative sentences are
+  acceptable when they more clearly describe the expected behavior (for
+  example: `the_default_action_is_a_home_symlink`). Avoid third-person
+  singular forms such as `shows_...`.
 
 ### Spec description style
 

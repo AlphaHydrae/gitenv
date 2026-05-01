@@ -18,19 +18,6 @@ are not forgotten.
 
 ## Current Backlog
 
-### Increment 2: Define the canonical config model
-
-Why this increment exists:
-
-- Establish the internal Rust data model for the normalized YAML shape before
-  parser or filesystem behavior is added.
-- Lock the vocabulary for repository, defaults, sources, and entries early.
-
-Review target:
-
-- Canonical config structs exist in the library.
-- Defaults and field ownership are explicit and type-safe.
-
 ### Increment 3: Parse the smallest valid YAML config
 
 Why this increment exists:
