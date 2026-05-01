@@ -174,6 +174,11 @@ them to EVERY task, EVERY time.**
      [`MIGRATION-LOG.md`](./MIGRATION-LOG.md).
   2. Remove or rewrite its item in
      [`MIGRATION-INCREMENTS.md`](./MIGRATION-INCREMENTS.md).
+- When an increment is completed, provide a suggested commit message in the
+  conversation that is easy to copy for human review:
+  1. Start with an imperative title line.
+  2. Follow with a short body describing what changed and why.
+  3. Keep it aligned with the increment summary and migration log language.
 - Be proactive with migration documentation upkeep. Do not wait for explicit
   user prompts: when work changes scope, sequencing, assumptions, or outcomes,
   update [`MIGRATION-LOG.md`](./MIGRATION-LOG.md) and/or
