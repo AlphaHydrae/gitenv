@@ -1,2 +1,4 @@
 # https://asdf-vm.com
+
 ruby 3.3.5
+rust 1.95.0

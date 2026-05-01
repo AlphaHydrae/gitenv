@@ -1,0 +1,15 @@
+{
+  "folders": [
+    {
+      "name": "gitenv",
+      "path": ".",
+    },
+    {
+      "name": "gitenv-rust",
+      "path": "rust",
+    },
+  ],
+  "settings": {
+    "rust-analyzer.linkedProjects": ["rust/Cargo.toml"],
+  },
+}

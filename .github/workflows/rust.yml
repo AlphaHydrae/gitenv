@@ -1,0 +1,95 @@
+name: rust
+
+on:
+  push:
+    branches:
+      - '*'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  rust-direct-commands:
+    runs-on: ubuntu-24.04
+    name: Rust checks (direct commands)
+
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+          components: clippy,rustfmt
+
+      - name: Install lychee
+        run: |
+          cargo install lychee --version 0.24.1 --locked
+
+      - name: Run cargo test
+        run: |
+          cd rust
+          cargo test
+
+      - name: Run cargo clippy
+        run: |
+          cd rust
+          cargo clippy --all-targets -- -D warnings
+
+      - name: Run cargo build
+        run: |
+          cd rust
+          cargo build
+
+      - name: Run cargo fmt check
+        run: |
+          cd rust
+          cargo fmt -- --check
+
+      - name: Run Markdown link checks
+        run: |
+          find . -type f -name '*.md' \
+            -not -path './.git/*' \
+            -not -path './vendor/*' \
+            -not -path './rust/target/*' \
+            -not -path './coverage/*' \
+            -not -path './tmp/*' \
+            -print0 | xargs -0 lychee --offline --no-progress
+
+  rust-wrapper-scripts:
+    runs-on: ubuntu-24.04
+    name: Rust checks (wrapper scripts)
+
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+          components: clippy,rustfmt
+
+      - name: Install lychee
+        run: |
+          cargo install lychee --version 0.24.1 --locked
+
+      - name: Run test wrapper
+        run: |
+          bash ./scripts/run-tests.sh
+
+      - name: Run lint wrapper
+        run: |
+          bash ./scripts/run-lint.sh
+
+      - name: Run build wrapper
+        run: |
+          bash ./scripts/run-build.sh
+
+      - name: Run format wrapper
+        run: |
+          bash ./scripts/run-format.sh
+
+      - name: Run Markdown lint wrapper
+        run: |
+          bash ./scripts/run-lint-md.sh
