@@ -1,13 +1,27 @@
-pub fn hello_world() -> &'static str {
-    "Hello, World!"
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProgramOutput {
+    pub message: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProgramError {
+    UnsupportedConfiguration,
+}
+
+pub fn run() -> Result<ProgramOutput, ProgramError> {
+    Ok(ProgramOutput {
+        message: "Hello, World!",
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::hello_world;
+    use super::run;
 
     #[test]
-    fn returns_hello_world_message() {
-        assert_eq!(hello_world(), "Hello, World!");
+    fn shows_default_message() {
+        let output = run().expect("run should succeed");
+
+        assert_eq!(output.message, "Hello, World!");
     }
 }

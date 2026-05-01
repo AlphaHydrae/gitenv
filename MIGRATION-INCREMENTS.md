@@ -11,20 +11,6 @@ and removed from this file so it stays forward-looking.
 
 ## Current Backlog
 
-### Increment 1: Establish the library/CLI seam
-
-Why this increment exists:
-
-- Replace the placeholder hello-world entry point with a tiny domain-oriented
-  library entry point and a typed error surface.
-- Preserve the current end-to-end executable path while creating a clean seam
-  between library logic and CLI rendering.
-
-Review target:
-
-- The crate is no longer structured around a placeholder message.
-- The CLI delegates to the library instead of owning the primary behavior.
-
 ### Increment 2: Define the canonical config model
 
 Why this increment exists:

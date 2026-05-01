@@ -1,7 +1,7 @@
 use std::process::Command;
 
 #[test]
-fn prints_hello_world_from_cli() {
+fn shows_default_message_on_stdout() {
     let output = Command::new(env!("CARGO_BIN_EXE_gitenv"))
         .output()
         .expect("binary should run");

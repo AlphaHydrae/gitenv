@@ -11,4 +11,7 @@ Suggested entry shape:
 
 ## Entries
 
-- No completed Rust migration increments logged yet.
+- 2026-05-01: Establish the library/CLI seam - Replaced the placeholder
+  hello-world entrypoint with a typed library `run` entrypoint and error
+  surface, while keeping CLI output behavior stable and delegating rendering to
+  the CLI boundary.
