@@ -224,8 +224,8 @@ them to EVERY task, EVERY time.**
   Prefer direct file edits.
 - Small one-off scripts are acceptable only when they are clearly the simplest
   safe option. If a larger script seems necessary, ask for approval first.
-- If you must create temporary files, place them in [`tmp/agent/`](./tmp/agent/)
-  and do not touch the `.keep` file there.
+- If you must create temporary files, place them in `tmp/agent/` and do not
+  touch the `.keep` file there.
 
 ## Agent coding guidelines
 
@@ -250,9 +250,8 @@ These wrappers run the commands documented in
 ### Automated tests
 
 - Always use `./scripts/run-tests.sh` from the repository root.
-- The script captures full output to
-  [`tmp/agent/test_output.log`](./tmp/agent/test_output.log) and prints the exit
-  code and a summary tail to stdout.
+- The script captures full output to `tmp/agent/test_output.log` and prints the
+  exit code and a summary tail to stdout.
 
 ### Test coverage
 
