@@ -30,8 +30,8 @@ Agent contributors must also follow [AGENTS.md](./AGENTS.md).
 - Prefer existing language and standard-library utilities over custom
   reimplementations when they satisfy the requirement.
 - Keep CI checks aligned with local verification expectations. When required
-  checks or wrapper scripts change, update `.github/workflows/rust.yml` in the
-  same change.
+  checks or wrapper scripts change, update `.github/workflows/rust.yml` and
+  `Makefile` in the same change.
 
 ## Documentation Expectations
 
@@ -210,13 +210,7 @@ is complete.
 - Run Markdown link checks:
 
   ```sh
-  find . -type f -name '*.md' \
-    -not -path './.git/*' \
-    -not -path './vendor/*' \
-    -not -path './rust/target/*' \
-    -not -path './coverage/*' \
-    -not -path './tmp/*' \
-    -print0 | xargs -0 lychee --offline --no-progress
+  ./scripts/lint-md
   ```
 
 ## Verification wrapper scripts

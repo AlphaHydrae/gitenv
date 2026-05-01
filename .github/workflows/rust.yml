@@ -110,3 +110,28 @@ jobs:
       - name: Run Markdown lint wrapper
         run: |
           bash ./scripts/run-lint-md.sh
+
+  rust-makefile:
+    runs-on: ubuntu-24.04
+    name: Rust checks (Makefile)
+
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.95.0
+          components: clippy,rustfmt
+
+      - name: Install cargo-llvm-cov
+        run: |
+          cargo install cargo-llvm-cov --locked
+
+      - name: Install lychee
+        run: |
+          cargo install lychee --version 0.24.1 --locked
+
+      - name: Run make
+        run: make

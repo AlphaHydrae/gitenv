@@ -179,11 +179,11 @@ them to EVERY task, EVERY time.**
   1. Start with an imperative title line.
   2. Follow with a short body describing what changed and why.
   3. Focus the body on product/code behavior changes, not expected maintenance
-    steps.
+     steps.
   4. Do not mention routine test additions unless the change introduces new
-    test utilities, test infrastructure, or testing tools.
+     test utilities, test infrastructure, or testing tools.
   5. Do not mention routine migration log/backlog updates unless those
-    documentation changes are themselves the primary deliverable.
+     documentation changes are themselves the primary deliverable.
 - Be proactive with migration documentation upkeep. Do not wait for explicit
   user prompts: when work changes scope, sequencing, assumptions, or outcomes,
   update [`MIGRATION-LOG.md`](./MIGRATION-LOG.md) and/or

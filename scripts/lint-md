@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+find . -type f -name '*.md' \
+  -not -path './.git/*' \
+  -not -path './vendor/*' \
+  -not -path './$(RUST_DIR)/target/*' \
+  -not -path './coverage/*' \
+  -not -path './tmp/*' \
+  -print0 | xargs -0 lychee --offline --no-progress
