@@ -1,0 +1,114 @@
+# Migration Increments (Living Plan)
+
+This document contains only the immediate, actively managed migration backlog.
+
+It is intentionally not written in stone. As implementation progresses and we
+learn more, this backlog should be split, merged, reordered, rewritten, and
+pruned.
+
+Completed increments must be moved to [`MIGRATION-LOG.md`](./MIGRATION-LOG.md)
+and removed from this file so it stays forward-looking.
+
+## Current Backlog
+
+### Increment 1: Establish the library/CLI seam
+
+Why this increment exists:
+
+- Replace the placeholder hello-world entry point with a tiny domain-oriented
+  library entry point and a typed error surface.
+- Preserve the current end-to-end executable path while creating a clean seam
+  between library logic and CLI rendering.
+
+Review target:
+
+- The crate is no longer structured around a placeholder message.
+- The CLI delegates to the library instead of owning the primary behavior.
+
+### Increment 2: Define the canonical config model
+
+Why this increment exists:
+
+- Establish the internal Rust data model for the normalized YAML shape before
+  parser or filesystem behavior is added.
+- Lock the vocabulary for repository, defaults, sources, and entries early.
+
+Review target:
+
+- Canonical config structs exist in the library.
+- Defaults and field ownership are explicit and type-safe.
+
+### Increment 3: Parse the smallest valid YAML config
+
+Why this increment exists:
+
+- Prove the file-reading and YAML boundary with the smallest viable scope.
+- Keep parsing concerns separate from normalization and planning.
+
+Review target:
+
+- Minimal valid YAML can be read into Rust types.
+- Missing required fields and malformed YAML fail clearly.
+
+### Increment 4: Reject unknown keys with clear errors
+
+Why this increment exists:
+
+- Enforce the schema-first boundary and avoid silent misconfiguration.
+- Make config errors actionable before more behavior depends on them.
+
+Review target:
+
+- Unknown top-level and nested keys are rejected.
+- Error messages are readable and stable enough to test.
+
+### Increment 5: Normalize shorthand into the canonical model
+
+Why this increment exists:
+
+- Introduce the first meaningful domain transformation without filesystem side
+  effects.
+- Prove that shorthand and canonical YAML representations converge to one
+  internal model.
+
+Review target:
+
+- Normalization code exists and is tested.
+- Equivalent shorthand and canonical configs yield equivalent normalized data.
+
+### Increment 6: Add an execution plan model without side effects
+
+Why this increment exists:
+
+- Separate deciding what should happen from doing it.
+- Keep future filesystem behavior narrow and testable.
+
+Review target:
+
+- The library can derive a deterministic plan from normalized config.
+- Plan output is structured and suitable for snapshots or golden tests.
+
+### Increment 7: Inspect one narrow symlink status case
+
+Why this increment exists:
+
+- Introduce the first real filesystem behavior with tightly constrained scope.
+- Start with read-only inspection before write-side apply behavior.
+
+Review target:
+
+- A single symlink status workflow works against temporary directories.
+- Status results are returned as structured data, not terminal output.
+
+### Increment 8: Wire the default CLI inspection flow
+
+Why this increment exists:
+
+- Deliver the first thin end-to-end vertical slice through config, planning,
+  inspection, and rendering.
+- Confirm the CLI is acting as an adapter over library behavior.
+
+Review target:
+
+- The default CLI path loads config, inspects status, and renders output.
+- CLI tests cover observable output and exit behavior.

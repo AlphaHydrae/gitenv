@@ -7,6 +7,9 @@ Before making changes, review:
 - [README.md](./README.md) for project overview and usage.
 - [ARCHITECTURE.md](./ARCHITECTURE.md) for design goals and decisions.
 - [MIGRATION.md](./MIGRATION.md) for the Ruby-to-Rust transition plan.
+- [MIGRATION-LOG.md](./MIGRATION-LOG.md) for completed migration increments.
+- [MIGRATION-INCREMENTS.md](./MIGRATION-INCREMENTS.md) for the living next-step
+  migration backlog.
 
 Agent contributors must also follow [AGENTS.md](./AGENTS.md).
 
@@ -41,7 +44,8 @@ Agent contributors must also follow [AGENTS.md](./AGENTS.md).
 - Suggest or make improvements when existing documentation is outdated or
   unclear.
 - Keep documentation consistent across `README.md`, `ARCHITECTURE.md`,
-  `CONTRIBUTING.md`, `MIGRATION.md`, and `AGENTS.md`.
+  `CONTRIBUTING.md`, `MIGRATION.md`, `MIGRATION_LOG.md`,
+  `MIGRATION_INCREMENTS.md`, and `AGENTS.md`.
 
 ## Boundaries
 

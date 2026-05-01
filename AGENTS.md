@@ -2,17 +2,15 @@
 
 This file contains agent-specific instructions for this repository.
 
+## Quick-reference
+
 When working on the codebase, consult these documents as needed:
 
 - [README](./README.md)
 - [Architecture & design decisions](./ARCHITECTURE.md)
-- [Contribution guidelines](./CONTRIBUTING.md)
 - [Migration plan](./MIGRATION.md)
-
-## Quick-reference: contribution guidelines
-
-When working on the codebase, you may need to reference these sections:
-
+- [Migration increment log](./MIGRATION-LOG.md)
+- [Migration increments (living plan)](./MIGRATION-INCREMENTS.md)
 - [Shared expectations](./CONTRIBUTING.md#shared-expectations) — design alignment, documentation
 - [Documentation expectations](./CONTRIBUTING.md#documentation-expectations) — comments, clarity
 - [Boundaries](./CONTRIBUTING.md#boundaries) — domain modules emit data/events, CLI owns terminal output
@@ -158,12 +156,24 @@ them to EVERY task, EVERY time.**
   discovered.
 - Do not mix architectural refactors and feature delivery in the same
   increment unless explicitly approved.
-- Maintain a running migration log in `MIGRATION.md` that records completed
-  increments and rationale.
-- Keep the `MIGRATION.md` increment sections up to date as work progresses.
-  When an increment is completed, add or update the corresponding entry in the
-  increment log and remove that increment from the living proposed backlog so
-  it remains a forward-looking plan rather than a full historical record.
+- Keep [`MIGRATION.md`](./MIGRATION.md) focused on long-term migration strategy,
+  scope, and phases.
+- Maintain increment history in [`MIGRATION-LOG.md`](./MIGRATION-LOG.md)
+  (historical record only). Keep entries concise and ordered so completed work
+  remains easy to scan.
+- Maintain the active next-step backlog in
+  [`MIGRATION-INCREMENTS.md`](./MIGRATION-INCREMENTS.md) (living plan only).
+  Keep it focused on immediate agreed increments.
+- When an increment is completed, immediately do both:
+  1. Add or update its completed entry in
+     [`MIGRATION-LOG.md`](./MIGRATION-LOG.md).
+  2. Remove or rewrite its item in
+     [`MIGRATION-INCREMENTS.md`](./MIGRATION-INCREMENTS.md).
+- Be proactive with migration documentation upkeep. Do not wait for explicit
+  user prompts: when work changes scope, sequencing, assumptions, or outcomes,
+  update [`MIGRATION-LOG.md`](./MIGRATION-LOG.md) and/or
+  [`MIGRATION-INCREMENTS.md`](./MIGRATION-INCREMENTS.md) in the same change or
+  explicitly suggest the needed update.
 
 ## Agent-specific execution rules
 
@@ -181,10 +191,13 @@ them to EVERY task, EVERY time.**
   contribution guidelines to identify any mismatch between the change and the
   documented conventions. If you find any, explain the mismatch and propose a
   correction to the change or the documentation.
-- After any documentation change in `README.md`, `ARCHITECTURE.md`,
-  `CONTRIBUTING.md`, `MIGRATION.md`, or `AGENTS.md`, review the full set of
-  those files for consistency and update any affected file in the same change
-  when needed.
+- After any documentation change in [`README.md`](./README.md),
+  [`ARCHITECTURE.md`](./ARCHITECTURE.md),
+  [`CONTRIBUTING.md`](./CONTRIBUTING.md), [`MIGRATION.md`](./MIGRATION.md),
+  [`MIGRATION-LOG.md`](./MIGRATION-LOG.md),
+  [`MIGRATION-INCREMENTS.md`](./MIGRATION-INCREMENTS.md), or
+  [`AGENTS.md`](./AGENTS.md), review the full set of those files for consistency
+  and update any affected file in the same change when needed.
 - If instructions are incomplete, contradictory, or likely to cause an
   unintended result, stop, explain the problem, and propose a better option.
 - For refactor work, stop extracting when remaining duplication is local and
@@ -196,8 +209,8 @@ them to EVERY task, EVERY time.**
   Prefer direct file edits.
 - Small one-off scripts are acceptable only when they are clearly the simplest
   safe option. If a larger script seems necessary, ask for approval first.
-- If you must create temporary files, place them in `tmp/agent/` and do not
-  touch the `.keep` file there.
+- If you must create temporary files, place them in [`tmp/agent/`](./tmp/agent/)
+  and do not touch the `.keep` file there.
 
 ## Agent coding guidelines
 
@@ -222,33 +235,37 @@ These wrappers run the commands documented in
 ### Automated tests
 
 - Always use `./scripts/run-tests.sh` from the repository root.
-- The script captures full output to `tmp/agent/test_output.log` and prints the
-  exit code and a summary tail to stdout.
+- The script captures full output to
+  [`tmp/agent/test_output.log`](./tmp/agent/test_output.log) and prints the exit
+  code and a summary tail to stdout.
 
 ### Linting
 
 - Use `./scripts/run-lint.sh` from the repository root.
-- The script captures full output to `tmp/agent/lint_output.log` and prints the
-  exit code and a summary tail to stdout.
+- The script captures full output to
+  [`tmp/agent/lint_output.log`](./tmp/agent/lint_output.log) and prints the exit
+  code and a summary tail to stdout.
 
 ### Building
 
 - Use `./scripts/run-build.sh` from the repository root when verifying builds.
-- The script captures full output to `tmp/agent/build_output.log` and prints the
+- The script captures full output to
+  [`tmp/agent/build_output.log`](./tmp/agent/build_output.log) and prints the
   exit code and a summary tail to stdout.
 
 ### Format wrapper
 
 - Use `./scripts/run-format.sh` from the repository root for formatting checks.
-- The script captures full output to `tmp/agent/format_output.log` and prints
-  the exit code and a summary tail to stdout.
+- The script captures full output to
+  [`tmp/agent/format_output.log`](./tmp/agent/format_output.log) and prints the
+  exit code and a summary tail to stdout.
 
 ### Markdown lint wrapper
 
 - Use `./scripts/run-lint-md.sh` from the repository root for Markdown linting.
 - The script lints all Markdown files in the project, captures full output to
-  `tmp/agent/markdown_lint_output.log`, and prints the exit code plus a summary
-  tail to stdout.
+  [`tmp/agent/markdown_lint_output.log`](./tmp/agent/markdown_lint_output.log),
+  and prints the exit code plus a summary tail to stdout.
 
 ## Former Commands
 
