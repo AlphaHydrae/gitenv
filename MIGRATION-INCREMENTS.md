@@ -9,6 +9,13 @@ pruned.
 Completed increments must be moved to [`MIGRATION-LOG.md`](./MIGRATION-LOG.md)
 and removed from this file so it stays forward-looking.
 
+Capture and report follow-up work to address coverage decreases and other gaps
+in the increment scope. If the follow-up is a discrete task, create a new
+increment with a clear scope and review target. If the follow-up is more
+open-ended, add inline TODO comments in the relevant code and consider adding a
+note in the next increment that explicitly references the TODOs to ensure they
+are not forgotten.
+
 ## Current Backlog
 
 ### Increment 2: Define the canonical config model

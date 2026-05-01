@@ -60,6 +60,9 @@ strategy, and quality gates.
 - For each deferred concern, keep one clear TODO comment that includes a
   removal/closure condition.
 - Add increment-level regression tests whenever bugs or edge cases are found.
+- For every increment, report test coverage before and after the change. If
+  coverage decreases, explain why and document follow-up work in the living
+  increments backlog and/or inline TODO comments.
 - Avoid mixing architectural refactors and feature delivery in the same
   increment unless explicitly approved.
 
@@ -239,6 +242,7 @@ Wrapper scripts are set up for the Rust project structure:
 - [x] `./scripts/run-build.sh`
 - [x] `./scripts/run-format.sh`
 - [x] `./scripts/run-lint-md.sh`
+- [x] `./scripts/run-coverage.sh`
 
 Exact command mappings (including non-wrapper commands) are documented in
 `CONTRIBUTING.md`. Wrapper output logs are written under `tmp/agent/`.

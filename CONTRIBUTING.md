@@ -83,6 +83,10 @@ Business modules must not print directly to terminal output.
 - Keep test names human-readable and avoid technical details that do not help
   explain the expected behavior. Put necessary technical context in inline
   comments instead.
+- For test function names, use sentence-style `snake_case` with an imperative
+  verb at the start (for example:
+  `show_the_default_message_on_stdout`). Avoid third-person singular forms such
+  as `shows_...`.
 
 ### Spec description style
 
@@ -117,6 +121,32 @@ Apply checks that match your change scope.
 4. Run build checks.
 5. Run documentation lint checks when Markdown files changed.
 6. Run formatting checks (and formatting write mode only when intended).
+7. Run coverage for code changes. If coverage decreases, capture required
+   follow-up work (living increment backlog item and/or inline TODO).
+
+## Setup
+
+Use this section to set up the local development environment before running the
+commands below. This setup guidance should move to `README.md` after the port
+is complete.
+
+- Install Markdown link checker (one-time):
+
+  ```sh
+  cargo install lychee --version 0.24.1 --locked
+  ```
+
+- Install coverage runner (one-time):
+
+  ```sh
+  cargo install cargo-llvm-cov --locked
+  ```
+
+- If installed via asdf and not found on `PATH`, refresh shims:
+
+  ```sh
+  asdf reshim rust
+  ```
 
 ## Common Commands
 
@@ -140,6 +170,12 @@ Apply checks that match your change scope.
 
   ```sh
   cd rust && cargo test
+  ```
+
+- Run coverage summary:
+
+  ```sh
+  cd rust && cargo llvm-cov --workspace --all-targets --summary-only
   ```
 
 - Run lint checks:
@@ -166,18 +202,6 @@ Apply checks that match your change scope.
   cd rust && cargo fmt
   ```
 
-- Install Markdown link checker (one-time):
-
-  ```sh
-  cargo install lychee --version 0.24.1 --locked
-  ```
-
-- If installed via asdf and not found on `PATH`, refresh shims:
-
-  ```sh
-  asdf reshim rust
-  ```
-
 - Run Markdown link checks:
 
   ```sh
@@ -195,6 +219,7 @@ Apply checks that match your change scope.
 Use these wrapper scripts for agent verification from the repository root:
 
 - `./scripts/run-tests.sh`
+- `./scripts/run-coverage.sh`
 - `./scripts/run-lint.sh`
 - `./scripts/run-build.sh`
 - `./scripts/run-format.sh`

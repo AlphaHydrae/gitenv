@@ -57,6 +57,11 @@ them to EVERY task, EVERY time.**
   - Always run `./scripts/run-build.sh` to verify compilation once the wrapper exists.
   - Always run `./scripts/run-format.sh` (or `./scripts/run-format.sh --write`
     when applying formatting changes) for formatting checks once the wrapper exists.
+  - For migration increments, always run `./scripts/run-coverage.sh` and
+    report both previous and current coverage.
+  - If coverage decreases, explicitly explain why and document follow-up work
+    in [`MIGRATION-INCREMENTS.md`](./MIGRATION-INCREMENTS.md) and/or inline TODO
+    comments.
   - When wrappers are not applicable for a task, run interim checks documented
     in [CONTRIBUTING.md](./CONTRIBUTING.md#common-commands).
   - Show full command output including exit code, test count, or failure details.
@@ -239,33 +244,36 @@ These wrappers run the commands documented in
   [`tmp/agent/test_output.log`](./tmp/agent/test_output.log) and prints the exit
   code and a summary tail to stdout.
 
+### Test coverage
+
+- Use `./scripts/run-coverage.sh` from the repository root for test coverage.
+- The script captures full output to `tmp/agent/coverage_output.log`, prints the
+  exit code, and prints the total line coverage when available.
+
 ### Linting
 
 - Use `./scripts/run-lint.sh` from the repository root.
-- The script captures full output to
-  [`tmp/agent/lint_output.log`](./tmp/agent/lint_output.log) and prints the exit
-  code and a summary tail to stdout.
+- The script captures full output to `tmp/agent/lint_output.log` and prints the
+  exit code and a summary tail to stdout.
 
 ### Building
 
 - Use `./scripts/run-build.sh` from the repository root when verifying builds.
-- The script captures full output to
-  [`tmp/agent/build_output.log`](./tmp/agent/build_output.log) and prints the
+- The script captures full output to `tmp/agent/build_output.log` and prints the
   exit code and a summary tail to stdout.
 
 ### Format wrapper
 
 - Use `./scripts/run-format.sh` from the repository root for formatting checks.
-- The script captures full output to
-  [`tmp/agent/format_output.log`](./tmp/agent/format_output.log) and prints the
-  exit code and a summary tail to stdout.
+- The script captures full output to `tmp/agent/format_output.log` and prints
+  the exit code and a summary tail to stdout.
 
 ### Markdown lint wrapper
 
 - Use `./scripts/run-lint-md.sh` from the repository root for Markdown linting.
 - The script lints all Markdown files in the project, captures full output to
-  [`tmp/agent/markdown_lint_output.log`](./tmp/agent/markdown_lint_output.log),
-  and prints the exit code plus a summary tail to stdout.
+  `tmp/agent/markdown_lint_output.log`, and prints the exit code plus a summary
+  tail to stdout.
 
 ## Former Commands
 

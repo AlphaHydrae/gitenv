@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+#
+# Run Rust coverage and capture output to "tmp/agent/coverage_output.log".
+#
+# Usage:
+#   scripts/run-coverage.sh               # run coverage summary
+#   scripts/run-coverage.sh --html        # pass through cargo llvm-cov args
+#
+# Output is written to: "tmp/agent/coverage_output.log".
+# Exit code matches cargo llvm-cov's exit code.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+RUST_WORKSPACE="$REPO_ROOT/rust"
+OUTPUT_LOG="$REPO_ROOT/tmp/agent/coverage_output.log"
+
+mkdir -p "$REPO_ROOT/tmp/agent"
+
+# Add asdf bin + shims to PATH if available (non-interactive shells may miss this).
+if [[ -d "/opt/homebrew/bin" ]]; then
+  export PATH="/opt/homebrew/bin:$PATH"
+fi
+
+if [[ -d "$HOME/.asdf/shims" ]]; then
+  export PATH="$HOME/.asdf/shims:$PATH"
+fi
+
+if [[ -f "$HOME/.asdf/asdf.sh" ]]; then
+  # shellcheck disable=SC1090
+  source "$HOME/.asdf/asdf.sh"
+fi
+
+cd "$RUST_WORKSPACE"
+
+if ! cargo llvm-cov --version >/dev/null 2>&1; then
+  {
+    echo "cargo-llvm-cov is not available."
+    echo "Install with: cargo install cargo-llvm-cov --locked"
+    echo "If installed via asdf, run: asdf reshim rust"
+  } | tee "$OUTPUT_LOG"
+
+  echo
+  echo "===== EXIT STATUS ====="
+  echo "Exit code: 127"
+  echo
+  echo "===== LAST 30 LINES OF OUTPUT ====="
+  tail -30 "$OUTPUT_LOG"
+  exit 127
+fi
+
+set +e
+if [[ $# -eq 0 ]]; then
+  echo "Running: cargo llvm-cov --workspace --all-targets --summary-only" | tee "$OUTPUT_LOG"
+  cargo llvm-cov --workspace --all-targets --summary-only 2>&1 | tee -a "$OUTPUT_LOG"
+else
+  echo "Running: cargo llvm-cov $*" | tee "$OUTPUT_LOG"
+  cargo llvm-cov "$@" 2>&1 | tee -a "$OUTPUT_LOG"
+fi
+
+EXIT_CODE=${PIPESTATUS[0]}
+set -e
+
+echo "" >> "$OUTPUT_LOG"
+echo "Exit code: $EXIT_CODE" >> "$OUTPUT_LOG"
+
+TOTAL_LINE="$(grep -E '^TOTAL' "$OUTPUT_LOG" | tail -1 || true)"
+TOTAL_PERCENT=""
+if [[ -n "$TOTAL_LINE" ]]; then
+  TOTAL_PERCENT="$(echo "$TOTAL_LINE" | awk '{print $(NF-3)}')"
+fi
+
+echo
+echo "===== EXIT STATUS ====="
+echo "Exit code: $EXIT_CODE"
+if [[ -n "$TOTAL_PERCENT" ]]; then
+  echo "Total line coverage: $TOTAL_PERCENT"
+fi
+echo
+echo "===== LAST 30 LINES OF OUTPUT ====="
+tail -30 "$OUTPUT_LOG"
+
+exit "$EXIT_CODE"
