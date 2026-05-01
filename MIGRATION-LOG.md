@@ -11,6 +11,9 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-01: Parse the smallest valid YAML config - Added `serde_yaml` parsing
+  for the canonical config model, including a file-loading boundary and clear
+  invalid-configuration errors for malformed YAML and missing required fields.
 - 2026-05-01: Define the canonical config model - Added canonical configuration
   types in the Rust library (`Config`, `Defaults`, `Source`, and config item
   variants) with explicit owned fields and default action semantics to lock the

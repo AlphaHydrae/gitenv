@@ -18,19 +18,35 @@ are not forgotten.
 
 ## Current Backlog
 
-### Increment 3: Parse the smallest valid YAML config
+### Increment 3 follow-up: Recover parser coverage after Increment 3
 
 Why this increment exists:
 
-- Prove the file-reading and YAML boundary with the smallest viable scope.
-- Keep parsing concerns separate from normalization and planning.
+- Increment 3 introduced new parser/file-read paths that reduced total line
+  coverage from 94.64% to 92.54%.
+- Keep the migration coverage contract explicit and actionable.
 
 Review target:
 
-- Minimal valid YAML can be read into Rust types.
-- Missing required fields and malformed YAML fail clearly.
+- Add coverage for file-read error handling and parser paths that remain
+  untested.
+- Return total line coverage to at least the pre-Increment-3 baseline.
 
-### Increment 4: Reject unknown keys with clear errors
+### Increment 4: Allow omitted defaults in configuration
+
+Why this increment exists:
+
+- The smallest valid user configuration should stay concise and not require
+  repeating obvious defaults.
+- Parser behavior should accept configs that define only `version`,
+  `repository`, and `sources` when defaults are omitted.
+
+Review target:
+
+- Configurations can omit some or all default fields and still parse.
+- Omitted default fields are filled with canonical `Defaults::default()` values.
+
+### Increment 5: Reject unknown keys with clear errors
 
 Why this increment exists:
 
@@ -42,7 +58,7 @@ Review target:
 - Unknown top-level and nested keys are rejected.
 - Error messages are readable and stable enough to test.
 
-### Increment 5: Normalize shorthand into the canonical model
+### Increment 6: Normalize shorthand into the canonical model
 
 Why this increment exists:
 
@@ -56,7 +72,7 @@ Review target:
 - Normalization code exists and is tested.
 - Equivalent shorthand and canonical configs yield equivalent normalized data.
 
-### Increment 6: Add an execution plan model without side effects
+### Increment 7: Add an execution plan model without side effects
 
 Why this increment exists:
 
@@ -68,7 +84,7 @@ Review target:
 - The library can derive a deterministic plan from normalized config.
 - Plan output is structured and suitable for snapshots or golden tests.
 
-### Increment 7: Inspect one narrow symlink status case
+### Increment 8: Inspect one narrow symlink status case
 
 Why this increment exists:
 
@@ -80,7 +96,7 @@ Review target:
 - A single symlink status workflow works against temporary directories.
 - Status results are returned as structured data, not terminal output.
 
-### Increment 8: Wire the default CLI inspection flow
+### Increment 9: Wire the default CLI inspection flow
 
 Why this increment exists:
 

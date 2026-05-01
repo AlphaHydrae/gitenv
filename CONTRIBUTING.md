@@ -71,8 +71,13 @@ Business modules must not print directly to terminal output.
 
 - Write tests in behavior-focused language.
 - Prefer clear, externally observable outcomes over implementation detail checks.
+- Make assertions complete for the behavior under test. Do not stop at partial
+  checks when the full structured outcome can be asserted directly.
+- If complete assertions are intentionally not used, include a brief comment
+  explaining the reason.
 - Cover edge cases and failure modes explicitly.
 - Coverage target is 100%; if lower, document uncovered paths and rationale.
+- Treat coverage as a signal, not a substitute for assertion quality.
 - Include parity tests for equivalent library and CLI workflows.
 - Include logging tests for level filtering and expected diagnostic visibility.
 
@@ -86,12 +91,17 @@ Business modules must not print directly to terminal output.
 - Keep test names human-readable and avoid technical details that do not help
   explain the expected behavior. Put necessary technical context in inline
   comments instead.
+- Do not include implementation technology in test names when it does not change
+  the expected behavior (for example, avoid format labels such as `yaml` in
+  config behavior tests, since we only parse YAML configs anyway).
 - For test function names, use sentence-style `snake_case`. Prefer an
   imperative verb at the start (for example:
   `show_the_default_message_on_stdout`), but declarative sentences are
   acceptable when they more clearly describe the expected behavior (for
   example: `the_default_action_is_a_home_symlink`). Avoid third-person
   singular forms such as `shows_...`.
+- Avoid redundant wording in test names (for example, do not pair `missing`
+  with `required` when one already implies the other).
 
 ### Spec description style
 

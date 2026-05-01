@@ -1,9 +1,12 @@
+use serde::{Deserialize, Deserializer};
+use std::path::{Path, PathBuf};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProgramOutput {
     pub message: &'static str,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Config {
     pub version: u32,
     pub repository: String,
@@ -11,7 +14,7 @@ pub struct Config {
     pub sources: Vec<Source>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Defaults {
     pub mode: ActionMode,
     pub to: String,
@@ -32,13 +35,14 @@ impl Default for Defaults {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ActionMode {
     Symlink,
     Copy,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Source {
     pub from: String,
     pub configs: Vec<ConfigItem>,
@@ -50,13 +54,33 @@ pub enum ConfigItem {
     Select(SelectConfig),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+impl<'de> Deserialize<'de> for ConfigItem {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum ConfigItemWire {
+            File(FileConfig),
+            Select { select: SelectConfig },
+        }
+
+        match ConfigItemWire::deserialize(deserializer)? {
+            ConfigItemWire::File(file_config) => Ok(Self::File(file_config)),
+            ConfigItemWire::Select { select } => Ok(Self::Select(select)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct FileConfig {
     pub file: String,
+    #[serde(rename = "as")]
     pub as_name: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct SelectConfig {
     pub dotfiles: bool,
     pub exclude: Vec<String>,
@@ -64,7 +88,24 @@ pub struct SelectConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProgramError {
+    InvalidConfiguration { message: String },
+    ReadConfiguration { path: PathBuf, message: String },
     UnsupportedConfiguration,
+}
+
+pub fn parse_config(yaml: &str) -> Result<Config, ProgramError> {
+    serde_yaml::from_str(yaml).map_err(|error| ProgramError::InvalidConfiguration {
+        message: format!("failed to parse config YAML: {error}"),
+    })
+}
+
+pub fn load_config(path: &Path) -> Result<Config, ProgramError> {
+    let yaml = std::fs::read_to_string(path).map_err(|error| ProgramError::ReadConfiguration {
+        path: path.to_path_buf(),
+        message: error.to_string(),
+    })?;
+
+    parse_config(&yaml)
 }
 
 pub fn run() -> Result<ProgramOutput, ProgramError> {
@@ -75,7 +116,12 @@ pub fn run() -> Result<ProgramOutput, ProgramError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActionMode, Config, ConfigItem, Defaults, FileConfig, SelectConfig, Source, run};
+    use super::{
+        ActionMode, Config, ConfigItem, Defaults, FileConfig, ProgramError, SelectConfig, Source,
+        load_config, parse_config, run,
+    };
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn the_default_action_is_a_home_symlink() {
@@ -119,5 +165,98 @@ mod tests {
         let output = run().expect("run should succeed");
 
         assert_eq!(output.message, "Hello, World!");
+    }
+
+    #[test]
+    fn load_the_smallest_valid_config() {
+        let file_path = unique_temp_file_path("smallest_valid_config");
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+defaults:
+  mode: symlink
+  to: "~"
+  mkdir: true
+  overwrite: false
+  backup_on_overwrite: true
+sources:
+  - from: "."
+    configs:
+      - file: .zshrc
+"#;
+
+        std::fs::write(&file_path, yaml).expect("temp config should be written");
+        let config = load_config(&file_path).expect("config should load");
+        std::fs::remove_file(&file_path).expect("temp config should be removed");
+
+        let expected = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                overwrite: false,
+                backup_on_overwrite: true,
+            },
+            sources: vec![Source {
+                from: ".".to_string(),
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                })],
+            }],
+        };
+
+        assert_eq!(config, expected);
+    }
+
+    #[test]
+    fn reject_config_missing_repository() {
+        let yaml = r#"
+version: 1
+defaults:
+  mode: symlink
+  to: "~"
+  mkdir: true
+  overwrite: false
+  backup_on_overwrite: true
+sources:
+  - from: "."
+    configs:
+      - file: .zshrc
+"#;
+
+        let error = parse_config(yaml).expect_err("config should fail without repository");
+
+        match error {
+            ProgramError::InvalidConfiguration { message } => {
+                assert!(message.contains("missing field `repository`"));
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn reject_malformed_config() {
+        let yaml = "version: [";
+
+        let error = parse_config(yaml).expect_err("malformed yaml should fail");
+
+        match error {
+            ProgramError::InvalidConfiguration { message } => {
+                assert!(message.contains("failed to parse config YAML"));
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+    }
+
+    fn unique_temp_file_path(prefix: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after unix epoch")
+            .as_nanos();
+
+        std::env::temp_dir().join(format!("gitenv_{prefix}_{nanos}.yml"))
     }
 }

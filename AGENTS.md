@@ -45,6 +45,10 @@ them to EVERY task, EVERY time.**
   style](./CONTRIBUTING.md#spec-description-style), then explicitly self-check
   each new/edited test name against those rules. Do not proceed if any test
   name violates them.
+- **🔴 TEST-ASSERTION GATE IS MANDATORY BEFORE ANY TEST EDIT.** Before finalizing
+  a test change, verify that each test makes complete assertions for the
+  behavior under test whenever practical. If a test intentionally uses partial
+  assertions, add a brief justification comment in the test.
 
 ### 🚨 VERIFICATION — STILL MANDATORY TOP PRIORITY
 
