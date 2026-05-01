@@ -29,6 +29,9 @@ Agent contributors must also follow [AGENTS.md](./AGENTS.md).
 - Favor maintainability and correctness over premature optimization.
 - Prefer existing language and standard-library utilities over custom
   reimplementations when they satisfy the requirement.
+- Keep CI checks aligned with local verification expectations. When required
+  checks or wrapper scripts change, update `.github/workflows/rust.yml` in the
+  same change.
 
 ## Documentation Expectations
 

@@ -26,10 +26,19 @@ jobs:
         run: |
           cargo install lychee --version 0.24.1 --locked
 
+      - name: Install cargo-llvm-cov
+        run: |
+          cargo install cargo-llvm-cov --locked
+
       - name: Run cargo test
         run: |
           cd rust
           cargo test
+
+      - name: Run cargo llvm-cov summary
+        run: |
+          cd rust
+          cargo llvm-cov --workspace --all-targets --summary-only
 
       - name: Run cargo clippy
         run: |
@@ -74,9 +83,17 @@ jobs:
         run: |
           cargo install lychee --version 0.24.1 --locked
 
+      - name: Install cargo-llvm-cov
+        run: |
+          cargo install cargo-llvm-cov --locked
+
       - name: Run test wrapper
         run: |
           bash ./scripts/run-tests.sh
+
+      - name: Run coverage wrapper
+        run: |
+          bash ./scripts/run-coverage.sh
 
       - name: Run lint wrapper
         run: |
