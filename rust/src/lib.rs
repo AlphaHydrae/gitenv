@@ -67,11 +67,16 @@ impl<'de> Deserialize<'de> for ConfigItem {
         #[derive(Deserialize)]
         #[serde(untagged)]
         enum ConfigItemWire {
+            ShorthandFile(String),
             File(FileConfig),
             Select { select: SelectConfig },
         }
 
         match ConfigItemWire::deserialize(deserializer)? {
+            ConfigItemWire::ShorthandFile(file) => Ok(Self::File(FileConfig {
+                file,
+                as_name: None,
+            })),
             ConfigItemWire::File(file_config) => Ok(Self::File(file_config)),
             ConfigItemWire::Select { select } => Ok(Self::Select(select)),
         }
@@ -90,6 +95,7 @@ pub struct FileConfig {
 #[serde(deny_unknown_fields)]
 pub struct SelectConfig {
     pub dotfiles: bool,
+    #[serde(default)]
     pub exclude: Vec<String>,
 }
 
@@ -304,6 +310,71 @@ sources:
         };
 
         assert_eq!(config, expected);
+    }
+
+    #[test]
+    fn accept_shorthand_file_entries_in_source_configs() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - .zshrc
+"#;
+
+        let config = parse_config(yaml).expect("config should parse with shorthand file entries");
+
+        let expected = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            sources: vec![Source {
+                from: ".".to_string(),
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                })],
+            }],
+        };
+
+        assert_eq!(config, expected);
+    }
+
+    #[test]
+    fn normalize_shorthand_and_canonical_configs_to_the_same_model() {
+        let shorthand_yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - .zshrc
+      - file: .tmux
+        as: .tmux.conf
+      - select:
+          dotfiles: true
+"#;
+        let canonical_yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - file: .zshrc
+      - file: .tmux
+        as: .tmux.conf
+      - select:
+          dotfiles: true
+          exclude: []
+"#;
+
+        let shorthand = parse_config(shorthand_yaml)
+            .expect("shorthand config should parse to the normalized model");
+        let canonical = parse_config(canonical_yaml)
+            .expect("canonical config should parse to the normalized model");
+
+        assert_eq!(shorthand, canonical);
     }
 
     #[test]

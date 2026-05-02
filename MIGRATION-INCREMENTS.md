@@ -18,20 +18,6 @@ are not forgotten.
 
 ## Current Backlog
 
-### Increment 6: Normalize shorthand into the canonical model
-
-Why this increment exists:
-
-- Introduce the first meaningful domain transformation without filesystem side
-  effects.
-- Prove that shorthand and canonical YAML representations converge to one
-  internal model.
-
-Review target:
-
-- Normalization code exists and is tested.
-- Equivalent shorthand and canonical configs yield equivalent normalized data.
-
 ### Increment 7: Add an execution plan model without side effects
 
 Why this increment exists:

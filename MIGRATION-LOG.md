@@ -11,6 +11,8 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-02: Normalize shorthand into the canonical model - Accept shorthand
+  file config entries and normalize them to canonical file config items.
 - 2026-05-02: Reject unknown keys in config parsing - Enforce strict serde
   unknown-field rejection for top-level and nested config objects and add
   parser tests for unknown top-level and defaults keys.
