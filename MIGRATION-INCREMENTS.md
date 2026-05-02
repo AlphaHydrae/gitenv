@@ -1,10 +1,10 @@
 # Migration Increments (Living Plan)
 
 This document contains only the immediate, actively managed migration backlog.
-
 It is intentionally not written in stone. As implementation progresses and we
 learn more, this backlog should be split, merged, reordered, rewritten, and
-pruned.
+pruned. The overall migration plan is located in
+[`MIGRATION.md`](./MIGRATION.md).
 
 Completed increments must be moved to [`MIGRATION-LOG.md`](./MIGRATION-LOG.md)
 and removed from this file so it stays forward-looking.
@@ -16,6 +16,15 @@ open-ended, add inline TODO comments in the relevant code and consider adding a
 note in the next increment that explicitly references the TODOs to ensure they
 are not forgotten. Treat a drop of about 0.25 percentage points or more as
 significant unless there is a stronger project-specific reason.
+
+## Documentation
+
+Make sure to understand the project by reading appropriate sections of the
+following documents before starting work on an increment:
+
+- [Architecture & design decisions](./ARCHITECTURE.md)
+- [Contribution guidelines](./CONTRIBUTING.md)
+- [Agent instructions](./AGENT.md)
 
 ## Design Decisions
 
