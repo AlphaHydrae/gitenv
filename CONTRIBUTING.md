@@ -242,12 +242,12 @@ is complete.
 
 Use these wrapper scripts for agent verification from the repository root:
 
-- `./scripts/run-tests.sh`
-- `./scripts/run-coverage.sh`
-- `./scripts/run-lint.sh`
-- `./scripts/run-build.sh`
-- `./scripts/run-format.sh`
-- `./scripts/run-lint-md.sh`
+- `./.agent/scripts/tests.sh`
+- `./.agent/scripts/coverage.sh`
+- `./.agent/scripts/lint.sh`
+- `./.agent/scripts/build.sh`
+- `./.agent/scripts/format.sh`
+- `./.agent/scripts/lint-md.sh`
 
 Each script:
 

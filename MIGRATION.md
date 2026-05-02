@@ -316,12 +316,12 @@ Coverage target:
 
 Wrapper scripts are set up for the Rust project structure:
 
-- [x] `./scripts/run-tests.sh`
-- [x] `./scripts/run-lint.sh`
-- [x] `./scripts/run-build.sh`
-- [x] `./scripts/run-format.sh`
-- [x] `./scripts/run-lint-md.sh`
-- [x] `./scripts/run-coverage.sh`
+- [x] `./.agent/scripts/tests.sh`
+- [x] `./.agent/scripts/lint.sh`
+- [x] `./.agent/scripts/build.sh`
+- [x] `./.agent/scripts/format.sh`
+- [x] `./.agent/scripts/lint-md.sh`
+- [x] `./.agent/scripts/coverage.sh`
 
 Exact command mappings (including non-wrapper commands) are documented in
 `CONTRIBUTING.md`. Wrapper output logs are written under `tmp/agent/`.

@@ -4,14 +4,14 @@
 # "tmp/agent/markdown_lint_output.log".
 #
 # Usage:
-#   scripts/run-lint-md.sh  # check all Markdown files with lychee
+#   .agent/scripts/lint-md.sh  # check all Markdown files with lychee
 #
 # Output is written to: "tmp/agent/markdown_lint_output.log".
 # Exit code matches lychee's exit code.
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OUTPUT_LOG="$REPO_ROOT/tmp/agent/markdown_lint_output.log"
 
 mkdir -p "$REPO_ROOT/tmp/agent"

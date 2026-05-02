@@ -133,7 +133,7 @@ Review target:
 
 After updating any core documentation file, verify:
 
-1. **Links are valid** — `./scripts/run-lint-md.sh` confirms links resolve.
+1. **Links are valid** — `./.agent/scripts/lint-md.sh` confirms links resolve.
 
 2. **No contradictions** — If a rule changed in `CONTRIBUTING.md`, update any
    mirrored guidance in `AGENTS.md` or vice versa.

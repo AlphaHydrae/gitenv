@@ -69,13 +69,13 @@ them to EVERY task, EVERY time.**
 - **🔴 NEVER claim a task is complete without running the required checks.**
   Do not say "tests pass" without showing the actual command output and exit
   code. This is a critical recurring failure mode.
-  - Always run `./scripts/run-tests.sh` for test changes once the wrapper exists.
-  - Always run `./scripts/run-lint.sh` for source changes once the wrapper exists.
-  - Always run `./scripts/run-lint-md.sh` for documentation changes once the wrapper exists.
-  - Always run `./scripts/run-build.sh` to verify compilation once the wrapper exists.
-  - Always run `./scripts/run-format.sh` (or `./scripts/run-format.sh --write`
-    when applying formatting changes) for formatting checks once the wrapper exists.
-  - For migration increments, always run `./scripts/run-coverage.sh` and
+  - Always run `./.agent/scripts/tests.sh` for test changes.
+  - Always run `./.agent/scripts/lint.sh` for source changes.
+  - Always run `./.agent/scripts/lint-md.sh` for documentation changes.
+  - Always run `./.agent/scripts/build.sh` to verify compilation.
+  - Always run `./.agent/scripts/format.sh` (or `./.agent/scripts/format.sh
+--check` to check without modifying) for formatting checks.
+  - For migration increments, always run `./.agent/scripts/coverage.sh` and
     report both previous and current coverage.
   - If coverage decreases significantly, explicitly explain why and document
     follow-up work in [`MIGRATION-INCREMENTS.md`](./MIGRATION-INCREMENTS.md)
@@ -316,37 +316,40 @@ These wrappers run the commands documented in
 
 ### Automated tests
 
-- Always use `./scripts/run-tests.sh` from the repository root.
+- Always use `./.agent/scripts/tests.sh` from the repository root.
 - The script captures full output to `tmp/agent/test_output.log` and prints the
   exit code and a summary tail to stdout.
 
 ### Test coverage
 
-- Use `./scripts/run-coverage.sh` from the repository root for test coverage.
+- Use `./.agent/scripts/coverage.sh` from the repository root for test coverage.
 - The script captures full output to `tmp/agent/coverage_output.log`, prints the
   exit code, and prints the total line coverage when available.
 
 ### Linting
 
-- Use `./scripts/run-lint.sh` from the repository root.
+- Use `./.agent/scripts/lint.sh` from the repository root.
 - The script captures full output to `tmp/agent/lint_output.log` and prints the
   exit code and a summary tail to stdout.
 
 ### Building
 
-- Use `./scripts/run-build.sh` from the repository root when verifying builds.
+- Use `./.agent/scripts/build.sh` from the repository root when verifying
+  builds.
 - The script captures full output to `tmp/agent/build_output.log` and prints the
   exit code and a summary tail to stdout.
 
 ### Format wrapper
 
-- Use `./scripts/run-format.sh` from the repository root for formatting checks.
+- Use `./.agent/scripts/format.sh` from the repository root for formatting
+  checks.
 - The script captures full output to `tmp/agent/format_output.log` and prints
   the exit code and a summary tail to stdout.
 
 ### Markdown lint wrapper
 
-- Use `./scripts/run-lint-md.sh` from the repository root for Markdown linting.
+- Use `./.agent/scripts/lint-md.sh` from the repository root for Markdown
+  linting.
 - The script lints all Markdown files in the project, captures full output to
   `tmp/agent/markdown_lint_output.log`, and prints the exit code plus a summary
   tail to stdout.

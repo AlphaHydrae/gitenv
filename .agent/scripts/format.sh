@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
 #
-# Run Rust build and capture output to "tmp/agent/build_output.log".
+# Run Rust formatting and capture output to "tmp/agent/format_output.log".
+#
+# By default, applies formatting changes. Use --check to check without modifying.
 #
 # Usage:
-#   scripts/run-build.sh      # run cargo build
-#   scripts/run-build.sh --release  # pass build flags
+#   .agent/scripts/format.sh          # apply formatting changes
+#   .agent/scripts/format.sh --check  # check formatting without modifying
 #
-# Output is written to: "tmp/agent/build_output.log".
-# Exit code matches cargo build's exit code.
+# Output is written to: "tmp/agent/format_output.log".
+# Exit code matches cargo fmt's exit code.
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RUST_WORKSPACE="$REPO_ROOT/rust"
-OUTPUT_LOG="$REPO_ROOT/tmp/agent/build_output.log"
+OUTPUT_LOG="$REPO_ROOT/tmp/agent/format_output.log"
 
 mkdir -p "$REPO_ROOT/tmp/agent"
 
@@ -34,12 +36,12 @@ fi
 cd "$RUST_WORKSPACE"
 
 set +e
-if [[ $# -eq 0 ]]; then
-  echo "Running: cargo build" | tee "$OUTPUT_LOG"
-  cargo build 2>&1 | tee -a "$OUTPUT_LOG"
+if [[ "${1:-}" == "--check" ]]; then
+  echo "Running: cargo fmt -- --check" | tee "$OUTPUT_LOG"
+  cargo fmt -- --check 2>&1 | tee -a "$OUTPUT_LOG"
 else
-  echo "Running: cargo build $*" | tee "$OUTPUT_LOG"
-  cargo build "$@" 2>&1 | tee -a "$OUTPUT_LOG"
+  echo "Running: cargo fmt" | tee "$OUTPUT_LOG"
+  cargo fmt 2>&1 | tee -a "$OUTPUT_LOG"
 fi
 
 EXIT_CODE=${PIPESTATUS[0]}

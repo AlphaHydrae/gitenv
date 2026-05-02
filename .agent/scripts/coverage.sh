@@ -3,15 +3,15 @@
 # Run Rust coverage and capture output to "tmp/agent/coverage_output.log".
 #
 # Usage:
-#   scripts/run-coverage.sh               # run coverage summary
-#   scripts/run-coverage.sh --html        # pass through cargo llvm-cov args
+#   .agent/scripts/coverage.sh         # run coverage summary
+#   .agent/scripts/coverage.sh --html  # pass through cargo llvm-cov args
 #
 # Output is written to: "tmp/agent/coverage_output.log".
 # Exit code matches cargo llvm-cov's exit code.
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RUST_WORKSPACE="$REPO_ROOT/rust"
 OUTPUT_LOG="$REPO_ROOT/tmp/agent/coverage_output.log"
 

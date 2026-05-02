@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 #
-# Run Rust formatting checks and capture output to "tmp/agent/format_output.log".
+# Run Rust tests and capture output to "tmp/agent/test_output.log".
 #
 # Usage:
-#   scripts/run-format.sh         # check formatting
-#   scripts/run-format.sh --write # apply formatting changes
+#   .agent/scripts/tests.sh                    # run all tests
+#   .agent/scripts/tests.sh --test cli_output  # pass through cargo test args
 #
-# Output is written to: "tmp/agent/format_output.log".
-# Exit code matches cargo fmt's exit code.
+# Output is written to: "tmp/agent/test_output.log".
+# Exit code matches cargo test's exit code.
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve repository root (script is in .agent/scripts/ subdirectory)
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RUST_WORKSPACE="$REPO_ROOT/rust"
-OUTPUT_LOG="$REPO_ROOT/tmp/agent/format_output.log"
+OUTPUT_LOG="$REPO_ROOT/tmp/agent/test_output.log"
 
 mkdir -p "$REPO_ROOT/tmp/agent"
 
@@ -34,12 +35,12 @@ fi
 cd "$RUST_WORKSPACE"
 
 set +e
-if [[ "${1:-}" == "--write" ]]; then
-  echo "Running: cargo fmt" | tee "$OUTPUT_LOG"
-  cargo fmt 2>&1 | tee -a "$OUTPUT_LOG"
+if [[ $# -eq 0 ]]; then
+  echo "Running: cargo test" | tee "$OUTPUT_LOG"
+  cargo test 2>&1 | tee -a "$OUTPUT_LOG"
 else
-  echo "Running: cargo fmt -- --check" | tee "$OUTPUT_LOG"
-  cargo fmt -- --check 2>&1 | tee -a "$OUTPUT_LOG"
+  echo "Running: cargo test $*" | tee "$OUTPUT_LOG"
+  cargo test "$@" 2>&1 | tee -a "$OUTPUT_LOG"
 fi
 
 EXIT_CODE=${PIPESTATUS[0]}

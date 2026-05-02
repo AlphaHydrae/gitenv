@@ -89,27 +89,27 @@ jobs:
 
       - name: Run test wrapper
         run: |
-          bash ./scripts/run-tests.sh
+          bash ./.agent/scripts/tests.sh
 
       - name: Run coverage wrapper
         run: |
-          bash ./scripts/run-coverage.sh
+          bash ./.agent/scripts/coverage.sh
 
       - name: Run lint wrapper
         run: |
-          bash ./scripts/run-lint.sh
+          bash ./.agent/scripts/lint.sh
 
       - name: Run build wrapper
         run: |
-          bash ./scripts/run-build.sh
+          bash ./.agent/scripts/build.sh
 
       - name: Run format wrapper
         run: |
-          bash ./scripts/run-format.sh
+          bash ./.agent/scripts/format.sh
 
       - name: Run Markdown lint wrapper
         run: |
-          bash ./scripts/run-lint-md.sh
+          bash ./.agent/scripts/lint-md.sh
 
   rust-makefile:
     runs-on: ubuntu-24.04

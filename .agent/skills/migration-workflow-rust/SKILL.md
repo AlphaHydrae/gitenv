@@ -59,26 +59,26 @@ Before starting an increment:
 
 Run these checks from the repository root (in order):
 
-1. **Build** — `./scripts/run-build.sh`
+1. **Build** — `./.agent/scripts/build.sh`
    - Confirms compilation without errors.
    - Output captured in `tmp/agent/build_output.log`.
 
-2. **Tests** — `./scripts/run-tests.sh`
+2. **Tests** — `./.agent/scripts/tests.sh`
    - Confirms all tests pass.
    - Output captured in `tmp/agent/test_output.log`.
 
-3. **Lint** — `./scripts/run-lint.sh`
+3. **Lint** — `./.agent/scripts/lint.sh`
    - Confirms code style and clippy warnings.
    - Output captured in `tmp/agent/lint_output.log`.
 
-4. **Coverage** — `./scripts/run-coverage.sh`
+4. **Coverage** — `./.agent/scripts/coverage.sh`
    - Reports total line coverage before and after.
    - Output captured in `tmp/agent/coverage_output.log`.
    - If coverage decreases by ~0.25 percentage points or more, document
      follow-up work in `MIGRATION-INCREMENTS.md` and/or inline TODO comments.
 
 5. **Documentation** — If any Markdown files changed:
-   - `./scripts/run-lint-md.sh`
+   - `./.agent/scripts/lint-md.sh`
    - Output captured in `tmp/agent/markdown_lint_output.log`.
 
 **Show exit codes and summary output for every check.** Do not claim tests pass
