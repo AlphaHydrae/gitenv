@@ -260,6 +260,12 @@ them to EVERY task, EVERY time.**
   logic.
 - Ensure logging is thorough and configurable by log level when working on
   diagnostics or command execution paths.
+- **🔴 Never use `expect`, `unwrap`, `panic!`, or `unreachable!` in
+  implementation code without explicit human approval.** Every fallible path
+  must propagate a typed `Result` or `Option` to the caller using `?`. If you
+  believe a path is unreachable due to enforced invariants, document that
+  reasoning and return a typed error anyway — do not panic. `expect` and
+  `unwrap` are only acceptable in test code.
 
 ## Agent verification helpers
 

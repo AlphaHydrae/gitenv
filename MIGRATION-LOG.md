@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-02: Add environment-backed config values - Accept explicit required
+  environment declarations and environment-backed source roots, resolve those
+  bindings during planning, and reject missing variables with stable
+  diagnostics.
 - 2026-05-02: Add a deterministic execution plan model - Derive structured,
   side-effect-free execution plans from normalized config and keep plan output
   deterministic across equivalent shorthand and canonical inputs.

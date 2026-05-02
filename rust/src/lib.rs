@@ -1,4 +1,5 @@
 use serde::{Deserialize, Deserializer};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,8 +50,19 @@ pub enum ActionMode {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Source {
-    pub from: String,
+    pub from: SourceRoot,
     pub configs: Vec<ConfigItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub enum SourceRoot {
+    Path(String),
+    Environment {
+        env: String,
+        #[serde(default)]
+        optional: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,6 +115,7 @@ pub struct SelectConfig {
 pub enum ProgramError {
     InvalidConfiguration { message: String },
     ReadConfiguration { path: PathBuf, message: String },
+    MissingEnvironment { vars: Vec<String> },
     UnsupportedConfiguration,
 }
 
@@ -161,12 +174,44 @@ pub fn load_config(path: &Path) -> Result<Config, ProgramError> {
     parse_config(&yaml)
 }
 
-pub fn derive_execution_plan(config: &Config) -> ExecutionPlan {
-    let sources = config
-        .sources
-        .iter()
-        .map(|source| PlannedSource {
-            from: source.from.clone(),
+pub fn derive_execution_plan(config: &Config) -> Result<ExecutionPlan, ProgramError> {
+    let environment = std::env::vars().collect::<BTreeMap<_, _>>();
+
+    derive_execution_plan_with_env(config, &environment)
+}
+
+pub fn derive_execution_plan_with_env(
+    config: &Config,
+    environment: &BTreeMap<String, String>,
+) -> Result<ExecutionPlan, ProgramError> {
+    let mut missing_environment = BTreeSet::new();
+    let mut sources = Vec::new();
+
+    for source in &config.sources {
+        let from = match &source.from {
+            SourceRoot::Path(path) => Some(path.clone()),
+            SourceRoot::Environment {
+                env,
+                optional: false,
+            } => match environment.get(env) {
+                Some(value) => Some(value.clone()),
+                None => {
+                    missing_environment.insert(env.clone());
+                    None
+                }
+            },
+            SourceRoot::Environment {
+                env,
+                optional: true,
+            } => environment.get(env).cloned(),
+        };
+
+        let Some(from) = from else {
+            continue;
+        };
+
+        sources.push(PlannedSource {
+            from,
             actions: source
                 .configs
                 .iter()
@@ -196,13 +241,19 @@ pub fn derive_execution_plan(config: &Config) -> ExecutionPlan {
                     }
                 })
                 .collect(),
-        })
-        .collect();
+        });
+    }
 
-    ExecutionPlan {
+    if !missing_environment.is_empty() {
+        return Err(ProgramError::MissingEnvironment {
+            vars: missing_environment.into_iter().collect(),
+        });
+    }
+
+    Ok(ExecutionPlan {
         repository: config.repository.clone(),
         sources,
-    }
+    })
 }
 
 pub fn run() -> Result<ProgramOutput, ProgramError> {
@@ -216,8 +267,9 @@ mod tests {
     use super::{
         ActionMode, Config, ConfigItem, Defaults, ExecutionPlan, FileConfig, PlannedAction,
         PlannedFileAction, PlannedSelectAction, PlannedSource, ProgramError, SelectConfig, Source,
-        derive_execution_plan, load_config, parse_config, run,
+        SourceRoot, derive_execution_plan_with_env, load_config, parse_config, run,
     };
+    use std::collections::BTreeMap;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -239,7 +291,7 @@ mod tests {
             repository: "~/projects/env".to_string(),
             defaults: Defaults::default(),
             sources: vec![Source {
-                from: ".".to_string(),
+                from: SourceRoot::Path(".".to_string()),
                 configs: vec![
                     ConfigItem::File(FileConfig {
                         file: ".zshrc".to_string(),
@@ -298,7 +350,7 @@ sources:
                 backup_on_overwrite: true,
             },
             sources: vec![Source {
-                from: ".".to_string(),
+                from: SourceRoot::Path(".".to_string()),
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
                     as_name: None,
@@ -386,7 +438,7 @@ sources:
                 backup_on_overwrite: true,
             },
             sources: vec![Source {
-                from: ".".to_string(),
+                from: SourceRoot::Path(".".to_string()),
                 configs: vec![ConfigItem::Select(SelectConfig {
                     dotfiles: true,
                     exclude: vec![".DS_Store".to_string(), ".git".to_string()],
@@ -415,7 +467,7 @@ sources:
             repository: "~/projects/env".to_string(),
             defaults: Defaults::default(),
             sources: vec![Source {
-                from: ".".to_string(),
+                from: SourceRoot::Path(".".to_string()),
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
                     as_name: None,
@@ -464,29 +516,37 @@ sources:
 
     #[test]
     fn derive_a_deterministic_execution_plan_from_a_config() {
-        let yaml = r#"
-version: 1
-repository: ~/projects/env
-defaults:
-  mode: copy
-  to: "~/dest"
-  mkdir: false
-  overwrite: true
-  backup_on_overwrite: false
-sources:
-  - from: "."
-    configs:
-      - file: .zshrc
-      - file: .tmux
-        as: .tmux.conf
-      - select:
-          dotfiles: true
-          exclude:
-            - .git
-"#;
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Copy,
+                to: "~/dest".to_string(),
+                mkdir: false,
+                overwrite: true,
+                backup_on_overwrite: false,
+            },
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                configs: vec![
+                    ConfigItem::File(FileConfig {
+                        file: ".zshrc".to_string(),
+                        as_name: None,
+                    }),
+                    ConfigItem::File(FileConfig {
+                        file: ".tmux".to_string(),
+                        as_name: Some(".tmux.conf".to_string()),
+                    }),
+                    ConfigItem::Select(SelectConfig {
+                        dotfiles: true,
+                        exclude: vec![".git".to_string()],
+                    }),
+                ],
+            }],
+        };
 
-        let config = parse_config(yaml).expect("config should parse for execution planning");
-        let plan = derive_execution_plan(&config);
+        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+            .expect("config should produce an execution plan");
 
         let expected = ExecutionPlan {
             repository: "~/projects/env".to_string(),
@@ -525,6 +585,159 @@ sources:
         };
 
         assert_eq!(plan, expected);
+    }
+
+    #[test]
+    fn accept_environment_backed_source_roots() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from:
+      env: PRIVATE_ENV_DIR
+    configs:
+      - file: .zshrc
+"#;
+
+        let config =
+            parse_config(yaml).expect("config should parse with an environment-backed source root");
+
+        let expected = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            sources: vec![Source {
+                from: SourceRoot::Environment {
+                    env: "PRIVATE_ENV_DIR".to_string(),
+                    optional: false,
+                },
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                })],
+            }],
+        };
+
+        assert_eq!(config, expected);
+    }
+
+    #[test]
+    fn resolve_environment_backed_sources_during_planning() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Copy,
+                to: "~/.config".to_string(),
+                mkdir: false,
+                overwrite: true,
+                backup_on_overwrite: false,
+            },
+            sources: vec![Source {
+                from: SourceRoot::Environment {
+                    env: "PRIVATE_ENV_DIR".to_string(),
+                    optional: false,
+                },
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".secrets".to_string(),
+                    as_name: None,
+                })],
+            }],
+        };
+        let environment = BTreeMap::from([(
+            "PRIVATE_ENV_DIR".to_string(),
+            "~/projects/private-env".to_string(),
+        )]);
+
+        let plan = derive_execution_plan_with_env(&config, &environment)
+            .expect("planning should resolve the environment-backed source");
+
+        let expected = ExecutionPlan {
+            repository: "~/projects/env".to_string(),
+            sources: vec![PlannedSource {
+                from: "~/projects/private-env".to_string(),
+                actions: vec![PlannedAction::File(PlannedFileAction {
+                    file: ".secrets".to_string(),
+                    as_name: ".secrets".to_string(),
+                    mode: ActionMode::Copy,
+                    to: "~/.config".to_string(),
+                    mkdir: false,
+                    overwrite: true,
+                    backup_on_overwrite: false,
+                })],
+            }],
+        };
+
+        assert_eq!(plan, expected);
+    }
+
+    #[test]
+    fn reject_missing_environment_variables_before_planning() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            sources: vec![
+                Source {
+                    from: SourceRoot::Environment {
+                        env: "PRIVATE_ENV_DIR".to_string(),
+                        optional: false,
+                    },
+                    configs: vec![ConfigItem::File(FileConfig {
+                        file: ".zshrc".to_string(),
+                        as_name: None,
+                    })],
+                },
+                Source {
+                    from: SourceRoot::Environment {
+                        env: "SSH_KEY_DIR".to_string(),
+                        optional: false,
+                    },
+                    configs: vec![ConfigItem::File(FileConfig {
+                        file: ".ssh_config".to_string(),
+                        as_name: None,
+                    })],
+                },
+            ],
+        };
+
+        let error = derive_execution_plan_with_env(&config, &BTreeMap::new())
+            .expect_err("planning should fail when environment variables are missing");
+
+        assert_eq!(
+            error,
+            ProgramError::MissingEnvironment {
+                vars: vec!["PRIVATE_ENV_DIR".to_string(), "SSH_KEY_DIR".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn skip_optional_environment_backed_sources_when_the_variable_is_unset() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            sources: vec![Source {
+                from: SourceRoot::Environment {
+                    env: "PRIVATE_ENV_DIR".to_string(),
+                    optional: true,
+                },
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+            .expect("planning should succeed when an optional environment-backed source is unset");
+
+        assert_eq!(plan.repository, "~/projects/env");
+        assert!(
+            plan.sources.is_empty(),
+            "unset optional sources should be omitted from the plan"
+        );
     }
 
     #[test]

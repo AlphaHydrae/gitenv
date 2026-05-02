@@ -27,23 +27,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 8: Add environment-backed config values
-
-Why this increment exists:
-
-- Existing Ruby configs rely on dynamic behavior that currently has no explicit
-  representation in the Rust canonical model.
-- Environment-backed source roots and explicit required environment variables
-  are the smallest high-impact slice of that gap.
-
-Review target:
-
-- Add schema/model support for environment-backed values and required
-  environment declarations.
-- Resolve environment bindings deterministically during planning.
-- Add parser and planning tests for successful resolution and missing-required
-  diagnostics.
-
 ### Increment 9: Add declarative filesystem guards
 
 Why this increment exists:

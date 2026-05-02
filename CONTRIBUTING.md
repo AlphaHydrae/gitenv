@@ -67,6 +67,16 @@ Business modules must not print directly to terminal output.
 - In unit tests, use fakes/mocks for injectable dependencies.
 - Keep runtime composition in a clear composition root at the CLI boundary.
 
+## Rust Code Guidelines
+
+- Do not use `expect`, `unwrap`, `panic!`, or `unreachable!` in implementation
+  code (non-test code). Every failure path must be represented as a typed
+  `Result` or `Option` and propagated to the caller. Use `?` for propagation.
+  If a path is genuinely unreachable due to invariants already enforced
+  elsewhere, document why and return a typed error instead of panicking.
+- `expect` and `unwrap` are acceptable in test code only, where a panic
+  produces a clear failure at the test site.
+
 ## Testing Guidelines
 
 - Write tests in behavior-focused language.
