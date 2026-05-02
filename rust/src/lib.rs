@@ -7,6 +7,7 @@ pub struct ProgramOutput {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub version: u32,
     pub repository: String,
@@ -17,6 +18,7 @@ pub struct Config {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default)]
+#[serde(deny_unknown_fields)]
 pub struct Defaults {
     pub mode: ActionMode,
     pub to: String,
@@ -45,6 +47,7 @@ pub enum ActionMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Source {
     pub from: String,
     pub configs: Vec<ConfigItem>,
@@ -76,6 +79,7 @@ impl<'de> Deserialize<'de> for ConfigItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FileConfig {
     pub file: String,
     #[serde(rename = "as")]
@@ -83,6 +87,7 @@ pub struct FileConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SelectConfig {
     pub dotfiles: bool,
     pub exclude: Vec<String>,
@@ -349,6 +354,60 @@ sources:
             error,
             ProgramError::InvalidConfiguration { message }
                 if message.contains("failed to parse config YAML")
+        ));
+    }
+
+    #[test]
+    fn reject_a_config_with_an_unknown_top_level_key() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+defaults:
+  mode: symlink
+  to: "~"
+  mkdir: true
+  overwrite: false
+  backup_on_overwrite: true
+sources:
+  - from: "."
+    configs:
+      - file: .zshrc
+unknown: true
+"#;
+
+        let error = parse_config(yaml).expect_err("config should fail on unknown top-level key");
+
+        assert!(matches!(
+            error,
+            ProgramError::InvalidConfiguration { message }
+                if message.contains("unknown field `unknown`")
+        ));
+    }
+
+    #[test]
+    fn reject_a_config_with_an_unknown_nested_key() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+defaults:
+  mode: symlink
+  to: "~"
+  mkdir: true
+  overwrite: false
+  backup_on_overwrite: true
+  extra: true
+sources:
+  - from: "."
+    configs:
+      - file: .zshrc
+"#;
+
+        let error = parse_config(yaml).expect_err("config should fail on unknown nested key");
+
+        assert!(matches!(
+            error,
+            ProgramError::InvalidConfiguration { message }
+                if message.contains("unknown field `extra`")
         ));
     }
 

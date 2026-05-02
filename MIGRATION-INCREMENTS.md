@@ -18,18 +18,6 @@ are not forgotten.
 
 ## Current Backlog
 
-### Increment 5: Reject unknown keys with clear errors
-
-Why this increment exists:
-
-- Enforce the schema-first boundary and avoid silent misconfiguration.
-- Make config errors actionable before more behavior depends on them.
-
-Review target:
-
-- Unknown top-level and nested keys are rejected.
-- Error messages are readable and stable enough to test.
-
 ### Increment 6: Normalize shorthand into the canonical model
 
 Why this increment exists:

@@ -173,6 +173,7 @@ them to EVERY task, EVERY time.**
 - For migration log entries, describe what changed. Do not add explicit
   coverage-outcome narration when the entry already states the added tests or
   behavior work.
+- Write migration log entries in present tense.
 - Maintain the active next-step backlog in
   [`MIGRATION-INCREMENTS.md`](./MIGRATION-INCREMENTS.md) (living plan only).
   Keep it focused on immediate agreed increments.
@@ -192,8 +193,10 @@ them to EVERY task, EVERY time.**
      bullet points in the body when that improves readability.
   6. Focus the body on product/code behavior changes, not expected maintenance
      steps.
-  7. Do not mention routine test additions unless the change introduces new
-     test utilities, test infrastructure, or testing tools.
+  7. Do not mention routine test additions for a feature change when the body
+     already states the feature/behavior change. Mention tests only when tests
+     are the primary deliverable, or when the change introduces new test
+     utilities, test infrastructure, or testing tools.
   8. Do not mention routine migration log/backlog updates unless those
      documentation changes are themselves the primary deliverable.
   9. Do not mention normal repository-upkeep tasks in suggested commit
