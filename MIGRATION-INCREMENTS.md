@@ -75,7 +75,27 @@ Review target:
 - Shared resolved-option fields are factored into one reusable plan type to
   reduce duplication across planned action variants.
 
-### Increment 12: Inspect one narrow symlink status case
+### Increment 12: Split planning/config code for readability
+
+Why this increment exists:
+
+- `rust/src/lib.rs` currently combines library API surface, config parsing,
+  and execution-plan derivation in one large file.
+- The file has no explanatory comments for non-trivial contracts and planning
+  logic, which increases onboarding and review cost.
+- Splitting and documenting this layer before more feature increments keeps the
+  migration maintainable while preserving behavior.
+
+Review target:
+
+- Split parsing/config model code and planning derivation code into focused
+  modules that match architecture boundaries.
+- Keep `src/lib.rs` as a thin public API/re-export surface.
+- Add concise doc comments on non-obvious public types/functions and targeted
+  inline comments only for non-trivial planning branches.
+- Preserve library/CLI behavior and keep coverage at least stable.
+
+### Increment 13: Inspect one narrow symlink status case
 
 Why this increment exists:
 
@@ -87,7 +107,7 @@ Review target:
 - A single symlink status workflow works against temporary directories.
 - Status results are returned as structured data, not terminal output.
 
-### Increment 13: Wire the default CLI inspection flow
+### Increment 14: Wire the default CLI inspection flow
 
 Why this increment exists:
 

@@ -36,9 +36,21 @@ them to EVERY task, EVERY time.**
 - **🔴 GUIDELINES MUST BE APPLIED DURING CHANGES, NOT AFTER.** Keep the relevant
   contribution guideline section open while editing and review the exact rule
   before each change.
-- **🔴 THIS IS DOUBLY IMPORTANT FOR TEST CODE.** Test files are behavioral
-  documentation for humans and agents; violating test guidelines is a critical
-  quality failure.
+- **🔴 PROACTIVELY SURFACE MAINTAINABILITY DEBT.** Do not wait for a human to
+  ask about readability issues. If a file grows large, mixes multiple concerns,
+  or lacks required explanatory documentation, call it out immediately and
+  propose either (a) a scoped increment now or (b) a clearly recorded backlog
+  item.
+- **🔴 READABILITY/DOCUMENTATION GATE IS MANDATORY FOR RUST INCREMENTS.** During
+  each increment review, explicitly check whether changed files still have
+  coherent responsibility boundaries and sufficient comments per [Documentation
+  expectations](./CONTRIBUTING.md#documentation-expectations). If not, stop and
+  either include the cleanup in scope or record the deferred cleanup in
+  [`MIGRATION-INCREMENTS.md`](./MIGRATION-INCREMENTS.md) before claiming
+  completion.
+- **🔴 GUIDELINES ARE DOUBLY IMPORTANT FOR TEST CODE.** Test files are
+  behavioral documentation for humans and agents; violating test guidelines is a
+  critical quality failure.
 - **🔴 TEST-NAMING GATE IS MANDATORY BEFORE ANY TEST EDIT.** Before writing or
   changing any test code, re-read [test code
   guidelines](./CONTRIBUTING.md#test-code-guidelines) and [spec description
