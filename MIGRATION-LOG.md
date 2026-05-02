@@ -11,6 +11,34 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-02: Move parser-focused tests into config.rs and document config API
+  - Relocate parse/load/guard/include/source-root/item-override parsing tests
+  from `rust/src/plan.rs` into `rust/src/config.rs` so parser behavior is
+  tested alongside parser code; keep planning-behavior tests in `plan.rs`.
+  Add doc comments to non-obvious config public models and parsing functions.
+- 2026-05-02: Add doc comments to plan.rs public types and functions - Add
+  concise doc comments to all public types (`ConflictPolicy`, `ExecutionPlan`,
+  `PlannedSource`, `PlannedAction`, `PlannedFileAction`, `PlannedSelectAction`)
+  and public entry-point functions (`derive_execution_plan`,
+  `derive_execution_plan_with_env`).
+- 2026-05-02: Review and fix plan.rs test quality - Rename three tests that
+  violated guidelines (`reject_missing_required_includes`,
+  `each_included_configs_defaults_apply_only_to_its_own_sources`,
+  `parse_error_in_included_config_propagates_immediately`); add partial-assertion
+  justification comment to `resolve_env_backed_include_paths_from_environment`.
+- 2026-05-02: Move planning and include tests into the plan module - Migrate all
+  planning, source-root, guard, include-parsing, include-planning, and
+  item-override tests from `rust/src/lib.rs` into `rust/src/plan.rs`; reduce
+  `rust/src/lib.rs` to a single `show_the_default_message` test; coverage
+  stays at 98.13%.
+- 2026-05-02: Move core config tests into the config module - Migrate default,
+  canonical-shape, load-from-file, and shorthand/normalization parsing tests
+  from `rust/src/lib.rs` into `rust/src/config.rs` so config behavior coverage
+  lives next to parsing/model code while preserving test behavior and coverage.
+- 2026-05-02: Split config and planner code into focused modules - Move
+  configuration model/parsing into `rust/src/config.rs` and planning
+  derivation/types into `rust/src/plan.rs`, keep `rust/src/lib.rs` as a thin
+  public re-export surface, and preserve existing behavior and API shape.
 - 2026-05-02: Support per-config-item option overrides - Add optional `mode`,
   `to`, `mkdir`, `overwrite`, and `backup_on_overwrite` override fields to
   `FileConfig` and `SelectConfig`; introduce `ResolvedOptions` to hold shared

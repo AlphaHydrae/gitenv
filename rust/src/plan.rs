@@ -1,0 +1,1844 @@
+use crate::ProgramError;
+use crate::config::{ActionMode, Config, ConfigItem, Defaults, Guard, Include, SourceRoot};
+use crate::load_config;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+
+/// Determines what the executor does when the destination file already exists.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConflictPolicy {
+    /// Leave the destination untouched and skip the action.
+    Skip,
+    /// Overwrite the destination file without keeping a backup.
+    Overwrite,
+    /// Overwrite the destination file after saving a backup copy.
+    OverwriteWithBackup,
+}
+
+/// Resolved execution options for a planned action, derived from the global
+/// defaults merged with any source-level and item-level overrides.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedOptions {
+    pub mode: ActionMode,
+    pub to: String,
+    pub mkdir: bool,
+    pub conflict_policy: ConflictPolicy,
+}
+
+/// The fully resolved set of actions that the executor should carry out.
+///
+/// Produced by `derive_execution_plan` and its variants after all config
+/// sources and transitive includes have been resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutionPlan {
+    /// Canonical path to the repository root (from the top-level config).
+    pub repository: String,
+    /// Ordered list of sources with their resolved actions.
+    pub sources: Vec<PlannedSource>,
+}
+
+/// A resolved source directory together with the actions to be run from it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedSource {
+    /// Resolved filesystem path to the source directory.
+    pub from: String,
+    pub actions: Vec<PlannedAction>,
+}
+
+/// A single resolved action to be executed against a source directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlannedAction {
+    /// Copy or link a specific named file.
+    File(PlannedFileAction),
+    /// Copy or link all matching files from the source directory.
+    Select(PlannedSelectAction),
+}
+
+/// Resolved action that operates on a single named file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedFileAction {
+    /// Source-relative filename to operate on.
+    pub file: String,
+    /// Destination filename; defaults to `file` when no `as` override is set.
+    pub as_name: String,
+    pub options: ResolvedOptions,
+}
+
+/// Resolved action that operates on a glob-selected set of files.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedSelectAction {
+    /// When `true`, dotfiles (names starting with `.`) are included.
+    pub dotfiles: bool,
+    /// Filenames explicitly excluded from selection.
+    pub exclude: Vec<String>,
+    pub options: ResolvedOptions,
+}
+
+/// Derives an execution plan from `config` using the real process environment
+/// and real filesystem access.
+///
+/// This is the primary entry point for production use.
+pub fn derive_execution_plan(config: &Config) -> Result<ExecutionPlan, ProgramError> {
+    let environment = std::env::vars().collect::<BTreeMap<_, _>>();
+    derive_execution_plan_with_env(config, &environment)
+}
+
+/// Like `derive_execution_plan` but accepts an explicit environment map.
+///
+/// Useful in tests that need to control environment variables without mutating
+/// the real process environment.
+pub fn derive_execution_plan_with_env(
+    config: &Config,
+    environment: &BTreeMap<String, String>,
+) -> Result<ExecutionPlan, ProgramError> {
+    derive_execution_plan_with_env_and_fs(config, environment, &|path| {
+        std::fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false)
+    })
+}
+
+/// Core planning function. `is_directory` is injected so tests can evaluate
+/// guards without touching the real filesystem.
+///
+/// Delegates to `derive_execution_plan_with_injectables` with the real
+/// file-reader so include resolution works against actual config files.
+pub fn derive_execution_plan_with_env_and_fs(
+    config: &Config,
+    environment: &BTreeMap<String, String>,
+    is_directory: &impl Fn(&str) -> bool,
+) -> Result<ExecutionPlan, ProgramError> {
+    derive_execution_plan_with_injectables(config, None, environment, is_directory, &load_config)
+}
+
+/// Fully injectable planning function used by tests to exercise include
+/// resolution without writing real config files.
+///
+/// `config_path` is the canonical path of the root config file, used to seed
+/// the cycle-detection stack. Pass `None` when there is no file on disk (e.g.
+/// configs built in tests via `parse_config`).
+///
+/// `read_config_file` is called once per include path. Tests supply a closure
+/// that returns pre-parsed configs from an in-memory map.
+pub fn derive_execution_plan_with_injectables(
+    config: &Config,
+    config_path: Option<&Path>,
+    environment: &BTreeMap<String, String>,
+    is_directory: &impl Fn(&str) -> bool,
+    read_config_file: &impl Fn(&Path) -> Result<Config, ProgramError>,
+) -> Result<ExecutionPlan, ProgramError> {
+    let mut missing_env: BTreeSet<String> = BTreeSet::new();
+    let mut missing_files: BTreeSet<PathBuf> = BTreeSet::new();
+    // in_flight tracks the ancestor chain for cycle detection; seed with the
+    // root config path so a self-referencing include is caught.
+    let mut in_flight: Vec<PathBuf> = config_path
+        .map(|p| vec![p.to_path_buf()])
+        .unwrap_or_default();
+    let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
+
+    let sources = plan_sources_recursively(
+        config,
+        environment,
+        is_directory,
+        read_config_file,
+        &mut in_flight,
+        &mut seen,
+        &mut missing_env,
+        &mut missing_files,
+    )?;
+
+    if !missing_env.is_empty() {
+        return Err(ProgramError::MissingEnvironment {
+            vars: missing_env.into_iter().collect(),
+        });
+    }
+
+    if !missing_files.is_empty() {
+        return Err(ProgramError::IncludeNotFound {
+            paths: missing_files.into_iter().collect(),
+        });
+    }
+
+    Ok(ExecutionPlan {
+        repository: config.repository.clone(),
+        sources,
+    })
+}
+
+/// Recursively plans sources for one config and all its transitive includes.
+///
+/// Returns the config's own planned sources followed by each include's planned
+/// sources in declaration order (includes-after ordering: the including file's
+/// sources always appear before the included ones).
+///
+/// Errors:
+/// - `IncludeCycle`: returned immediately when a path already in the ancestor
+///   chain is encountered again. The returned `cycle` field contains the full
+///   repeated chain. This is a structural error that cannot be recovered from.
+/// - `MissingEnvironment` and `IncludeNotFound` diagnostics are collected into
+///   `missing_env` and `missing_files` and handled by the caller after the
+///   full tree has been walked.
+#[allow(clippy::too_many_arguments)]
+fn plan_sources_recursively(
+    config: &Config,
+    environment: &BTreeMap<String, String>,
+    is_directory: &impl Fn(&str) -> bool,
+    read_config_file: &impl Fn(&Path) -> Result<Config, ProgramError>,
+    in_flight: &mut Vec<PathBuf>,
+    seen: &mut BTreeSet<PathBuf>,
+    missing_env: &mut BTreeSet<String>,
+    missing_files: &mut BTreeSet<PathBuf>,
+) -> Result<Vec<PlannedSource>, ProgramError> {
+    // Plan this config's own sources first (includes-after ordering).
+    let mut own_sources = Vec::new();
+    for source in &config.sources {
+        let from = match &source.from {
+            SourceRoot::Path(path) => Some(path.clone()),
+            SourceRoot::ExplicitPath { path } => Some(path.clone()),
+            SourceRoot::Environment {
+                env,
+                optional: false,
+            } => match environment.get(env) {
+                Some(value) => Some(value.clone()),
+                None => {
+                    missing_env.insert(env.clone());
+                    None
+                }
+            },
+            SourceRoot::Environment {
+                env,
+                optional: true,
+            } => environment.get(env).cloned(),
+        };
+
+        let Some(from) = from else {
+            continue;
+        };
+
+        // Source-level `to` overrides the global default for all items in this source.
+        let source_to = source
+            .to
+            .as_deref()
+            .unwrap_or(&config.defaults.to)
+            .to_string();
+
+        // Evaluate the guard if present. A false guard skips the entire source.
+        if let Some(guard) = &source.guard {
+            let satisfied = match guard {
+                Guard::ToExists => is_directory(&source_to),
+                Guard::DirectoryExists(path) => is_directory(path),
+            };
+            if !satisfied {
+                continue;
+            }
+        }
+
+        let actions = source
+            .configs
+            .iter()
+            .map(|item| match item {
+                ConfigItem::File(file_config) => {
+                    let options = resolve_item_options(
+                        &config.defaults,
+                        &source_to,
+                        file_config.mode.as_ref(),
+                        file_config.to.as_deref(),
+                        file_config.mkdir,
+                        file_config.overwrite,
+                        file_config.backup_on_overwrite,
+                    )?;
+                    Ok(PlannedAction::File(PlannedFileAction {
+                        file: file_config.file.clone(),
+                        as_name: file_config
+                            .as_name
+                            .clone()
+                            .unwrap_or_else(|| file_config.file.clone()),
+                        options,
+                    }))
+                }
+                ConfigItem::Select(select_config) => {
+                    let options = resolve_item_options(
+                        &config.defaults,
+                        &source_to,
+                        select_config.mode.as_ref(),
+                        select_config.to.as_deref(),
+                        select_config.mkdir,
+                        select_config.overwrite,
+                        select_config.backup_on_overwrite,
+                    )?;
+                    Ok(PlannedAction::Select(PlannedSelectAction {
+                        dotfiles: select_config.dotfiles,
+                        exclude: select_config.exclude.clone(),
+                        options,
+                    }))
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        own_sources.push(PlannedSource { from, actions });
+    }
+
+    // Resolve and plan each include, appending their sources after own sources.
+    let mut included_sources = Vec::new();
+    for include in &config.includes {
+        let (include_path, optional) = match include {
+            Include::Path { path, optional } => (Some(PathBuf::from(path)), *optional),
+            Include::Environment { env, optional } => match environment.get(env) {
+                Some(value) => (Some(PathBuf::from(value)), *optional),
+                None if *optional => (None, true),
+                None => {
+                    missing_env.insert(env.clone());
+                    (None, false)
+                }
+            },
+        };
+
+        let Some(include_path) = include_path else {
+            continue;
+        };
+
+        // Skip already-processed includes (dedup across the whole include tree).
+        if seen.contains(&include_path) {
+            continue;
+        }
+
+        // A path already in the ancestor chain means a cycle.
+        if let Some(start) = in_flight.iter().position(|path| path == &include_path) {
+            let mut cycle = in_flight[start..].to_vec();
+            cycle.push(include_path.clone());
+            return Err(ProgramError::IncludeCycle { cycle });
+        }
+
+        // Attempt to load the included config file.
+        let included_config = match read_config_file(&include_path) {
+            Ok(c) => c,
+            // Optional includes are silently skipped when the file is missing.
+            Err(ProgramError::ReadConfiguration { .. }) if optional => {
+                seen.insert(include_path);
+                continue;
+            }
+            // Required includes that cannot be read are collected for the
+            // caller to surface as a single IncludeNotFound error.
+            Err(ProgramError::ReadConfiguration { .. }) => {
+                missing_files.insert(include_path);
+                continue;
+            }
+            // Parse errors and other structural failures are propagated
+            // immediately - they indicate a malformed config, not a
+            // missing file.
+            Err(e) => return Err(e),
+        };
+
+        // Push to in_flight before recursing to make this path visible to
+        // cycle detection in the subtree. Seen is updated only after full
+        // processing completes so that in-flight ancestors are never mistaken
+        // for already-finished (deduplicated) nodes.
+        in_flight.push(include_path.clone());
+
+        let sub_sources = plan_sources_recursively(
+            &included_config,
+            environment,
+            is_directory,
+            read_config_file,
+            in_flight,
+            seen,
+            missing_env,
+            missing_files,
+        )?;
+
+        in_flight.pop();
+        // Mark as seen after full processing so sibling branches that
+        // reference the same path are deduplicated without re-processing.
+        seen.insert(include_path);
+
+        included_sources.extend(sub_sources);
+    }
+
+    own_sources.extend(included_sources);
+    Ok(own_sources)
+}
+
+/// Maps the resolved `overwrite` and `backup_on_overwrite` boolean flags to the
+/// corresponding `ConflictPolicy` variant.
+fn resolve_conflict_policy(overwrite: bool, backup_on_overwrite: bool) -> ConflictPolicy {
+    if !overwrite {
+        ConflictPolicy::Skip
+    } else if backup_on_overwrite {
+        ConflictPolicy::OverwriteWithBackup
+    } else {
+        ConflictPolicy::Overwrite
+    }
+}
+
+/// Resolves execution options for a single config item by merging item-level
+/// overrides on top of the inherited defaults and source-level destination.
+///
+/// Returns `InvalidConfiguration` immediately when the item explicitly sets
+/// both `overwrite: false` and `backup_on_overwrite: true`. This combination
+/// is meaningless (backup is irrelevant when overwrite is disabled) and most
+/// likely indicates a config mistake.
+///
+/// Inherited defaults are never rejected: an item that falls back to the
+/// global `overwrite: false, backup_on_overwrite: true` default resolves to
+/// `ConflictPolicy::Skip` without error.
+fn resolve_item_options(
+    defaults: &Defaults,
+    source_to: &str,
+    mode: Option<&ActionMode>,
+    to: Option<&str>,
+    mkdir: Option<bool>,
+    overwrite: Option<bool>,
+    backup_on_overwrite: Option<bool>,
+) -> Result<ResolvedOptions, ProgramError> {
+    if overwrite == Some(false) && backup_on_overwrite == Some(true) {
+        return Err(ProgramError::InvalidConfiguration {
+            message: "item-level `overwrite: false` with `backup_on_overwrite: true` is not a valid combination"
+                .to_string(),
+        });
+    }
+    Ok(ResolvedOptions {
+        mode: mode.unwrap_or(&defaults.mode).clone(),
+        to: to.unwrap_or(source_to).to_string(),
+        mkdir: mkdir.unwrap_or(defaults.mkdir),
+        conflict_policy: resolve_conflict_policy(
+            overwrite.unwrap_or(defaults.overwrite),
+            backup_on_overwrite.unwrap_or(defaults.backup_on_overwrite),
+        ),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ConflictPolicy, ExecutionPlan, PlannedAction, PlannedFileAction, PlannedSelectAction,
+        PlannedSource, ResolvedOptions, derive_execution_plan, derive_execution_plan_with_env,
+        derive_execution_plan_with_env_and_fs, derive_execution_plan_with_injectables,
+    };
+    use crate::{
+        ActionMode, Config, ConfigItem, Defaults, FileConfig, Guard, Include, ProgramError,
+        SelectConfig, Source, SourceRoot,
+    };
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+
+    // ---------------------------------------------------------------------------
+    // Helper constructors
+    // ---------------------------------------------------------------------------
+
+    /// Returns a minimal config with one file source rooted at `from`.
+    fn single_source_config(from: &str, file: &str) -> Config {
+        Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            sources: vec![Source {
+                from: SourceRoot::Path(from.to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: file.to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+            includes: vec![],
+        }
+    }
+
+    /// Minimal planned file action with symlink/skip defaults pointing to `~`.
+    fn expected_file_action(file: &str) -> PlannedAction {
+        PlannedAction::File(PlannedFileAction {
+            file: file.to_string(),
+            as_name: file.to_string(),
+            options: ResolvedOptions {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                conflict_policy: ConflictPolicy::Skip,
+            },
+        })
+    }
+
+    // ---------------------------------------------------------------------------
+    // Execution plan derivation
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn derive_a_deterministic_execution_plan_from_a_config() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Copy,
+                to: "~/dest".to_string(),
+                mkdir: false,
+                overwrite: true,
+                backup_on_overwrite: false,
+            },
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![
+                    ConfigItem::File(FileConfig {
+                        file: ".zshrc".to_string(),
+                        as_name: None,
+                        mode: None,
+                        to: None,
+                        mkdir: None,
+                        overwrite: None,
+                        backup_on_overwrite: None,
+                    }),
+                    ConfigItem::File(FileConfig {
+                        file: ".tmux".to_string(),
+                        as_name: Some(".tmux.conf".to_string()),
+                        mode: None,
+                        to: None,
+                        mkdir: None,
+                        overwrite: None,
+                        backup_on_overwrite: None,
+                    }),
+                    ConfigItem::Select(SelectConfig {
+                        dotfiles: true,
+                        exclude: vec![".git".to_string()],
+                        mode: None,
+                        to: None,
+                        mkdir: None,
+                        overwrite: None,
+                        backup_on_overwrite: None,
+                    }),
+                ],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+            .expect("config should produce an execution plan");
+
+        let expected = ExecutionPlan {
+            repository: "~/projects/env".to_string(),
+            sources: vec![PlannedSource {
+                from: ".".to_string(),
+                actions: vec![
+                    PlannedAction::File(PlannedFileAction {
+                        file: ".zshrc".to_string(),
+                        as_name: ".zshrc".to_string(),
+                        options: ResolvedOptions {
+                            mode: ActionMode::Copy,
+                            to: "~/dest".to_string(),
+                            mkdir: false,
+                            conflict_policy: ConflictPolicy::Overwrite,
+                        },
+                    }),
+                    PlannedAction::File(PlannedFileAction {
+                        file: ".tmux".to_string(),
+                        as_name: ".tmux.conf".to_string(),
+                        options: ResolvedOptions {
+                            mode: ActionMode::Copy,
+                            to: "~/dest".to_string(),
+                            mkdir: false,
+                            conflict_policy: ConflictPolicy::Overwrite,
+                        },
+                    }),
+                    PlannedAction::Select(PlannedSelectAction {
+                        dotfiles: true,
+                        exclude: vec![".git".to_string()],
+                        options: ResolvedOptions {
+                            mode: ActionMode::Copy,
+                            to: "~/dest".to_string(),
+                            mkdir: false,
+                            conflict_policy: ConflictPolicy::Overwrite,
+                        },
+                    }),
+                ],
+            }],
+        };
+
+        assert_eq!(plan, expected);
+    }
+
+    #[test]
+    fn derive_execution_plan_uses_real_environment_and_filesystem() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                overwrite: false,
+                backup_on_overwrite: false,
+            },
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: Some(Guard::DirectoryExists(".".to_string())),
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan(&config)
+            .expect("planning should succeed when the current directory exists");
+
+        assert_eq!(plan.repository, "~/projects/env");
+        assert_eq!(plan.sources.len(), 1);
+        assert_eq!(plan.sources[0].from, ".");
+        assert_eq!(
+            plan.sources[0].actions,
+            vec![expected_file_action(".zshrc")]
+        );
+    }
+
+    #[test]
+    fn resolve_environment_backed_sources_during_planning() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Copy,
+                to: "~/.config".to_string(),
+                mkdir: false,
+                overwrite: true,
+                backup_on_overwrite: false,
+            },
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Environment {
+                    env: "PRIVATE_ENV_DIR".to_string(),
+                    optional: false,
+                },
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".secrets".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+        let environment = BTreeMap::from([(
+            "PRIVATE_ENV_DIR".to_string(),
+            "~/projects/private-env".to_string(),
+        )]);
+
+        let plan = derive_execution_plan_with_env(&config, &environment)
+            .expect("planning should resolve the environment-backed source");
+
+        let expected = ExecutionPlan {
+            repository: "~/projects/env".to_string(),
+            sources: vec![PlannedSource {
+                from: "~/projects/private-env".to_string(),
+                actions: vec![PlannedAction::File(PlannedFileAction {
+                    file: ".secrets".to_string(),
+                    as_name: ".secrets".to_string(),
+                    options: ResolvedOptions {
+                        mode: ActionMode::Copy,
+                        to: "~/.config".to_string(),
+                        mkdir: false,
+                        conflict_policy: ConflictPolicy::Overwrite,
+                    },
+                })],
+            }],
+        };
+
+        assert_eq!(plan, expected);
+    }
+
+    #[test]
+    fn plan_explicit_path_source_roots_as_literal_paths() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::ExplicitPath {
+                    path: "$PRIVATE_ENV_DIR".to_string(),
+                },
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+            .expect("planning should keep explicit path source roots as-is");
+
+        assert_eq!(plan.sources.len(), 1);
+        assert_eq!(plan.sources[0].from, "$PRIVATE_ENV_DIR");
+    }
+
+    #[test]
+    fn collapse_backup_preference_when_overwrite_is_disabled_in_planning() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                overwrite: false,
+                backup_on_overwrite: true,
+            },
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+            .expect("planning should collapse overwrite-disabled defaults to skip");
+
+        let expected = ExecutionPlan {
+            repository: "~/projects/env".to_string(),
+            sources: vec![PlannedSource {
+                from: ".".to_string(),
+                actions: vec![PlannedAction::File(PlannedFileAction {
+                    file: ".zshrc".to_string(),
+                    as_name: ".zshrc".to_string(),
+                    options: ResolvedOptions {
+                        mode: ActionMode::Symlink,
+                        to: "~".to_string(),
+                        mkdir: true,
+                        conflict_policy: ConflictPolicy::Skip,
+                    },
+                })],
+            }],
+        };
+
+        assert_eq!(plan, expected);
+    }
+
+    #[test]
+    fn reject_missing_environment_variables_before_planning() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![
+                Source {
+                    from: SourceRoot::Environment {
+                        env: "PRIVATE_ENV_DIR".to_string(),
+                        optional: false,
+                    },
+                    to: None,
+                    guard: None,
+                    configs: vec![ConfigItem::File(FileConfig {
+                        file: ".zshrc".to_string(),
+                        as_name: None,
+                        mode: None,
+                        to: None,
+                        mkdir: None,
+                        overwrite: None,
+                        backup_on_overwrite: None,
+                    })],
+                },
+                Source {
+                    from: SourceRoot::Environment {
+                        env: "SSH_KEY_DIR".to_string(),
+                        optional: false,
+                    },
+                    to: None,
+                    guard: None,
+                    configs: vec![ConfigItem::File(FileConfig {
+                        file: ".ssh_config".to_string(),
+                        as_name: None,
+                        mode: None,
+                        to: None,
+                        mkdir: None,
+                        overwrite: None,
+                        backup_on_overwrite: None,
+                    })],
+                },
+            ],
+        };
+
+        let error = derive_execution_plan_with_env(&config, &BTreeMap::new())
+            .expect_err("planning should fail when environment variables are missing");
+
+        assert_eq!(
+            error,
+            ProgramError::MissingEnvironment {
+                vars: vec!["PRIVATE_ENV_DIR".to_string(), "SSH_KEY_DIR".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn skip_optional_environment_backed_sources_when_the_variable_is_unset() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Environment {
+                    env: "PRIVATE_ENV_DIR".to_string(),
+                    optional: true,
+                },
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+            .expect("planning should succeed when an optional environment-backed source is unset");
+
+        assert_eq!(plan.repository, "~/projects/env");
+        assert!(
+            plan.sources.is_empty(),
+            "unset optional sources should be omitted from the plan"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Guards
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn source_level_to_overrides_default_to_in_planned_actions() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                overwrite: false,
+                backup_on_overwrite: true,
+            },
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path("vscode".to_string()),
+                to: Some("~/Library/Application Support/Code/User".to_string()),
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: "settings.json".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env_and_fs(&config, &BTreeMap::new(), &|_| false)
+            .expect("planning should succeed with a source-level to");
+
+        assert_eq!(
+            plan.sources[0].actions[0],
+            PlannedAction::File(PlannedFileAction {
+                file: "settings.json".to_string(),
+                as_name: "settings.json".to_string(),
+                options: ResolvedOptions {
+                    mode: ActionMode::Symlink,
+                    to: "~/Library/Application Support/Code/User".to_string(),
+                    mkdir: true,
+                    conflict_policy: ConflictPolicy::Skip,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn include_a_source_when_to_exists_guard_is_satisfied() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path("vscode".to_string()),
+                to: Some("~/Library/Application Support/Code/User".to_string()),
+                guard: Some(Guard::ToExists),
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: "settings.json".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+        // Simulate the destination directory being present.
+        let known_dirs = std::collections::BTreeSet::from([
+            "~/Library/Application Support/Code/User".to_string(),
+        ]);
+
+        let plan = derive_execution_plan_with_env_and_fs(&config, &BTreeMap::new(), &|path| {
+            known_dirs.contains(path)
+        })
+        .expect("planning should succeed when the to_exists guard is satisfied");
+
+        assert_eq!(plan.sources.len(), 1, "source should be included");
+        assert_eq!(plan.sources[0].from, "vscode");
+    }
+
+    #[test]
+    fn exclude_a_source_when_to_exists_guard_is_not_satisfied() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path("vscode".to_string()),
+                to: Some("~/Library/Application Support/Code/User".to_string()),
+                guard: Some(Guard::ToExists),
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: "settings.json".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+        // Destination directory is absent.
+        let plan = derive_execution_plan_with_env_and_fs(&config, &BTreeMap::new(), &|_| false)
+            .expect("planning should succeed when the to_exists guard is not satisfied");
+
+        assert!(
+            plan.sources.is_empty(),
+            "source should be excluded when guard is not satisfied"
+        );
+    }
+
+    #[test]
+    fn include_a_source_when_directory_exists_guard_is_satisfied() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path("macos".to_string()),
+                to: None,
+                guard: Some(Guard::DirectoryExists("/Applications".to_string())),
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".macos-defaults".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+        let known_dirs = std::collections::BTreeSet::from(["/Applications".to_string()]);
+
+        let plan = derive_execution_plan_with_env_and_fs(&config, &BTreeMap::new(), &|path| {
+            known_dirs.contains(path)
+        })
+        .expect("planning should succeed when the directory_exists guard is satisfied");
+
+        assert_eq!(plan.sources.len(), 1, "source should be included");
+        assert_eq!(plan.sources[0].from, "macos");
+    }
+
+    #[test]
+    fn exclude_a_source_when_directory_exists_guard_is_not_satisfied() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path("macos".to_string()),
+                to: None,
+                guard: Some(Guard::DirectoryExists("/Applications".to_string())),
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".macos-defaults".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env_and_fs(&config, &BTreeMap::new(), &|_| false)
+            .expect("planning should succeed when the directory_exists guard is not satisfied");
+
+        assert!(
+            plan.sources.is_empty(),
+            "source should be excluded when guard is not satisfied"
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Conflict policy resolution
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn overwrite_with_backup_produces_backup_conflict_policy() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                overwrite: true,
+                backup_on_overwrite: true,
+            },
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+            .expect("planning should produce overwrite-with-backup conflict policy");
+
+        assert_eq!(
+            plan.sources[0].actions[0],
+            PlannedAction::File(PlannedFileAction {
+                file: ".zshrc".to_string(),
+                as_name: ".zshrc".to_string(),
+                options: ResolvedOptions {
+                    mode: ActionMode::Symlink,
+                    to: "~".to_string(),
+                    mkdir: true,
+                    conflict_policy: ConflictPolicy::OverwriteWithBackup,
+                },
+            })
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Include planning
+    //
+    // These tests use `derive_execution_plan_with_injectables` and supply a
+    // `read_config_file` closure that returns pre-built in-memory configs keyed
+    // by path string, so no real files need to be written.
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn include_declared_files_sources_after_own_sources() {
+        // Root declares .zshrc; includes /inc/a.yml which declares .tmux.conf.
+        // Expected order: root's source first, then the include's source.
+        let included = single_source_config("inc", ".tmux.conf");
+        let root = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+            includes: vec![Include::Path {
+                path: "/inc/a.yml".to_string(),
+                optional: false,
+            }],
+        };
+
+        let plan = derive_execution_plan_with_injectables(
+            &root,
+            None,
+            &BTreeMap::new(),
+            &|_| false,
+            &|path: &Path| {
+                assert_eq!(path, Path::new("/inc/a.yml"));
+                Ok(included.clone())
+            },
+        )
+        .expect("planning should succeed with a valid include");
+
+        assert_eq!(plan.sources.len(), 2);
+        assert_eq!(plan.sources[0].from, ".");
+        assert_eq!(
+            plan.sources[0].actions,
+            vec![expected_file_action(".zshrc")]
+        );
+        assert_eq!(plan.sources[1].from, "inc");
+        assert_eq!(
+            plan.sources[1].actions,
+            vec![expected_file_action(".tmux.conf")]
+        );
+    }
+
+    #[test]
+    fn include_sources_from_nested_includes_depth_first() {
+        // Root includes /inc/a.yml; /inc/a.yml itself includes /inc/c.yml.
+        // Expected order: root → a → c (depth-first, includes-after at each level).
+        let c = single_source_config("c_src", ".bashrc");
+        let a = Config {
+            includes: vec![Include::Path {
+                path: "/inc/c.yml".to_string(),
+                optional: false,
+            }],
+            ..single_source_config("a_src", ".aliases")
+        };
+        let root = Config {
+            includes: vec![Include::Path {
+                path: "/inc/a.yml".to_string(),
+                optional: false,
+            }],
+            ..single_source_config("root_src", ".zshrc")
+        };
+
+        let plan = derive_execution_plan_with_injectables(
+            &root,
+            None,
+            &BTreeMap::new(),
+            &|_| false,
+            &|path: &Path| {
+                if path == Path::new("/inc/a.yml") {
+                    Ok(a.clone())
+                } else {
+                    assert_eq!(path, Path::new("/inc/c.yml"));
+                    Ok(c.clone())
+                }
+            },
+        )
+        .expect("planning should succeed with nested includes");
+
+        assert_eq!(plan.sources.len(), 3);
+        // root_src comes first (includes-after), then a_src, then c_src.
+        assert_eq!(plan.sources[0].from, "root_src");
+        assert_eq!(plan.sources[1].from, "a_src");
+        assert_eq!(plan.sources[2].from, "c_src");
+    }
+
+    #[test]
+    fn skip_duplicate_includes_across_the_include_tree() {
+        // Both root and /inc/a.yml include /inc/shared.yml.
+        // /inc/shared.yml should only appear once in the plan.
+        let shared = single_source_config("shared_src", ".shared");
+        let a = Config {
+            includes: vec![Include::Path {
+                path: "/inc/shared.yml".to_string(),
+                optional: false,
+            }],
+            ..single_source_config("a_src", ".aliases")
+        };
+        let root = Config {
+            includes: vec![
+                Include::Path {
+                    path: "/inc/a.yml".to_string(),
+                    optional: false,
+                },
+                Include::Path {
+                    path: "/inc/shared.yml".to_string(),
+                    optional: false,
+                },
+            ],
+            ..single_source_config("root_src", ".zshrc")
+        };
+
+        let plan = derive_execution_plan_with_injectables(
+            &root,
+            None,
+            &BTreeMap::new(),
+            &|_| false,
+            &|path: &Path| {
+                if path == Path::new("/inc/a.yml") {
+                    Ok(a.clone())
+                } else {
+                    assert_eq!(path, Path::new("/inc/shared.yml"));
+                    Ok(shared.clone())
+                }
+            },
+        )
+        .expect("planning should succeed and deduplicate shared includes");
+
+        // root_src, a_src, shared_src — shared only once despite two references.
+        let froms: Vec<&str> = plan.sources.iter().map(|s| s.from.as_str()).collect();
+        assert_eq!(froms, vec!["root_src", "a_src", "shared_src"]);
+    }
+
+    #[test]
+    fn skip_optional_includes_when_file_is_missing() {
+        let root = Config {
+            includes: vec![Include::Path {
+                path: "/inc/missing.yml".to_string(),
+                optional: true,
+            }],
+            ..single_source_config("root_src", ".zshrc")
+        };
+
+        let plan = derive_execution_plan_with_injectables(
+            &root,
+            None,
+            &BTreeMap::new(),
+            &|_| false,
+            &|path: &Path| {
+                Err(ProgramError::ReadConfiguration {
+                    path: path.to_path_buf(),
+                    message: "not found".to_string(),
+                })
+            },
+        )
+        .expect("planning should succeed when an optional include is missing");
+
+        // Only the root's own source is present; the missing optional include is silently skipped.
+        assert_eq!(plan.sources.len(), 1);
+        assert_eq!(plan.sources[0].from, "root_src");
+    }
+
+    #[test]
+    fn reject_required_includes_that_cannot_be_found() {
+        let root = Config {
+            includes: vec![
+                Include::Path {
+                    path: "/inc/missing_a.yml".to_string(),
+                    optional: false,
+                },
+                Include::Path {
+                    path: "/inc/missing_b.yml".to_string(),
+                    optional: false,
+                },
+            ],
+            ..single_source_config(".", ".zshrc")
+        };
+
+        let error = derive_execution_plan_with_injectables(
+            &root,
+            None,
+            &BTreeMap::new(),
+            &|_| false,
+            &|path: &Path| {
+                Err(ProgramError::ReadConfiguration {
+                    path: path.to_path_buf(),
+                    message: "not found".to_string(),
+                })
+            },
+        )
+        .expect_err("planning should fail when required includes are missing");
+
+        assert_eq!(
+            error,
+            ProgramError::IncludeNotFound {
+                paths: vec![
+                    PathBuf::from("/inc/missing_a.yml"),
+                    PathBuf::from("/inc/missing_b.yml"),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn reject_include_cycles() {
+        // /inc/a.yml includes /inc/b.yml, which includes /inc/a.yml — a cycle.
+        let b = Config {
+            includes: vec![Include::Path {
+                path: "/inc/a.yml".to_string(),
+                optional: false,
+            }],
+            ..single_source_config("b_src", ".b")
+        };
+        let a = Config {
+            includes: vec![Include::Path {
+                path: "/inc/b.yml".to_string(),
+                optional: false,
+            }],
+            ..single_source_config("a_src", ".a")
+        };
+        let root = Config {
+            includes: vec![Include::Path {
+                path: "/inc/a.yml".to_string(),
+                optional: false,
+            }],
+            ..single_source_config("root_src", ".zshrc")
+        };
+
+        let error = derive_execution_plan_with_injectables(
+            &root,
+            None,
+            &BTreeMap::new(),
+            &|_| false,
+            &|path: &Path| {
+                if path == Path::new("/inc/a.yml") {
+                    Ok(a.clone())
+                } else {
+                    assert_eq!(path, Path::new("/inc/b.yml"));
+                    Ok(b.clone())
+                }
+            },
+        )
+        .expect_err("planning should fail when an include cycle is detected");
+
+        assert_eq!(
+            error,
+            ProgramError::IncludeCycle {
+                cycle: vec![
+                    PathBuf::from("/inc/a.yml"),
+                    PathBuf::from("/inc/b.yml"),
+                    PathBuf::from("/inc/a.yml"),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_env_backed_include_paths_from_environment() {
+        let included = single_source_config("private_src", ".secrets");
+        let root = Config {
+            includes: vec![Include::Environment {
+                env: "PRIVATE_CONFIG".to_string(),
+                optional: false,
+            }],
+            ..single_source_config(".", ".zshrc")
+        };
+        let environment = BTreeMap::from([(
+            "PRIVATE_CONFIG".to_string(),
+            "/private/.gitenv.yml".to_string(),
+        )]);
+
+        let plan = derive_execution_plan_with_injectables(
+            &root,
+            None,
+            &environment,
+            &|_| false,
+            &|path: &Path| {
+                assert_eq!(path, Path::new("/private/.gitenv.yml"));
+                Ok(included.clone())
+            },
+        )
+        .expect("planning should resolve an environment-backed include path");
+
+        assert_eq!(plan.sources.len(), 2);
+        assert_eq!(plan.sources[1].from, "private_src");
+    }
+
+    #[test]
+    fn skip_optional_env_backed_includes_when_variable_is_unset() {
+        let root = Config {
+            includes: vec![Include::Environment {
+                env: "PRIVATE_CONFIG".to_string(),
+                optional: true,
+            }],
+            ..single_source_config(".", ".zshrc")
+        };
+
+        let plan = derive_execution_plan_with_env(&root, &BTreeMap::new()).expect(
+            "planning should succeed when an optional env-backed include variable is unset",
+        );
+
+        assert_eq!(
+            plan.sources.len(),
+            1,
+            "only the root source should be present"
+        );
+    }
+
+    #[test]
+    fn reject_required_env_backed_includes_when_variable_is_unset() {
+        let root = Config {
+            includes: vec![Include::Environment {
+                env: "PRIVATE_CONFIG".to_string(),
+                optional: false,
+            }],
+            ..single_source_config(".", ".zshrc")
+        };
+
+        let error = derive_execution_plan_with_env(&root, &BTreeMap::new()).expect_err(
+            "planning should fail when a required env-backed include variable is unset",
+        );
+
+        assert_eq!(
+            error,
+            ProgramError::MissingEnvironment {
+                vars: vec!["PRIVATE_CONFIG".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn apply_each_included_configs_defaults_only_to_its_own_sources() {
+        // Root uses copy mode; the included config uses symlink mode.
+        // Each should plan with its own defaults, not the other's.
+        let included = Config {
+            defaults: Defaults {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                overwrite: false,
+                backup_on_overwrite: true,
+            },
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path("inc_src".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".tmux.conf".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+            ..Config {
+                version: 1,
+                repository: "~/projects/env".to_string(),
+                defaults: Defaults::default(),
+                sources: vec![],
+                includes: vec![],
+            }
+        };
+        let root = Config {
+            defaults: Defaults {
+                mode: ActionMode::Copy,
+                to: "~/dest".to_string(),
+                mkdir: false,
+                overwrite: true,
+                backup_on_overwrite: false,
+            },
+            includes: vec![Include::Path {
+                path: "/inc/a.yml".to_string(),
+                optional: false,
+            }],
+            sources: vec![Source {
+                from: SourceRoot::Path("root_src".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+            ..Config {
+                version: 1,
+                repository: "~/projects/env".to_string(),
+                defaults: Defaults::default(),
+                sources: vec![],
+                includes: vec![],
+            }
+        };
+
+        let plan = derive_execution_plan_with_injectables(
+            &root,
+            None,
+            &BTreeMap::new(),
+            &|_| false,
+            &|path: &Path| {
+                assert_eq!(path, Path::new("/inc/a.yml"));
+                Ok(included.clone())
+            },
+        )
+        .expect("planning should succeed and isolate defaults per included config");
+
+        assert_eq!(plan.sources.len(), 2);
+
+        // Root's source uses copy mode with root's defaults.
+        assert_eq!(
+            plan.sources[0].actions[0],
+            PlannedAction::File(PlannedFileAction {
+                file: ".zshrc".to_string(),
+                as_name: ".zshrc".to_string(),
+                options: ResolvedOptions {
+                    mode: ActionMode::Copy,
+                    to: "~/dest".to_string(),
+                    mkdir: false,
+                    conflict_policy: ConflictPolicy::Overwrite,
+                },
+            })
+        );
+
+        // Included source uses symlink mode with included config's defaults.
+        assert_eq!(
+            plan.sources[1].actions[0],
+            PlannedAction::File(PlannedFileAction {
+                file: ".tmux.conf".to_string(),
+                as_name: ".tmux.conf".to_string(),
+                options: ResolvedOptions {
+                    mode: ActionMode::Symlink,
+                    to: "~".to_string(),
+                    mkdir: true,
+                    conflict_policy: ConflictPolicy::Skip,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn propagate_parse_errors_from_included_configs() {
+        // An include whose file returns a non-ReadConfiguration error (e.g. a
+        // structural parse failure) must be propagated as-is rather than
+        // collected into an IncludeNotFound set.
+        let root = Config {
+            includes: vec![Include::Path {
+                path: "/inc/bad.yml".to_string(),
+                optional: false,
+            }],
+            ..single_source_config(".", ".zshrc")
+        };
+
+        let error = derive_execution_plan_with_injectables(
+            &root,
+            None,
+            &BTreeMap::new(),
+            &|_| false,
+            &|_| {
+                Err(ProgramError::InvalidConfiguration {
+                    message: "unknown field `oops`".to_string(),
+                })
+            },
+        )
+        .expect_err("a parse error from an included config should propagate immediately");
+
+        assert_eq!(
+            error,
+            ProgramError::InvalidConfiguration {
+                message: "unknown field `oops`".to_string(),
+            }
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Item-level option overrides
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn item_level_mode_override_takes_precedence_over_default_mode() {
+        // Global defaults use symlink mode; item overrides to copy.
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                overwrite: false,
+                backup_on_overwrite: true,
+            },
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                    mode: Some(ActionMode::Copy),
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+            .expect("planning should apply item-level mode override");
+
+        assert_eq!(
+            plan.sources[0].actions[0],
+            PlannedAction::File(PlannedFileAction {
+                file: ".zshrc".to_string(),
+                as_name: ".zshrc".to_string(),
+                options: ResolvedOptions {
+                    mode: ActionMode::Copy,
+                    to: "~".to_string(),
+                    mkdir: true,
+                    conflict_policy: ConflictPolicy::Skip,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn item_level_to_override_takes_precedence_over_source_to() {
+        // Source-level `to` is ~/shared; item overrides to ~/item-specific.
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: Some("~/shared".to_string()),
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: Some("~/item-specific".to_string()),
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env_and_fs(&config, &BTreeMap::new(), &|_| false)
+            .expect("planning should apply item-level to override");
+
+        assert_eq!(
+            plan.sources[0].actions[0],
+            PlannedAction::File(PlannedFileAction {
+                file: ".zshrc".to_string(),
+                as_name: ".zshrc".to_string(),
+                options: ResolvedOptions {
+                    mode: ActionMode::Symlink,
+                    to: "~/item-specific".to_string(),
+                    mkdir: true,
+                    conflict_policy: ConflictPolicy::Skip,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn item_level_overwrite_true_resolves_to_overwrite_conflict_policy() {
+        // Global defaults have overwrite disabled; item enables it.
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                overwrite: false,
+                backup_on_overwrite: true,
+            },
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: Some(true),
+                    backup_on_overwrite: Some(false),
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+            .expect("planning should apply item-level overwrite override");
+
+        assert_eq!(
+            plan.sources[0].actions[0],
+            PlannedAction::File(PlannedFileAction {
+                file: ".zshrc".to_string(),
+                as_name: ".zshrc".to_string(),
+                options: ResolvedOptions {
+                    mode: ActionMode::Symlink,
+                    to: "~".to_string(),
+                    mkdir: true,
+                    conflict_policy: ConflictPolicy::Overwrite,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn item_level_select_overrides_are_applied_independently() {
+        // Select item overrides mode and to while inheriting everything else.
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                overwrite: false,
+                backup_on_overwrite: true,
+            },
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::Select(SelectConfig {
+                    dotfiles: true,
+                    exclude: vec![],
+                    mode: Some(ActionMode::Copy),
+                    to: Some("~/config".to_string()),
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+            .expect("planning should apply select item overrides");
+
+        assert_eq!(
+            plan.sources[0].actions[0],
+            PlannedAction::Select(PlannedSelectAction {
+                dotfiles: true,
+                exclude: vec![],
+                options: ResolvedOptions {
+                    mode: ActionMode::Copy,
+                    to: "~/config".to_string(),
+                    mkdir: true,
+                    conflict_policy: ConflictPolicy::Skip,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn cannot_set_overwrite_false_and_backup_on_overwrite_true_at_item_level() {
+        // This combination is explicitly rejected when both are set at item level.
+        // (Inherited defaults with the same values are fine — they resolve to Skip.)
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: Some(false),
+                    backup_on_overwrite: Some(true),
+                })],
+            }],
+        };
+
+        let error = derive_execution_plan_with_env(&config, &BTreeMap::new())
+            .expect_err("planning should reject explicit overwrite: false with backup_on_overwrite: true at item level");
+
+        assert!(matches!(
+            error,
+            ProgramError::InvalidConfiguration { ref message }
+                if message.contains("overwrite: false") && message.contains("backup_on_overwrite: true")
+        ));
+    }
+
+    #[test]
+    fn inherited_backup_default_is_valid_when_overwrite_resolves_to_false() {
+        // Global defaults: overwrite: false, backup_on_overwrite: true (the defaults).
+        // An item that doesn't override either should resolve to Skip without error.
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                overwrite: false,
+                backup_on_overwrite: true,
+            },
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new()).expect(
+            "planning should succeed when backup default is inherited and overwrite is false",
+        );
+
+        assert_eq!(
+            plan.sources[0].actions[0],
+            PlannedAction::File(PlannedFileAction {
+                file: ".zshrc".to_string(),
+                as_name: ".zshrc".to_string(),
+                options: ResolvedOptions {
+                    mode: ActionMode::Symlink,
+                    to: "~".to_string(),
+                    mkdir: true,
+                    conflict_policy: ConflictPolicy::Skip,
+                },
+            })
+        );
+    }
+}
