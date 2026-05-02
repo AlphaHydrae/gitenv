@@ -27,7 +27,54 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 8: Support per-config-item option overrides
+### Increment 8: Add environment-backed config values
+
+Why this increment exists:
+
+- Existing Ruby configs rely on dynamic behavior that currently has no explicit
+  representation in the Rust canonical model.
+- Environment-backed source roots and explicit required environment variables
+  are the smallest high-impact slice of that gap.
+
+Review target:
+
+- Add schema/model support for environment-backed values and required
+  environment declarations.
+- Resolve environment bindings deterministically during planning.
+- Add parser and planning tests for successful resolution and missing-required
+  diagnostics.
+
+### Increment 9: Add declarative filesystem guards
+
+Why this increment exists:
+
+- Existing Ruby configs gate actions with `File.directory?` checks.
+- Declarative `when` guards should be introduced before write-side execution
+  behavior expands.
+
+Review target:
+
+- Add schema/model support for declarative guard conditions.
+- Resolve guard outcomes deterministically in planning without executing config
+  code.
+- Add planner tests covering both matched and unmatched guard cases.
+
+### Increment 10: Add deterministic config includes
+
+Why this increment exists:
+
+- Existing Ruby configs compose additional private config through `include`.
+- Composition semantics should be locked before broader planner and CLI work.
+
+Review target:
+
+- Add include support for YAML config composition with deterministic merge
+  behavior.
+- Detect include cycles and return stable, actionable diagnostics.
+- Add parser/planning tests for include ordering, cycle rejection, and
+  duplicate-handling behavior.
+
+### Increment 11: Support per-config-item option overrides
 
 Why this increment exists:
 
@@ -42,7 +89,7 @@ Review target:
 - Shared resolved-option fields are factored into one reusable plan type to
   reduce duplication across planned action variants.
 
-### Increment 9: Inspect one narrow symlink status case
+### Increment 12: Inspect one narrow symlink status case
 
 Why this increment exists:
 
@@ -54,7 +101,7 @@ Review target:
 - A single symlink status workflow works against temporary directories.
 - Status results are returned as structured data, not terminal output.
 
-### Increment 10: Wire the default CLI inspection flow
+### Increment 13: Wire the default CLI inspection flow
 
 Why this increment exists:
 

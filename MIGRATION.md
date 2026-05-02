@@ -132,6 +132,74 @@ sources:
 
 The parser will normalize shorthand into one canonical internal model.
 
+## Required Dynamic-Behavior Parity (Without Code Execution)
+
+Existing Ruby configurations often use Ruby language features for dynamic
+behavior. The Rust migration must preserve those outcomes through declarative
+YAML fields and deterministic planning, not config code execution.
+
+Required parity capabilities:
+
+- Environment-provided source roots:
+  Replace Ruby expressions like `from ENV[...]` with explicit placeholders or
+  bindings that resolve from environment variables at load time.
+- Required environment variables with clear diagnostics:
+  Replace `raise`-style checks with schema-level `required_env` declarations
+  and stable error messages when values are missing.
+- Conditional actions based on filesystem existence:
+  Replace Ruby `if File.directory?(...)` branches with declarative `when`
+  conditions (for example: destination exists, source exists).
+- Reusable includes/composition:
+  Replace Ruby `include ...private...` with declarative include/merge support
+  that is explicit, cycle-safe, and deterministic.
+- Runtime-expanded selections:
+  Preserve selection behavior (for example dotfile selection with exclusions)
+  as declarative selectors expanded during planning.
+
+These capabilities are part of core configuration semantics and must be modeled
+before broad filesystem execution and CLI parity work continues.
+
+Representative legacy Ruby example:
+
+```ruby
+# Shared dotfiles
+symlink dot_files.except('.local-only', '.shell-profile'), overwrite: true, backup: false
+copy('.local-only').once
+
+# Tool-specific config from subdirectories
+from 'editor' do
+  symlink('settings.json').to('.config/editor')
+  symlink('keybindings.json').to('.config/editor')
+end
+
+# Optional integration enabled only when the destination app directory exists
+app_config_dir = File.expand_path(File.join('~', 'Library', 'Application Support', 'ExampleApp'))
+if File.directory? app_config_dir
+  from 'app' do
+    symlink('data.json', overwrite: true).to(app_config_dir)
+  end
+end
+
+# Private config loaded from an environment-provided directory
+private_dir = ENV['PRIVATE_ENV_DIR']
+raise 'Environment variable $PRIVATE_ENV_DIR is required' unless private_dir
+
+from private_dir do
+  symlink dot_files.except('.private-data', '.gitenv.extra.rb')
+  copy('.private-data').once
+
+  from '.ssh' do
+    symlink('config').to('.ssh')
+  end
+end
+
+include File.join(private_dir, '.gitenv.extra.rb')
+```
+
+This example demonstrates the behavior patterns the YAML model must preserve:
+selection with exclusions, per-item copy/symlink behavior, filesystem-gated
+actions, required environment input, and deterministic composition.
+
 ## Validation
 
 - YAML files are validated against a schema.
@@ -156,6 +224,8 @@ Exit criteria:
 
 - Implement YAML parser and schema validation.
 - Implement normalization from shorthand to canonical model.
+- Implement declarative runtime context resolution (env bindings, required env,
+  conditional guards, and includes) with deterministic expansion.
 - Implement intent planning with defaults resolved (without filesystem side
   effects).
 - Implement operation planning that derives concrete actions after selection
@@ -166,6 +236,8 @@ Exit criteria:
 
 - [ ] Parser unit tests cover valid/invalid examples.
 - [ ] Normalization tests verify shorthand and canonical equivalence.
+- [ ] Dynamic-behavior parity tests cover env resolution, missing required env
+      diagnostics, include behavior, and filesystem-gated conditions.
 - [ ] Intent and operation plan snapshots cover core combinations.
 
 ### Phase 2: Filesystem execution

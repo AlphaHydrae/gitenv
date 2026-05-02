@@ -80,6 +80,24 @@ sources:
 All shorthand is normalized to one canonical internal model before planning or
 execution.
 
+### Dynamic behavior without executable config
+
+The Ruby DSL allowed runtime behavior in configuration code. The Rust port must
+preserve those behavior outcomes while keeping YAML non-executable.
+
+Core supported mechanisms in the YAML model:
+
+- Environment-backed values and required environment declarations.
+- Declarative conditional guards (for example, apply only when a target path
+  exists).
+- Deterministic include/composition support for splitting private/shared
+  config.
+- Runtime selection expansion (for example dotfile selectors with exclusions)
+  during planning.
+
+These are treated as first-class configuration semantics in the planner, not
+as arbitrary scripting hooks.
+
 ### Configuration compatibility policy
 
 The Rust implementation does not execute Ruby config files and does not support
