@@ -18,6 +18,8 @@ When working on the codebase, consult these documents as needed:
 - [Testing guidelines](./CONTRIBUTING.md#testing-guidelines) — behavior coverage, parity checks, logging checks
 - [Verification checklist](./CONTRIBUTING.md#verification-checklist) — testing, linting, formatting steps
 - [Common commands](./CONTRIBUTING.md#common-commands) — Ruby checks, Rust commands, and verification wrappers
+- [**SKILL: Migration Workflow Rust**](./.agent/skills/migration-workflow-rust/SKILL.md) — incremental delivery, verification, coverage
+- [**SKILL: Gitenv Documentation Management**](./.agent/skills/gitenv-documentation-management/SKILL.md) — keeping docs consistent
 
 ## ⚠️ EXECUTION AND VERIFICATION MANDATE ⚠️
 
@@ -220,6 +222,22 @@ them to EVERY task, EVERY time.**
   update [`MIGRATION-LOG.md`](./MIGRATION-LOG.md) and/or
   [`MIGRATION-INCREMENTS.md`](./MIGRATION-INCREMENTS.md) in the same change or
   explicitly suggest the needed update.
+- **When the backlog in [`MIGRATION-INCREMENTS.md`](./MIGRATION-INCREMENTS.md)
+  has been fully worked through**, proactively suggest the next set of
+  increments. Before doing so:
+  1. Re-read [`MIGRATION.md`](./MIGRATION.md) to understand the overarching
+     migration plan, phases, and exit criteria.
+  2. Read the most recent entries in
+     [`MIGRATION-LOG.md`](./MIGRATION-LOG.md) to understand what was completed,
+     what decisions were made, and whether the overall plan assumptions still
+     hold.
+  3. Suggest updates to [`MIGRATION.md`](./MIGRATION.md) if phases are complete,
+     decisions have shifted, or exit criteria have been met (mark work as
+     completed, adapt phase scope, etc).
+  4. With that context, suggest appropriately-sized increments for immediate
+     next work only (do not attempt to plan the entire remaining migration).
+     Keep each increment to 10–20 lines plus tests when practical, and ensure
+     each increment has a coherent scope and clear review target.
 
 ## Agent-specific execution rules
 
@@ -244,6 +262,15 @@ them to EVERY task, EVERY time.**
   [`MIGRATION-INCREMENTS.md`](./MIGRATION-INCREMENTS.md), or
   [`AGENTS.md`](./AGENTS.md), review the full set of those files for consistency
   and update any affected file in the same change when needed.
+- **Maintain skills in sync with guidelines and instructions.** Whenever you
+  update [`AGENTS.md`](./AGENTS.md), [`CONTRIBUTING.md`](./CONTRIBUTING.md),
+  [`MIGRATION.md`](./MIGRATION.md), or [`ARCHITECTURE.md`](./ARCHITECTURE.md),
+  review the skills in `.agent/skills/` that are referenced by those changes
+  (currently `migration-workflow-rust` and `gitenv-documentation-management`)
+  and update any references or guidance that has become outdated. Do not
+  duplicate rule text; instead, update links and adjust explanations. If a
+  skill's guidance contradicts updated instructions, correct it before claiming
+  the primary documentation change is complete.
 - If instructions are incomplete, contradictory, or likely to cause an
   unintended result, stop, explain the problem, and propose a better option.
 - For refactor work, stop extracting when remaining duplication is local and
