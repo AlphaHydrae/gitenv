@@ -18,20 +18,6 @@ are not forgotten.
 
 ## Current Backlog
 
-### Increment 4: Allow omitted defaults in configuration
-
-Why this increment exists:
-
-- The smallest valid user configuration should stay concise and not require
-  repeating obvious defaults.
-- Parser behavior should accept configs that define only `version`,
-  `repository`, and `sources` when defaults are omitted.
-
-Review target:
-
-- Configurations can omit some or all default fields and still parse.
-- Omitted default fields are filled with canonical `Defaults::default()` values.
-
 ### Increment 5: Reject unknown keys with clear errors
 
 Why this increment exists:

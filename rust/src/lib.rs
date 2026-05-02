@@ -10,11 +10,13 @@ pub struct ProgramOutput {
 pub struct Config {
     pub version: u32,
     pub repository: String,
+    #[serde(default)]
     pub defaults: Defaults,
     pub sources: Vec<Source>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default)]
 pub struct Defaults {
     pub mode: ActionMode,
     pub to: String,
@@ -212,6 +214,49 @@ sources:
     }
 
     #[test]
+    fn accept_a_config_without_a_defaults_section() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - file: .zshrc
+"#;
+
+        let config = parse_config(yaml).expect("config should parse without defaults");
+
+        assert_eq!(config.defaults, Defaults::default());
+    }
+
+    #[test]
+    fn accept_a_config_with_partial_defaults() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+defaults:
+  to: "~/.config"
+  overwrite: true
+sources:
+  - from: "."
+    configs:
+      - file: .zshrc
+"#;
+
+        let config = parse_config(yaml).expect("config should parse with partial defaults");
+
+        let expected_defaults = Defaults {
+            mode: ActionMode::Symlink,
+            to: "~/.config".to_string(),
+            mkdir: true,
+            overwrite: true,
+            backup_on_overwrite: true,
+        };
+
+        assert_eq!(config.defaults, expected_defaults);
+    }
+
+    #[test]
     fn accept_select_entries_in_source_configs() {
         let yaml = r#"
 version: 1
@@ -270,7 +315,7 @@ sources:
     }
 
     #[test]
-    fn reject_config_missing_repository() {
+    fn reject_a_config_missing_a_repository() {
         let yaml = r#"
 version: 1
 defaults:
@@ -295,7 +340,7 @@ sources:
     }
 
     #[test]
-    fn reject_malformed_config() {
+    fn reject_a_malformed_config() {
         let yaml = "version: [";
 
         let error = parse_config(yaml).expect_err("malformed yaml should fail");

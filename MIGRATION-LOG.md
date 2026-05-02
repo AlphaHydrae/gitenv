@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-02: Allowed omitted defaults in configuration parsing - Added
+  serde-driven defaulting so configs parse when `defaults` is missing or
+  partially specified, and added tests that assert omitted values are filled
+  from `Defaults::default()`.
 - 2026-05-02: Added targeted Rust tests for select-item parsing and missing-file
   read failures, and tightened invalid-config assertions so parser error
   behavior is fully exercised.
