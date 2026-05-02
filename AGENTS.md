@@ -69,14 +69,19 @@ them to EVERY task, EVERY time.**
 - **🔴 NEVER claim a task is complete without running the required checks.**
   Do not say "tests pass" without showing the actual command output and exit
   code. This is a critical recurring failure mode.
+  - For migration increments, capture a **coverage baseline before code
+    changes** by running `./.agent/scripts/coverage.sh` first and recording the
+    current total line coverage.
   - Always run `./.agent/scripts/tests.sh` for test changes.
   - Always run `./.agent/scripts/lint.sh` for source changes.
   - Always run `./.agent/scripts/lint-md.sh` for documentation changes.
   - Always run `./.agent/scripts/build.sh` to verify compilation.
-  - Always run `./.agent/scripts/format.sh` (or `./.agent/scripts/format.sh
---check` to check without modifying) for formatting checks.
-  - For migration increments, always run `./.agent/scripts/coverage.sh` and
-    report both previous and current coverage.
+  - Always run `./.agent/scripts/format.sh` in write mode for formatting
+    verification.
+  - Use `./.agent/scripts/format.sh --check` only when explicitly requested by
+    a human or when diagnosing formatting-only issues without applying changes.
+  - For migration increments, always run `./.agent/scripts/coverage.sh` again
+    after changes and report both previous and current coverage.
   - If coverage decreases significantly, explicitly explain why and document
     follow-up work in [`MIGRATION-INCREMENTS.md`](./MIGRATION-INCREMENTS.md)
     and/or inline TODO comments. Treat a drop of about 0.25 percentage points
@@ -217,6 +222,10 @@ them to EVERY task, EVERY time.**
      documentation changes are themselves the primary deliverable.
   10. Do not mention normal repository-upkeep tasks in suggested commit
       messages when those tasks are evident from the diff.
+- **🔴 COMMIT-MESSAGE SELF-CHECK IS MANDATORY.** Before posting a suggested
+  commit message, explicitly re-check rules 1-10 above and ensure the body does
+  not include routine test additions, migration backlog/log updates, or format/
+  lint/build upkeep unless one of those is the primary deliverable.
 - Be proactive with migration documentation upkeep. Do not wait for explicit
   user prompts: when work changes scope, sequencing, assumptions, or outcomes,
   update [`MIGRATION-LOG.md`](./MIGRATION-LOG.md) and/or

@@ -148,6 +148,16 @@ After updating any core documentation file, verify:
    `MIGRATION.md`, mark it as such and verify exit criteria language matches
    what was achieved.
 
+6. **Verification policy alignment is preserved** — When verification guidance
+   changes, confirm these policies remain aligned between `AGENTS.md`,
+   `CONTRIBUTING.md`, and `migration-workflow-rust`:
+   - Migration increments capture pre-change coverage baseline so coverage drops
+     can be detected with evidence.
+   - Formatting wrapper defaults to write mode; `--check` is only for explicit
+     human requests or formatting diagnostics.
+   - Commit message guidance omits routine tests, migration log/backlog updates,
+     and upkeep notes unless those are the primary deliverable.
+
 ## Skill maintenance
 
 When updating any guideline or instruction file:

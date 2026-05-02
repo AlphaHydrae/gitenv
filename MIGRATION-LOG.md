@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-02: Add declarative filesystem guards - Add source-level destination
+  overrides and declarative `when` guards (`to_exists` and `directory_exists`),
+  evaluate guard outcomes deterministically during planning without executing
+  config code.
 - 2026-05-02: Interpret dollar-prefixed source roots as environment bindings -
   Normalize shorthand source roots that begin with `$` into required
   environment-backed source roots and add an explicit path object variant so

@@ -240,6 +240,12 @@ Exit criteria:
       diagnostics, include behavior, and filesystem-gated conditions.
 - [ ] Intent and operation plan snapshots cover core combinations.
 
+Current status:
+
+- Parser coverage, shorthand/canonical normalization, required environment
+  resolution, and filesystem-gated guards are implemented.
+- Include behavior and intent/operation plan snapshots are still pending.
+
 ### Phase 2: Filesystem execution
 
 - Implement symlink operations (Unix).

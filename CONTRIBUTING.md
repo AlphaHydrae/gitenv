@@ -143,16 +143,21 @@ Business modules must not print directly to terminal output.
 
 Apply checks that match your change scope.
 
+0. For migration increments, run coverage before making code changes to capture
+   the baseline used to detect regressions.
 1. Ensure behavior is correct to the best of your ability.
 2. Run relevant tests.
 3. Run linting checks.
 4. Run build checks.
 5. Run documentation lint checks when Markdown files changed.
-6. Run formatting checks (and formatting write mode only when intended).
-7. Run coverage for code changes. If coverage decreases significantly, capture
-   required follow-up work (living increment backlog item and/or inline TODO).
-   Treat a drop of about 0.25 percentage points or more as significant unless
-   there is a stronger project-specific reason.
+6. Run formatting using write mode by default (`./.agent/scripts/format.sh`).
+   Use check mode only when explicitly requested or when diagnosing formatting
+   without modifying files.
+7. Run coverage for code changes and compare with the pre-change baseline. If
+   coverage decreases significantly, capture required follow-up work (living
+   increment backlog item and/or inline TODO). Treat a drop of about 0.25
+   percentage points or more as significant unless there is a stronger
+   project-specific reason.
 
 ## Setup
 

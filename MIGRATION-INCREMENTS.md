@@ -27,21 +27,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 9: Add declarative filesystem guards
-
-Why this increment exists:
-
-- Existing Ruby configs gate actions with `File.directory?` checks.
-- Declarative `when` guards should be introduced before write-side execution
-  behavior expands.
-
-Review target:
-
-- Add schema/model support for declarative guard conditions.
-- Resolve guard outcomes deterministically in planning without executing config
-  code.
-- Add planner tests covering both matched and unmatched guard cases.
-
 ### Increment 10: Add deterministic config includes
 
 Why this increment exists:
@@ -94,6 +79,9 @@ Review target:
 - Add concise doc comments on non-obvious public types/functions and targeted
   inline comments only for non-trivial planning branches.
 - Preserve library/CLI behavior and keep coverage at least stable.
+- Take the time to thoroughly review test code against test code guidelines and
+  fix any issues to ensure the tests are of sufficient quality and
+  maintainability for the next increments to build on.
 
 ### Increment 13: Inspect one narrow symlink status case
 

@@ -34,6 +34,10 @@ Before starting an increment:
    the project compiling and tests passing, mark it clearly with a TODO comment
    including the removal condition.
 
+5. **Capture baseline coverage first** — For migration increments, run
+   `./.agent/scripts/coverage.sh` before making code changes and record the
+   total line coverage as the baseline for drop detection.
+
 ## Implementation
 
 1. **Apply guidelines during changes, not after** — Keep the relevant sections
@@ -72,7 +76,8 @@ Run these checks from the repository root (in order):
    - Output captured in `tmp/agent/lint_output.log`.
 
 4. **Coverage** — `./.agent/scripts/coverage.sh`
-   - Reports total line coverage before and after.
+   - Run once before implementation for baseline, and once after changes.
+   - Reports total line coverage for baseline and current state.
    - Output captured in `tmp/agent/coverage_output.log`.
    - If coverage decreases by ~0.25 percentage points or more, document
      follow-up work in `MIGRATION-INCREMENTS.md` and/or inline TODO comments.
@@ -80,6 +85,11 @@ Run these checks from the repository root (in order):
 5. **Documentation** — If any Markdown files changed:
    - `./.agent/scripts/lint-md.sh`
    - Output captured in `tmp/agent/markdown_lint_output.log`.
+
+6. **Formatting** — `./.agent/scripts/format.sh`
+   - Use write mode by default.
+   - Use `--check` only when explicitly requested by a human or when diagnosing
+     formatting-only issues without applying changes.
 
 **Show exit codes and summary output for every check.** Do not claim tests pass
 without showing actual output.
@@ -94,6 +104,9 @@ When an increment is complete, provide a suggested commit message:
    steps.
 3. **Omit** routine test additions (already evident from diff) and migration log
    updates (unless documentation is the primary deliverable).
+4. **Self-check before sending** — Re-read the commit message rules in
+   `AGENTS.md` and explicitly verify the message does not include routine
+   verification or repository-upkeep steps unless those are the primary change.
 
 See commit message expectations in `AGENTS.md` for full guidance.
 

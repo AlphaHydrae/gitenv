@@ -1,6 +1,7 @@
 use serde::{Deserialize, Deserializer};
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProgramOutput {
@@ -58,6 +59,10 @@ pub enum ConflictPolicy {
 #[serde(deny_unknown_fields)]
 pub struct Source {
     pub from: SourceRoot,
+    #[serde(default)]
+    pub to: Option<String>,
+    #[serde(rename = "when")]
+    pub guard: Option<Guard>,
     pub configs: Vec<ConfigItem>,
 }
 
@@ -105,6 +110,45 @@ impl<'de> Deserialize<'de> for SourceRoot {
             SourceRootWire::Path { path } => Ok(Self::ExplicitPath { path }),
             SourceRootWire::Environment { env, optional } => {
                 Ok(Self::Environment { env, optional })
+            }
+        }
+    }
+}
+
+/// A declarative condition that must be satisfied for a source to be included in the plan.
+///
+/// `ToExists` checks that the resolved destination directory for this source exists on
+/// the filesystem. This avoids repeating the destination path in both a `to` key and an
+/// explicit path guard.
+///
+/// `DirectoryExists` checks an arbitrary path — useful for platform or tool detection
+/// where the path has no relationship to the source's destination (e.g. `/Applications`
+/// to detect macOS).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Guard {
+    ToExists,
+    DirectoryExists(String),
+}
+
+impl<'de> Deserialize<'de> for Guard {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum GuardWire {
+            Shorthand(String),
+            DirectoryExists { directory_exists: String },
+        }
+
+        match GuardWire::deserialize(deserializer)? {
+            GuardWire::Shorthand(s) if s == "to_exists" => Ok(Self::ToExists),
+            GuardWire::Shorthand(s) => Err(serde::de::Error::custom(format!(
+                "unknown guard shorthand `{s}`, expected `to_exists`"
+            ))),
+            GuardWire::DirectoryExists { directory_exists } => {
+                Ok(Self::DirectoryExists(directory_exists))
             }
         }
     }
@@ -219,13 +263,24 @@ pub fn load_config(path: &Path) -> Result<Config, ProgramError> {
 
 pub fn derive_execution_plan(config: &Config) -> Result<ExecutionPlan, ProgramError> {
     let environment = std::env::vars().collect::<BTreeMap<_, _>>();
-
     derive_execution_plan_with_env(config, &environment)
 }
 
 pub fn derive_execution_plan_with_env(
     config: &Config,
     environment: &BTreeMap<String, String>,
+) -> Result<ExecutionPlan, ProgramError> {
+    derive_execution_plan_with_env_and_fs(config, environment, &|path| {
+        std::fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false)
+    })
+}
+
+/// Core planning function. `is_directory` is injected so tests can evaluate guards
+/// against a controlled set of paths rather than the real filesystem.
+pub fn derive_execution_plan_with_env_and_fs(
+    config: &Config,
+    environment: &BTreeMap<String, String>,
+    is_directory: &impl Fn(&str) -> bool,
 ) -> Result<ExecutionPlan, ProgramError> {
     let mut missing_environment = BTreeSet::new();
     let mut sources = Vec::new();
@@ -258,6 +313,24 @@ pub fn derive_execution_plan_with_env(
             continue;
         };
 
+        // Source-level `to` overrides the global default for all items in this source.
+        let source_to = source
+            .to
+            .as_deref()
+            .unwrap_or(&config.defaults.to)
+            .to_string();
+
+        // Evaluate the guard if present. A false guard skips the entire source.
+        if let Some(guard) = &source.guard {
+            let satisfied = match guard {
+                Guard::ToExists => is_directory(&source_to),
+                Guard::DirectoryExists(path) => is_directory(path),
+            };
+            if !satisfied {
+                continue;
+            }
+        }
+
         sources.push(PlannedSource {
             from,
             actions: source
@@ -271,7 +344,7 @@ pub fn derive_execution_plan_with_env(
                             .clone()
                             .unwrap_or_else(|| file_config.file.clone()),
                         mode: config.defaults.mode.clone(),
-                        to: config.defaults.to.clone(),
+                        to: source_to.clone(),
                         mkdir: config.defaults.mkdir,
                         conflict_policy: conflict_policy.clone(),
                     }),
@@ -280,7 +353,7 @@ pub fn derive_execution_plan_with_env(
                             dotfiles: select_config.dotfiles,
                             exclude: select_config.exclude.clone(),
                             mode: config.defaults.mode.clone(),
-                            to: config.defaults.to.clone(),
+                            to: source_to.clone(),
                             mkdir: config.defaults.mkdir,
                             conflict_policy: conflict_policy.clone(),
                         })
@@ -321,10 +394,10 @@ pub fn run() -> Result<ProgramOutput, ProgramError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ActionMode, Config, ConfigItem, ConflictPolicy, Defaults, ExecutionPlan, FileConfig,
+        ActionMode, Config, ConfigItem, ConflictPolicy, Defaults, ExecutionPlan, FileConfig, Guard,
         PlannedAction, PlannedFileAction, PlannedSelectAction, PlannedSource, ProgramError,
-        SelectConfig, Source, SourceRoot, derive_execution_plan_with_env, load_config,
-        parse_config, run,
+        SelectConfig, Source, SourceRoot, derive_execution_plan_with_env,
+        derive_execution_plan_with_env_and_fs, load_config, parse_config, run,
     };
     use std::collections::BTreeMap;
     use std::path::PathBuf;
@@ -349,6 +422,8 @@ mod tests {
             defaults: Defaults::default(),
             sources: vec![Source {
                 from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
                 configs: vec![
                     ConfigItem::File(FileConfig {
                         file: ".zshrc".to_string(),
@@ -408,6 +483,8 @@ sources:
             },
             sources: vec![Source {
                 from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
                     as_name: None,
@@ -496,6 +573,8 @@ sources:
             },
             sources: vec![Source {
                 from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
                 configs: vec![ConfigItem::Select(SelectConfig {
                     dotfiles: true,
                     exclude: vec![".DS_Store".to_string(), ".git".to_string()],
@@ -525,6 +604,8 @@ sources:
             defaults: Defaults::default(),
             sources: vec![Source {
                 from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
                     as_name: None,
@@ -585,6 +666,8 @@ sources:
             },
             sources: vec![Source {
                 from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
                 configs: vec![
                     ConfigItem::File(FileConfig {
                         file: ".zshrc".to_string(),
@@ -665,6 +748,8 @@ sources:
                     env: "PRIVATE_ENV_DIR".to_string(),
                     optional: false,
                 },
+                to: None,
+                guard: None,
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
                     as_name: None,
@@ -699,6 +784,8 @@ sources:
                     env: "PRIVATE_ENV_DIR".to_string(),
                     optional: false,
                 },
+                to: None,
+                guard: None,
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
                     as_name: None,
@@ -732,6 +819,8 @@ sources:
                 from: SourceRoot::ExplicitPath {
                     path: "$PRIVATE_ENV_DIR".to_string(),
                 },
+                to: None,
+                guard: None,
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
                     as_name: None,
@@ -759,6 +848,8 @@ sources:
                     env: "PRIVATE_ENV_DIR".to_string(),
                     optional: false,
                 },
+                to: None,
+                guard: None,
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".secrets".to_string(),
                     as_name: None,
@@ -805,6 +896,8 @@ sources:
             },
             sources: vec![Source {
                 from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
                     as_name: None,
@@ -845,6 +938,8 @@ sources:
                         env: "PRIVATE_ENV_DIR".to_string(),
                         optional: false,
                     },
+                    to: None,
+                    guard: None,
                     configs: vec![ConfigItem::File(FileConfig {
                         file: ".zshrc".to_string(),
                         as_name: None,
@@ -855,6 +950,8 @@ sources:
                         env: "SSH_KEY_DIR".to_string(),
                         optional: false,
                     },
+                    to: None,
+                    guard: None,
                     configs: vec![ConfigItem::File(FileConfig {
                         file: ".ssh_config".to_string(),
                         as_name: None,
@@ -885,6 +982,8 @@ sources:
                     env: "PRIVATE_ENV_DIR".to_string(),
                     optional: true,
                 },
+                to: None,
+                guard: None,
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
                     as_name: None,
@@ -1005,6 +1104,241 @@ sources:
             ProgramError::InvalidConfiguration { message }
                 if message.contains("unknown field `extra`")
         ));
+    }
+
+    #[test]
+    fn load_a_config_with_a_to_exists_guard() {
+        let yaml = r#"
+    version: 1
+    repository: ~/projects/env
+    sources:
+      - from: vscode
+        to: ~/Library/Application Support/Code/User
+        when: to_exists
+        configs:
+          - keybindings.json
+    "#;
+
+        let config = parse_config(yaml).expect("config should parse with a to_exists guard");
+
+        let source = &config.sources[0];
+        assert_eq!(
+            source.to.as_deref(),
+            Some("~/Library/Application Support/Code/User")
+        );
+        assert_eq!(source.guard, Some(Guard::ToExists));
+    }
+
+    #[test]
+    fn load_a_config_with_a_directory_exists_guard() {
+        let yaml = r#"
+    version: 1
+    repository: ~/projects/env
+    sources:
+      - from: macos
+        when:
+          directory_exists: /Applications
+        configs:
+          - .macos-defaults
+    "#;
+
+        let config = parse_config(yaml).expect("config should parse with a directory_exists guard");
+
+        let source = &config.sources[0];
+        assert_eq!(
+            source.guard,
+            Some(Guard::DirectoryExists("/Applications".to_string()))
+        );
+    }
+
+    #[test]
+    fn reject_an_unknown_guard_shorthand() {
+        let yaml = r#"
+    version: 1
+    repository: ~/projects/env
+    sources:
+      - from: .
+        when: something_unsupported
+        configs:
+          - .zshrc
+    "#;
+
+        let error =
+            parse_config(yaml).expect_err("config should reject an unknown guard shorthand");
+
+        assert!(matches!(
+            error,
+            ProgramError::InvalidConfiguration { message }
+                if message.contains("unknown guard shorthand")
+        ));
+    }
+
+    #[test]
+    fn load_a_config_with_a_source_level_to() {
+        let yaml = r#"
+    version: 1
+    repository: ~/projects/env
+    sources:
+      - from: vscode
+        to: ~/Library/Application Support/Code/User
+        configs:
+          - settings.json
+    "#;
+
+        let config = parse_config(yaml).expect("config should parse with a source-level to");
+
+        assert_eq!(
+            config.sources[0].to.as_deref(),
+            Some("~/Library/Application Support/Code/User")
+        );
+    }
+
+    #[test]
+    fn source_level_to_overrides_default_to_in_planned_actions() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                overwrite: false,
+                backup_on_overwrite: true,
+            },
+            sources: vec![Source {
+                from: SourceRoot::Path("vscode".to_string()),
+                to: Some("~/Library/Application Support/Code/User".to_string()),
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: "settings.json".to_string(),
+                    as_name: None,
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env_and_fs(&config, &BTreeMap::new(), &|_| false)
+            .expect("planning should succeed with a source-level to");
+
+        assert_eq!(
+            plan.sources[0].actions[0],
+            PlannedAction::File(PlannedFileAction {
+                file: "settings.json".to_string(),
+                as_name: "settings.json".to_string(),
+                mode: ActionMode::Symlink,
+                to: "~/Library/Application Support/Code/User".to_string(),
+                mkdir: true,
+                conflict_policy: ConflictPolicy::Skip,
+            })
+        );
+    }
+
+    #[test]
+    fn include_a_source_when_to_exists_guard_is_satisfied() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            sources: vec![Source {
+                from: SourceRoot::Path("vscode".to_string()),
+                to: Some("~/Library/Application Support/Code/User".to_string()),
+                guard: Some(Guard::ToExists),
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: "settings.json".to_string(),
+                    as_name: None,
+                })],
+            }],
+        };
+        // Simulate the destination directory being present.
+        let known_dirs = std::collections::BTreeSet::from([
+            "~/Library/Application Support/Code/User".to_string(),
+        ]);
+
+        let plan = derive_execution_plan_with_env_and_fs(&config, &BTreeMap::new(), &|path| {
+            known_dirs.contains(path)
+        })
+        .expect("planning should succeed when the to_exists guard is satisfied");
+
+        assert_eq!(plan.sources.len(), 1, "source should be included");
+        assert_eq!(plan.sources[0].from, "vscode");
+    }
+
+    #[test]
+    fn exclude_a_source_when_to_exists_guard_is_not_satisfied() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            sources: vec![Source {
+                from: SourceRoot::Path("vscode".to_string()),
+                to: Some("~/Library/Application Support/Code/User".to_string()),
+                guard: Some(Guard::ToExists),
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: "settings.json".to_string(),
+                    as_name: None,
+                })],
+            }],
+        };
+        // Destination directory is absent.
+        let plan = derive_execution_plan_with_env_and_fs(&config, &BTreeMap::new(), &|_| false)
+            .expect("planning should succeed when the to_exists guard is not satisfied");
+
+        assert!(
+            plan.sources.is_empty(),
+            "source should be excluded when guard is not satisfied"
+        );
+    }
+
+    #[test]
+    fn include_a_source_when_directory_exists_guard_is_satisfied() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            sources: vec![Source {
+                from: SourceRoot::Path("macos".to_string()),
+                to: None,
+                guard: Some(Guard::DirectoryExists("/Applications".to_string())),
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".macos-defaults".to_string(),
+                    as_name: None,
+                })],
+            }],
+        };
+        let known_dirs = std::collections::BTreeSet::from(["/Applications".to_string()]);
+
+        let plan = derive_execution_plan_with_env_and_fs(&config, &BTreeMap::new(), &|path| {
+            known_dirs.contains(path)
+        })
+        .expect("planning should succeed when the directory_exists guard is satisfied");
+
+        assert_eq!(plan.sources.len(), 1, "source should be included");
+        assert_eq!(plan.sources[0].from, "macos");
+    }
+
+    #[test]
+    fn exclude_a_source_when_directory_exists_guard_is_not_satisfied() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            sources: vec![Source {
+                from: SourceRoot::Path("macos".to_string()),
+                to: None,
+                guard: Some(Guard::DirectoryExists("/Applications".to_string())),
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".macos-defaults".to_string(),
+                    as_name: None,
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env_and_fs(&config, &BTreeMap::new(), &|_| false)
+            .expect("planning should succeed when the directory_exists guard is not satisfied");
+
+        assert!(
+            plan.sources.is_empty(),
+            "source should be excluded when guard is not satisfied"
+        );
     }
 
     fn unique_temp_file_path(prefix: &str) -> PathBuf {
