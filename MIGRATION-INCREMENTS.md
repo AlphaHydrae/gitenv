@@ -24,7 +24,7 @@ following documents before starting work on an increment:
 
 - [Architecture & design decisions](./ARCHITECTURE.md)
 - [Contribution guidelines](./CONTRIBUTING.md)
-- [Agent instructions](./AGENT.md)
+- [Agent instructions](./AGENTS.md)
 
 ## Design Decisions
 
@@ -35,24 +35,6 @@ Architectural and design decisions referenced by active increments:
 - [Output boundary: domain data vs CLI rendering](./ARCHITECTURE.md#output-boundary-domain-data-vs-cli-rendering)
 
 ## Current Backlog
-
-### Increment 11: Support per-config-item option overrides
-
-Why this increment exists:
-
-- Current planning applies global defaults uniformly to all config items.
-- Users need item-level overrides for mode and destination behavior without
-  duplicating sources.
-
-Review target:
-
-- File/select config items can override relevant default execution options.
-- Planning resolves item-level overrides deterministically.
-- Item-level explicit `overwrite: false` with `backup_on_overwrite: true` is
-  rejected as an invalid combination, while inherited backup defaults remain
-  valid when overwrite resolves to false.
-- Shared resolved-option fields are factored into one reusable plan type to
-  reduce duplication across planned action variants.
 
 ### Increment 12: Split planning/config code for readability
 

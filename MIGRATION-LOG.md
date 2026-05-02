@@ -11,6 +11,13 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-02: Support per-config-item option overrides - Add optional `mode`,
+  `to`, `mkdir`, `overwrite`, and `backup_on_overwrite` override fields to
+  `FileConfig` and `SelectConfig`; introduce `ResolvedOptions` to hold shared
+  resolved execution options and refactor `PlannedFileAction` and
+  `PlannedSelectAction` to use it; add `resolve_item_options` helper that merges
+  item-level overrides on top of inherited defaults and rejects the explicit
+  `overwrite: false` + `backup_on_overwrite: true` combination at item level.
 - 2026-05-02: Recover include-planner coverage and diagnostics workflow - Add
   focused include parser/planner tests for bare-dollar source/include
   shorthand, explicit-path planning, backup-on-overwrite conflict behavior, and

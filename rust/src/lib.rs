@@ -57,6 +57,16 @@ pub enum ConflictPolicy {
     OverwriteWithBackup,
 }
 
+/// Resolved execution options for a planned action, derived from the global
+/// defaults merged with any source-level and item-level overrides.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedOptions {
+    pub mode: ActionMode,
+    pub to: String,
+    pub mkdir: bool,
+    pub conflict_policy: ConflictPolicy,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Source {
@@ -241,6 +251,11 @@ impl<'de> Deserialize<'de> for ConfigItem {
             ConfigItemWire::ShorthandFile(file) => Ok(Self::File(FileConfig {
                 file,
                 as_name: None,
+                mode: None,
+                to: None,
+                mkdir: None,
+                overwrite: None,
+                backup_on_overwrite: None,
             })),
             ConfigItemWire::File(file_config) => Ok(Self::File(file_config)),
             ConfigItemWire::Select { select } => Ok(Self::Select(select)),
@@ -254,6 +269,16 @@ pub struct FileConfig {
     pub file: String,
     #[serde(rename = "as")]
     pub as_name: Option<String>,
+    #[serde(default)]
+    pub mode: Option<ActionMode>,
+    #[serde(default)]
+    pub to: Option<String>,
+    #[serde(default)]
+    pub mkdir: Option<bool>,
+    #[serde(default)]
+    pub overwrite: Option<bool>,
+    #[serde(default)]
+    pub backup_on_overwrite: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -262,6 +287,16 @@ pub struct SelectConfig {
     pub dotfiles: bool,
     #[serde(default)]
     pub exclude: Vec<String>,
+    #[serde(default)]
+    pub mode: Option<ActionMode>,
+    #[serde(default)]
+    pub to: Option<String>,
+    #[serde(default)]
+    pub mkdir: Option<bool>,
+    #[serde(default)]
+    pub overwrite: Option<bool>,
+    #[serde(default)]
+    pub backup_on_overwrite: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -312,20 +347,14 @@ pub enum PlannedAction {
 pub struct PlannedFileAction {
     pub file: String,
     pub as_name: String,
-    pub mode: ActionMode,
-    pub to: String,
-    pub mkdir: bool,
-    pub conflict_policy: ConflictPolicy,
+    pub options: ResolvedOptions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlannedSelectAction {
     pub dotfiles: bool,
     pub exclude: Vec<String>,
-    pub mode: ActionMode,
-    pub to: String,
-    pub mkdir: bool,
-    pub conflict_policy: ConflictPolicy,
+    pub options: ResolvedOptions,
 }
 
 pub fn parse_config(yaml: &str) -> Result<Config, ProgramError> {
@@ -448,11 +477,6 @@ fn plan_sources_recursively(
     missing_env: &mut BTreeSet<String>,
     missing_files: &mut BTreeSet<PathBuf>,
 ) -> Result<Vec<PlannedSource>, ProgramError> {
-    let conflict_policy = resolve_conflict_policy(
-        config.defaults.overwrite,
-        config.defaults.backup_on_overwrite,
-    );
-
     // Plan this config's own sources first (includes-after ordering).
     let mut own_sources = Vec::new();
     for source in &config.sources {
@@ -497,36 +521,48 @@ fn plan_sources_recursively(
             }
         }
 
-        own_sources.push(PlannedSource {
-            from,
-            actions: source
-                .configs
-                .iter()
-                .map(|item| match item {
-                    ConfigItem::File(file_config) => PlannedAction::File(PlannedFileAction {
+        let actions = source
+            .configs
+            .iter()
+            .map(|item| match item {
+                ConfigItem::File(file_config) => {
+                    let options = resolve_item_options(
+                        &config.defaults,
+                        &source_to,
+                        file_config.mode.as_ref(),
+                        file_config.to.as_deref(),
+                        file_config.mkdir,
+                        file_config.overwrite,
+                        file_config.backup_on_overwrite,
+                    )?;
+                    Ok(PlannedAction::File(PlannedFileAction {
                         file: file_config.file.clone(),
                         as_name: file_config
                             .as_name
                             .clone()
                             .unwrap_or_else(|| file_config.file.clone()),
-                        mode: config.defaults.mode.clone(),
-                        to: source_to.clone(),
-                        mkdir: config.defaults.mkdir,
-                        conflict_policy: conflict_policy.clone(),
-                    }),
-                    ConfigItem::Select(select_config) => {
-                        PlannedAction::Select(PlannedSelectAction {
-                            dotfiles: select_config.dotfiles,
-                            exclude: select_config.exclude.clone(),
-                            mode: config.defaults.mode.clone(),
-                            to: source_to.clone(),
-                            mkdir: config.defaults.mkdir,
-                            conflict_policy: conflict_policy.clone(),
-                        })
-                    }
-                })
-                .collect(),
-        });
+                        options,
+                    }))
+                }
+                ConfigItem::Select(select_config) => {
+                    let options = resolve_item_options(
+                        &config.defaults,
+                        &source_to,
+                        select_config.mode.as_ref(),
+                        select_config.to.as_deref(),
+                        select_config.mkdir,
+                        select_config.overwrite,
+                        select_config.backup_on_overwrite,
+                    )?;
+                    Ok(PlannedAction::Select(PlannedSelectAction {
+                        dotfiles: select_config.dotfiles,
+                        exclude: select_config.exclude.clone(),
+                        options,
+                    }))
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        own_sources.push(PlannedSource { from, actions });
     }
 
     // Resolve and plan each include, appending their sources after own sources.
@@ -619,6 +655,43 @@ fn resolve_conflict_policy(overwrite: bool, backup_on_overwrite: bool) -> Confli
     }
 }
 
+/// Resolves execution options for a single config item by merging item-level
+/// overrides on top of the inherited defaults and source-level destination.
+///
+/// Returns `InvalidConfiguration` immediately when the item explicitly sets
+/// both `overwrite: false` and `backup_on_overwrite: true`. This combination
+/// is meaningless (backup is irrelevant when overwrite is disabled) and most
+/// likely indicates a config mistake.
+///
+/// Inherited defaults are never rejected: an item that falls back to the
+/// global `overwrite: false, backup_on_overwrite: true` default resolves to
+/// `ConflictPolicy::Skip` without error.
+fn resolve_item_options(
+    defaults: &Defaults,
+    source_to: &str,
+    mode: Option<&ActionMode>,
+    to: Option<&str>,
+    mkdir: Option<bool>,
+    overwrite: Option<bool>,
+    backup_on_overwrite: Option<bool>,
+) -> Result<ResolvedOptions, ProgramError> {
+    if overwrite == Some(false) && backup_on_overwrite == Some(true) {
+        return Err(ProgramError::InvalidConfiguration {
+            message: "item-level `overwrite: false` with `backup_on_overwrite: true` is not a valid combination"
+                .to_string(),
+        });
+    }
+    Ok(ResolvedOptions {
+        mode: mode.unwrap_or(&defaults.mode).clone(),
+        to: to.unwrap_or(source_to).to_string(),
+        mkdir: mkdir.unwrap_or(defaults.mkdir),
+        conflict_policy: resolve_conflict_policy(
+            overwrite.unwrap_or(defaults.overwrite),
+            backup_on_overwrite.unwrap_or(defaults.backup_on_overwrite),
+        ),
+    })
+}
+
 pub fn run() -> Result<ProgramOutput, ProgramError> {
     Ok(ProgramOutput {
         message: "Hello, World!",
@@ -630,7 +703,7 @@ mod tests {
     use super::{
         ActionMode, Config, ConfigItem, ConflictPolicy, Defaults, ExecutionPlan, FileConfig, Guard,
         Include, PlannedAction, PlannedFileAction, PlannedSelectAction, PlannedSource,
-        ProgramError, SelectConfig, Source, SourceRoot, derive_execution_plan,
+        ProgramError, ResolvedOptions, SelectConfig, Source, SourceRoot, derive_execution_plan,
         derive_execution_plan_with_env, derive_execution_plan_with_env_and_fs,
         derive_execution_plan_with_injectables, load_config, parse_config, run,
     };
@@ -664,10 +737,20 @@ mod tests {
                     ConfigItem::File(FileConfig {
                         file: ".zshrc".to_string(),
                         as_name: None,
+                        mode: None,
+                        to: None,
+                        mkdir: None,
+                        overwrite: None,
+                        backup_on_overwrite: None,
                     }),
                     ConfigItem::Select(SelectConfig {
                         dotfiles: true,
                         exclude: vec![".DS_Store".to_string()],
+                        mode: None,
+                        to: None,
+                        mkdir: None,
+                        overwrite: None,
+                        backup_on_overwrite: None,
                     }),
                 ],
             }],
@@ -725,6 +808,11 @@ sources:
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
                     as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
                 })],
             }],
         };
@@ -816,6 +904,11 @@ sources:
                 configs: vec![ConfigItem::Select(SelectConfig {
                     dotfiles: true,
                     exclude: vec![".DS_Store".to_string(), ".git".to_string()],
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
                 })],
             }],
         };
@@ -848,6 +941,11 @@ sources:
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
                     as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
                 })],
             }],
         };
@@ -912,14 +1010,29 @@ sources:
                     ConfigItem::File(FileConfig {
                         file: ".zshrc".to_string(),
                         as_name: None,
+                        mode: None,
+                        to: None,
+                        mkdir: None,
+                        overwrite: None,
+                        backup_on_overwrite: None,
                     }),
                     ConfigItem::File(FileConfig {
                         file: ".tmux".to_string(),
                         as_name: Some(".tmux.conf".to_string()),
+                        mode: None,
+                        to: None,
+                        mkdir: None,
+                        overwrite: None,
+                        backup_on_overwrite: None,
                     }),
                     ConfigItem::Select(SelectConfig {
                         dotfiles: true,
                         exclude: vec![".git".to_string()],
+                        mode: None,
+                        to: None,
+                        mkdir: None,
+                        overwrite: None,
+                        backup_on_overwrite: None,
                     }),
                 ],
             }],
@@ -936,26 +1049,32 @@ sources:
                     PlannedAction::File(PlannedFileAction {
                         file: ".zshrc".to_string(),
                         as_name: ".zshrc".to_string(),
-                        mode: ActionMode::Copy,
-                        to: "~/dest".to_string(),
-                        mkdir: false,
-                        conflict_policy: ConflictPolicy::Overwrite,
+                        options: ResolvedOptions {
+                            mode: ActionMode::Copy,
+                            to: "~/dest".to_string(),
+                            mkdir: false,
+                            conflict_policy: ConflictPolicy::Overwrite,
+                        },
                     }),
                     PlannedAction::File(PlannedFileAction {
                         file: ".tmux".to_string(),
                         as_name: ".tmux.conf".to_string(),
-                        mode: ActionMode::Copy,
-                        to: "~/dest".to_string(),
-                        mkdir: false,
-                        conflict_policy: ConflictPolicy::Overwrite,
+                        options: ResolvedOptions {
+                            mode: ActionMode::Copy,
+                            to: "~/dest".to_string(),
+                            mkdir: false,
+                            conflict_policy: ConflictPolicy::Overwrite,
+                        },
                     }),
                     PlannedAction::Select(PlannedSelectAction {
                         dotfiles: true,
                         exclude: vec![".git".to_string()],
-                        mode: ActionMode::Copy,
-                        to: "~/dest".to_string(),
-                        mkdir: false,
-                        conflict_policy: ConflictPolicy::Overwrite,
+                        options: ResolvedOptions {
+                            mode: ActionMode::Copy,
+                            to: "~/dest".to_string(),
+                            mkdir: false,
+                            conflict_policy: ConflictPolicy::Overwrite,
+                        },
                     }),
                 ],
             }],
@@ -994,6 +1113,11 @@ sources:
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
                     as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
                 })],
             }],
         };
@@ -1031,6 +1155,11 @@ sources:
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
                     as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
                 })],
             }],
         };
@@ -1067,6 +1196,11 @@ sources:
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
                     as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
                 })],
             }],
         };
@@ -1097,6 +1231,11 @@ sources:
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".secrets".to_string(),
                     as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
                 })],
             }],
         };
@@ -1115,10 +1254,12 @@ sources:
                 actions: vec![PlannedAction::File(PlannedFileAction {
                     file: ".secrets".to_string(),
                     as_name: ".secrets".to_string(),
-                    mode: ActionMode::Copy,
-                    to: "~/.config".to_string(),
-                    mkdir: false,
-                    conflict_policy: ConflictPolicy::Overwrite,
+                    options: ResolvedOptions {
+                        mode: ActionMode::Copy,
+                        to: "~/.config".to_string(),
+                        mkdir: false,
+                        conflict_policy: ConflictPolicy::Overwrite,
+                    },
                 })],
             }],
         };
@@ -1146,6 +1287,11 @@ sources:
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
                     as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
                 })],
             }],
         };
@@ -1160,10 +1306,12 @@ sources:
                 actions: vec![PlannedAction::File(PlannedFileAction {
                     file: ".zshrc".to_string(),
                     as_name: ".zshrc".to_string(),
-                    mode: ActionMode::Symlink,
-                    to: "~".to_string(),
-                    mkdir: true,
-                    conflict_policy: ConflictPolicy::Skip,
+                    options: ResolvedOptions {
+                        mode: ActionMode::Symlink,
+                        to: "~".to_string(),
+                        mkdir: true,
+                        conflict_policy: ConflictPolicy::Skip,
+                    },
                 })],
             }],
         };
@@ -1189,6 +1337,11 @@ sources:
                     configs: vec![ConfigItem::File(FileConfig {
                         file: ".zshrc".to_string(),
                         as_name: None,
+                        mode: None,
+                        to: None,
+                        mkdir: None,
+                        overwrite: None,
+                        backup_on_overwrite: None,
                     })],
                 },
                 Source {
@@ -1201,6 +1354,11 @@ sources:
                     configs: vec![ConfigItem::File(FileConfig {
                         file: ".ssh_config".to_string(),
                         as_name: None,
+                        mode: None,
+                        to: None,
+                        mkdir: None,
+                        overwrite: None,
+                        backup_on_overwrite: None,
                     })],
                 },
             ],
@@ -1234,6 +1392,11 @@ sources:
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
                     as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
                 })],
             }],
         };
@@ -1460,6 +1623,11 @@ sources:
                 configs: vec![ConfigItem::File(FileConfig {
                     file: "settings.json".to_string(),
                     as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
                 })],
             }],
         };
@@ -1472,10 +1640,12 @@ sources:
             PlannedAction::File(PlannedFileAction {
                 file: "settings.json".to_string(),
                 as_name: "settings.json".to_string(),
-                mode: ActionMode::Symlink,
-                to: "~/Library/Application Support/Code/User".to_string(),
-                mkdir: true,
-                conflict_policy: ConflictPolicy::Skip,
+                options: ResolvedOptions {
+                    mode: ActionMode::Symlink,
+                    to: "~/Library/Application Support/Code/User".to_string(),
+                    mkdir: true,
+                    conflict_policy: ConflictPolicy::Skip,
+                },
             })
         );
     }
@@ -1494,6 +1664,11 @@ sources:
                 configs: vec![ConfigItem::File(FileConfig {
                     file: "settings.json".to_string(),
                     as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
                 })],
             }],
         };
@@ -1525,6 +1700,11 @@ sources:
                 configs: vec![ConfigItem::File(FileConfig {
                     file: "settings.json".to_string(),
                     as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
                 })],
             }],
         };
@@ -1552,6 +1732,11 @@ sources:
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".macos-defaults".to_string(),
                     as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
                 })],
             }],
         };
@@ -1580,6 +1765,11 @@ sources:
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".macos-defaults".to_string(),
                     as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
                 })],
             }],
         };
@@ -1744,6 +1934,11 @@ sources:
                 configs: vec![ConfigItem::File(FileConfig {
                     file: file.to_string(),
                     as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
                 })],
             }],
             includes: vec![],
@@ -1755,10 +1950,12 @@ sources:
         PlannedAction::File(PlannedFileAction {
             file: file.to_string(),
             as_name: file.to_string(),
-            mode: ActionMode::Symlink,
-            to: "~".to_string(),
-            mkdir: true,
-            conflict_policy: ConflictPolicy::Skip,
+            options: ResolvedOptions {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                conflict_policy: ConflictPolicy::Skip,
+            },
         })
     }
 
@@ -1778,6 +1975,11 @@ sources:
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
                     as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
                 })],
             }],
             includes: vec![Include::Path {
@@ -2118,6 +2320,11 @@ sources:
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".tmux.conf".to_string(),
                     as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
                 })],
             }],
             ..Config {
@@ -2147,6 +2354,11 @@ sources:
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
                     as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
                 })],
             }],
             ..Config {
@@ -2178,10 +2390,12 @@ sources:
             PlannedAction::File(PlannedFileAction {
                 file: ".zshrc".to_string(),
                 as_name: ".zshrc".to_string(),
-                mode: ActionMode::Copy,
-                to: "~/dest".to_string(),
-                mkdir: false,
-                conflict_policy: ConflictPolicy::Overwrite,
+                options: ResolvedOptions {
+                    mode: ActionMode::Copy,
+                    to: "~/dest".to_string(),
+                    mkdir: false,
+                    conflict_policy: ConflictPolicy::Overwrite,
+                },
             })
         );
 
@@ -2191,10 +2405,12 @@ sources:
             PlannedAction::File(PlannedFileAction {
                 file: ".tmux.conf".to_string(),
                 as_name: ".tmux.conf".to_string(),
-                mode: ActionMode::Symlink,
-                to: "~".to_string(),
-                mkdir: true,
-                conflict_policy: ConflictPolicy::Skip,
+                options: ResolvedOptions {
+                    mode: ActionMode::Symlink,
+                    to: "~".to_string(),
+                    mkdir: true,
+                    conflict_policy: ConflictPolicy::Skip,
+                },
             })
         );
     }
@@ -2284,6 +2500,11 @@ sources:
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
                     as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
                 })],
             }]
         );
@@ -2309,6 +2530,11 @@ sources:
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
                     as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
                 })],
             }],
         };
@@ -2341,6 +2567,11 @@ sources:
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
                     as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
                 })],
             }],
         };
@@ -2372,6 +2603,11 @@ sources:
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
                     as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
                 })],
             }],
         };
@@ -2384,10 +2620,348 @@ sources:
             PlannedAction::File(PlannedFileAction {
                 file: ".zshrc".to_string(),
                 as_name: ".zshrc".to_string(),
+                options: ResolvedOptions {
+                    mode: ActionMode::Symlink,
+                    to: "~".to_string(),
+                    mkdir: true,
+                    conflict_policy: ConflictPolicy::OverwriteWithBackup,
+                },
+            })
+        );
+    }
+
+    // ---------------------------------------------------------------------------
+    // Item-level option override tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn accept_item_level_option_overrides_in_file_config() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - file: .zshrc
+        mode: copy
+        to: ~/dest
+        mkdir: false
+        overwrite: true
+        backup_on_overwrite: false
+"#;
+
+        let config =
+            parse_config(yaml).expect("config should parse with item-level overrides on a file");
+
+        let item = &config.sources[0].configs[0];
+        let ConfigItem::File(file_cfg) = item else {
+            panic!("expected a file config item");
+        };
+        assert_eq!(file_cfg.mode, Some(ActionMode::Copy));
+        assert_eq!(file_cfg.to.as_deref(), Some("~/dest"));
+        assert_eq!(file_cfg.mkdir, Some(false));
+        assert_eq!(file_cfg.overwrite, Some(true));
+        assert_eq!(file_cfg.backup_on_overwrite, Some(false));
+    }
+
+    #[test]
+    fn accept_item_level_option_overrides_in_select_config() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - select:
+          dotfiles: true
+          mode: copy
+          to: ~/dest
+          mkdir: false
+          overwrite: true
+          backup_on_overwrite: false
+"#;
+
+        let config =
+            parse_config(yaml).expect("config should parse with item-level overrides on a select");
+
+        let item = &config.sources[0].configs[0];
+        let ConfigItem::Select(sel_cfg) = item else {
+            panic!("expected a select config item");
+        };
+        assert_eq!(sel_cfg.mode, Some(ActionMode::Copy));
+        assert_eq!(sel_cfg.to.as_deref(), Some("~/dest"));
+        assert_eq!(sel_cfg.mkdir, Some(false));
+        assert_eq!(sel_cfg.overwrite, Some(true));
+        assert_eq!(sel_cfg.backup_on_overwrite, Some(false));
+    }
+
+    #[test]
+    fn item_level_mode_override_takes_precedence_over_default_mode() {
+        // Global defaults use symlink mode; item overrides to copy.
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
                 mode: ActionMode::Symlink,
                 to: "~".to_string(),
                 mkdir: true,
-                conflict_policy: ConflictPolicy::OverwriteWithBackup,
+                overwrite: false,
+                backup_on_overwrite: true,
+            },
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                    mode: Some(ActionMode::Copy),
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+            .expect("planning should apply item-level mode override");
+
+        assert_eq!(
+            plan.sources[0].actions[0],
+            PlannedAction::File(PlannedFileAction {
+                file: ".zshrc".to_string(),
+                as_name: ".zshrc".to_string(),
+                options: ResolvedOptions {
+                    mode: ActionMode::Copy,
+                    to: "~".to_string(),
+                    mkdir: true,
+                    conflict_policy: ConflictPolicy::Skip,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn item_level_to_override_takes_precedence_over_source_to() {
+        // Source-level `to` is ~/shared; item overrides to ~/item-specific.
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: Some("~/shared".to_string()),
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: Some("~/item-specific".to_string()),
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env_and_fs(&config, &BTreeMap::new(), &|_| false)
+            .expect("planning should apply item-level to override");
+
+        assert_eq!(
+            plan.sources[0].actions[0],
+            PlannedAction::File(PlannedFileAction {
+                file: ".zshrc".to_string(),
+                as_name: ".zshrc".to_string(),
+                options: ResolvedOptions {
+                    mode: ActionMode::Symlink,
+                    to: "~/item-specific".to_string(),
+                    mkdir: true,
+                    conflict_policy: ConflictPolicy::Skip,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn item_level_overwrite_true_resolves_to_overwrite_conflict_policy() {
+        // Global defaults have overwrite disabled; item enables it.
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                overwrite: false,
+                backup_on_overwrite: true,
+            },
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: Some(true),
+                    backup_on_overwrite: Some(false),
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+            .expect("planning should apply item-level overwrite override");
+
+        assert_eq!(
+            plan.sources[0].actions[0],
+            PlannedAction::File(PlannedFileAction {
+                file: ".zshrc".to_string(),
+                as_name: ".zshrc".to_string(),
+                options: ResolvedOptions {
+                    mode: ActionMode::Symlink,
+                    to: "~".to_string(),
+                    mkdir: true,
+                    conflict_policy: ConflictPolicy::Overwrite,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn item_level_select_overrides_are_applied_independently() {
+        // Select item overrides mode and to while inheriting everything else.
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                overwrite: false,
+                backup_on_overwrite: true,
+            },
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::Select(SelectConfig {
+                    dotfiles: true,
+                    exclude: vec![],
+                    mode: Some(ActionMode::Copy),
+                    to: Some("~/config".to_string()),
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+            .expect("planning should apply select item overrides");
+
+        assert_eq!(
+            plan.sources[0].actions[0],
+            PlannedAction::Select(PlannedSelectAction {
+                dotfiles: true,
+                exclude: vec![],
+                options: ResolvedOptions {
+                    mode: ActionMode::Copy,
+                    to: "~/config".to_string(),
+                    mkdir: true,
+                    conflict_policy: ConflictPolicy::Skip,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn cannot_set_overwrite_false_and_backup_on_overwrite_true_at_item_level() {
+        // This combination is explicitly rejected when both are set at item level.
+        // (Inherited defaults with the same values are fine — they resolve to Skip.)
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: Some(false),
+                    backup_on_overwrite: Some(true),
+                })],
+            }],
+        };
+
+        let error = derive_execution_plan_with_env(&config, &BTreeMap::new())
+            .expect_err("planning should reject explicit overwrite: false with backup_on_overwrite: true at item level");
+
+        assert!(matches!(
+            error,
+            ProgramError::InvalidConfiguration { ref message }
+                if message.contains("overwrite: false") && message.contains("backup_on_overwrite: true")
+        ));
+    }
+
+    #[test]
+    fn inherited_backup_default_is_valid_when_overwrite_resolves_to_false() {
+        // Global defaults: overwrite: false, backup_on_overwrite: true (the defaults).
+        // An item that doesn't override either should resolve to Skip without error.
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                overwrite: false,
+                backup_on_overwrite: true,
+            },
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new()).expect(
+            "planning should succeed when backup default is inherited and overwrite is false",
+        );
+
+        assert_eq!(
+            plan.sources[0].actions[0],
+            PlannedAction::File(PlannedFileAction {
+                file: ".zshrc".to_string(),
+                as_name: ".zshrc".to_string(),
+                options: ResolvedOptions {
+                    mode: ActionMode::Symlink,
+                    to: "~".to_string(),
+                    mkdir: true,
+                    conflict_policy: ConflictPolicy::Skip,
+                },
             })
         );
     }
