@@ -49,6 +49,8 @@ Why this increment exists:
 
 Review target:
 
+- Update the proposed module boundaries in the architecture document to take
+  into account the two-stage planning model (if need be).
 - Split parsing/config model code and planning derivation code into focused
   modules that match architecture boundaries.
 - Keep `src/lib.rs` as a thin public API/re-export surface.
