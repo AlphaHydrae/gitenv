@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-02: Interpret dollar-prefixed source roots as environment bindings -
+  Normalize shorthand source roots that begin with `$` into required
+  environment-backed source roots and add an explicit path object variant so
+  literal paths that start with `$` remain supported.
 - 2026-05-02: Add environment-backed config values - Accept explicit required
   environment declarations and environment-backed source roots, resolve those
   bindings during planning, and reject missing variables with stable

@@ -61,15 +61,53 @@ pub struct Source {
     pub configs: Vec<ConfigItem>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceRoot {
     Path(String),
-    Environment {
-        env: String,
-        #[serde(default)]
-        optional: bool,
-    },
+    ExplicitPath { path: String },
+    Environment { env: String, optional: bool },
+}
+
+impl<'de> Deserialize<'de> for SourceRoot {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum SourceRootWire {
+            Shorthand(String),
+            Path {
+                path: String,
+            },
+            Environment {
+                env: String,
+                #[serde(default)]
+                optional: bool,
+            },
+        }
+
+        match SourceRootWire::deserialize(deserializer)? {
+            SourceRootWire::Shorthand(path) => {
+                if let Some(env) = path.strip_prefix('$') {
+                    if env.is_empty() {
+                        Ok(Self::Path(path))
+                    } else {
+                        Ok(Self::Environment {
+                            env: env.to_string(),
+                            optional: false,
+                        })
+                    }
+                } else {
+                    Ok(Self::Path(path))
+                }
+            }
+            SourceRootWire::Path { path } => Ok(Self::ExplicitPath { path }),
+            SourceRootWire::Environment { env, optional } => {
+                Ok(Self::Environment { env, optional })
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -199,6 +237,7 @@ pub fn derive_execution_plan_with_env(
     for source in &config.sources {
         let from = match &source.from {
             SourceRoot::Path(path) => Some(path.clone()),
+            SourceRoot::ExplicitPath { path } => Some(path.clone()),
             SourceRoot::Environment {
                 env,
                 optional: false,
@@ -625,6 +664,73 @@ sources:
                 from: SourceRoot::Environment {
                     env: "PRIVATE_ENV_DIR".to_string(),
                     optional: false,
+                },
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                })],
+            }],
+        };
+
+        assert_eq!(config, expected);
+    }
+
+    #[test]
+    fn interpret_dollar_prefixed_shorthand_source_roots_as_environment_sources() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "$PRIVATE_ENV_DIR"
+    configs:
+      - file: .zshrc
+"#;
+
+        let config = parse_config(yaml).expect(
+            "config should parse dollar-prefixed shorthand source roots as environment sources",
+        );
+
+        let expected = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            sources: vec![Source {
+                from: SourceRoot::Environment {
+                    env: "PRIVATE_ENV_DIR".to_string(),
+                    optional: false,
+                },
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                })],
+            }],
+        };
+
+        assert_eq!(config, expected);
+    }
+
+    #[test]
+    fn accept_explicit_path_source_roots_that_start_with_a_dollar_sign() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from:
+      path: "$PRIVATE_ENV_DIR"
+    configs:
+      - file: .zshrc
+"#;
+
+        let config = parse_config(yaml)
+            .expect("config should parse explicit path source roots that start with a dollar sign");
+
+        let expected = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            sources: vec![Source {
+                from: SourceRoot::ExplicitPath {
+                    path: "$PRIVATE_ENV_DIR".to_string(),
                 },
                 configs: vec![ConfigItem::File(FileConfig {
                     file: ".zshrc".to_string(),
