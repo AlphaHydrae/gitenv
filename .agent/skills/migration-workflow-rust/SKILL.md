@@ -79,8 +79,15 @@ Run these checks from the repository root (in order):
    - Run once before implementation for baseline, and once after changes.
    - Reports total line coverage for baseline and current state.
    - Output captured in `tmp/agent/coverage_output.log`.
-   - If coverage decreases by ~0.25 percentage points or more, document
-     follow-up work in `MIGRATION-INCREMENTS.md` and/or inline TODO comments.
+     - Default runs also write line-by-line annotated coverage to
+       `tmp/agent/coverage_annotated.log`.
+     - If coverage decreases by ~0.25 percentage points or more, restore
+       coverage in the same increment before claiming completion.
+     - Deferring coverage recovery is acceptable only for intentionally
+       incomplete intermediate increments where the missing tests fit the next
+       already-planned increment, or when restoration requires significant
+       architectural refactoring that does not fit current scope and has been
+       explicitly discussed.
 
 5. **Documentation** — If any Markdown files changed:
    - `./.agent/scripts/lint-md.sh`
@@ -129,8 +136,9 @@ See commit message expectations in `AGENTS.md` for full guidance.
   increment or a backlog item per proactive maintainability guidance in
   `AGENTS.md`.
 
-- **Coverage drop without justification** — Explain why in a comment or
-  increment note. Treat ~0.25pp or more as significant.
+- **Coverage drop without recovery** — Do not close the increment until
+  coverage is restored or an explicit defer decision is recorded with reason.
+  Treat ~0.25pp or more as significant.
 
 - **Test name unclear** — Re-read spec description style in `CONTRIBUTING.md`
   and rename. Test names are behavioral documentation.

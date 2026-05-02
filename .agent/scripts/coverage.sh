@@ -3,10 +3,17 @@
 # Run Rust coverage and capture output to "tmp/agent/coverage_output.log".
 #
 # Usage:
-#   .agent/scripts/coverage.sh         # run coverage summary
+#   .agent/scripts/coverage.sh         # run coverage summary + annotated text report
 #   .agent/scripts/coverage.sh --html  # pass through cargo llvm-cov args
 #
-# Output is written to: "tmp/agent/coverage_output.log".
+# Output files written to tmp/agent/:
+#   coverage_output.log      — summary table (Regions / Functions / Lines)
+#   coverage_annotated.log   — line-by-line annotated source (always written on
+#                              a default run, omitted when args are passed)
+#
+# Finding uncovered lines (execution count = 0):
+#   grep -E '^\s+[0-9]+\|\s+0\|' tmp/agent/coverage_annotated.log
+#
 # Exit code matches cargo llvm-cov's exit code.
 
 set -euo pipefail
@@ -14,6 +21,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RUST_WORKSPACE="$REPO_ROOT/rust"
 OUTPUT_LOG="$REPO_ROOT/tmp/agent/coverage_output.log"
+ANNOTATED_LOG="$REPO_ROOT/tmp/agent/coverage_annotated.log"
 
 mkdir -p "$REPO_ROOT/tmp/agent"
 
@@ -53,12 +61,20 @@ set +e
 if [[ $# -eq 0 ]]; then
   echo "Running: cargo llvm-cov --workspace --all-targets --summary-only" | tee "$OUTPUT_LOG"
   cargo llvm-cov --workspace --all-targets --summary-only 2>&1 | tee -a "$OUTPUT_LOG"
+  SUMMARY_EXIT_CODE=${PIPESTATUS[0]}
+
+  # Also write a line-by-line annotated report so that uncovered lines can be
+  # surfaced quickly with:
+  #   grep -E '^\s+[0-9]+\|\s+0\|' tmp/agent/coverage_annotated.log
+  echo "Running: cargo llvm-cov --workspace --all-targets --text (annotated)" >> "$OUTPUT_LOG"
+  cargo llvm-cov --workspace --all-targets --text 2>/dev/null > "$ANNOTATED_LOG" || true
+
+  EXIT_CODE=$SUMMARY_EXIT_CODE
 else
   echo "Running: cargo llvm-cov $*" | tee "$OUTPUT_LOG"
   cargo llvm-cov "$@" 2>&1 | tee -a "$OUTPUT_LOG"
+  EXIT_CODE=${PIPESTATUS[0]}
 fi
-
-EXIT_CODE=${PIPESTATUS[0]}
 set -e
 
 echo "" >> "$OUTPUT_LOG"

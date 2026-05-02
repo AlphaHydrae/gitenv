@@ -11,6 +11,12 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-02: Recover include-planner coverage and diagnostics workflow - Add
+  focused include parser/planner tests for bare-dollar source/include
+  shorthand, explicit-path planning, backup-on-overwrite conflict behavior, and
+  non-read include error propagation; simplify include test injectables to
+  avoid dead closure branches; and extend coverage tooling/docs to emit an
+  annotated coverage log for fast uncovered-line inspection.
 - 2026-05-02: Add deterministic config includes - Add declarative YAML
   `includes` support with deterministic include ordering (including file
   sources before included sources), per-config default isolation, include

@@ -186,9 +186,14 @@ Skills currently in scope:
 
 **Deferred work:**
 
-- If follow-up work is discovered (e.g., significant coverage drop), document
-  it in `MIGRATION-INCREMENTS.md` as a new item or as an inline TODO.
-- Do not create separate tracked items outside the migration docs.
+- If significant coverage drops during an increment, treat restoring coverage
+  as part of that same increment by default.
+- Defer coverage recovery only for intentionally incomplete intermediate
+  increments where missing tests fit the next already-planned increment, or
+  when restoration needs significant architectural refactoring and the defer
+  decision has been explicitly discussed.
+- When deferred, document the specific uncovered paths and rationale in
+  `MIGRATION-INCREMENTS.md` and/or inline TODO comments.
 
 **Explanation vs. decision:**
 

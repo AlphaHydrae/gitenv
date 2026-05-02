@@ -153,11 +153,7 @@ Apply checks that match your change scope.
 6. Run formatting using write mode by default (`./.agent/scripts/format.sh`).
    Use check mode only when explicitly requested or when diagnosing formatting
    without modifying files.
-7. Run coverage for code changes and compare with the pre-change baseline. If
-   coverage decreases significantly, capture required follow-up work (living
-   increment backlog item and/or inline TODO). Treat a drop of about 0.25
-   percentage points or more as significant unless there is a stronger
-   project-specific reason.
+7. Run coverage for code changes. Avoid significant coverage drops.
 
 ## Setup
 
@@ -256,9 +252,16 @@ Use these wrapper scripts for agent verification from the repository root:
 
 Each script:
 
-- Print command output to the terminal.
-- Capture full output in `tmp/agent/*.log` files.
-- Print exit code and concise summary at the end.
+- Prints command output to the terminal.
+- Captures full output in `tmp/agent/*.log` files.
+- Prints the exit code and a concise summary at the end.
+
+`./.agent/scripts/coverage.sh` also writes a line-by-line annotated report to
+`tmp/agent/coverage_annotated.log` on default runs. To list uncovered lines:
+
+```sh
+grep -E '^\s+[0-9]+\|\s+0\|' tmp/agent/coverage_annotated.log
+```
 
 ## Pull Request Expectations
 

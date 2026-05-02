@@ -82,10 +82,24 @@ them to EVERY task, EVERY time.**
     a human or when diagnosing formatting-only issues without applying changes.
   - For migration increments, always run `./.agent/scripts/coverage.sh` again
     after changes and report both previous and current coverage.
-  - If coverage decreases significantly, explicitly explain why and document
-    follow-up work in [`MIGRATION-INCREMENTS.md`](./MIGRATION-INCREMENTS.md)
-    and/or inline TODO comments. Treat a drop of about 0.25 percentage points
-    or more as significant unless there is a stronger project-specific reason.
+  - If coverage decreases significantly, **do not consider the increment
+    complete.** Restore coverage before claiming completion. A coverage drop
+    caused by new code in the current increment means the tests for that code
+    are missing — adding those tests is part of the increment, not a separate
+    follow-up. Treat a drop of about 0.25 percentage points or more as
+    significant unless there is a stronger project-specific reason.
+  - There are two narrow situations where scheduling coverage recovery in a
+    separate increment is acceptable: (1) the increment is an intentionally
+    incomplete intermediate step toward a larger feature, and the missing tests
+    fit better with the next already-planned increment; or (2) restoring
+    coverage requires significant architectural changes that cannot fit in the
+    current increment — in that case, explicitly surface the issue and ask the
+    human whether to fix it immediately, skip it, or schedule a new increment.
+    In all other cases, restore coverage in the same increment.
+  - When coverage cannot be restored immediately, document the specific
+    uncovered lines and the reason in
+    [`MIGRATION-INCREMENTS.md`](./MIGRATION-INCREMENTS.md) and/or inline TODO
+    comments.
   - When wrappers are not applicable for a task, run interim checks documented
     in [CONTRIBUTING.md](./CONTRIBUTING.md#common-commands).
   - Show full command output including exit code, test count, or failure details.
@@ -334,6 +348,11 @@ These wrappers run the commands documented in
 - Use `./.agent/scripts/coverage.sh` from the repository root for test coverage.
 - The script captures full output to `tmp/agent/coverage_output.log`, prints the
   exit code, and prints the total line coverage when available.
+- On a default run the script also writes a line-by-line annotated source report
+  to `tmp/agent/coverage_annotated.log`. To list every uncovered line quickly:
+  ```sh
+  grep -E '^\s+[0-9]+\|\s+0\|' tmp/agent/coverage_annotated.log
+  ```
 
 ### Linting
 

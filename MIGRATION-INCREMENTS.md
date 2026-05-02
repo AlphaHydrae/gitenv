@@ -27,25 +27,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 10a: Recover include planning coverage after include rollout
-
-Why this increment exists:
-
-- Increment 10 introduces include parsing/planning behavior and new branches,
-  and overall line coverage drops from 97.92% to 94.48%.
-- The current tests cover primary include semantics but leave several fallback
-  and error paths under-covered.
-
-Review target:
-
-- Add focused tests for include planning edge branches, especially around
-  non-`ReadConfiguration` include load errors and root-path-seeded cycle
-  detection.
-- Add direct unit assertions for include-path diagnostic determinism (sorted,
-  deduplicated reporting).
-- Restore coverage trend upward from the post-Increment-10 baseline while
-  preserving existing include behavior.
-
 ### Increment 11: Support per-config-item option overrides
 
 Why this increment exists:

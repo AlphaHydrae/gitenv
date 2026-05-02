@@ -630,9 +630,9 @@ mod tests {
     use super::{
         ActionMode, Config, ConfigItem, ConflictPolicy, Defaults, ExecutionPlan, FileConfig, Guard,
         Include, PlannedAction, PlannedFileAction, PlannedSelectAction, PlannedSource,
-        ProgramError, SelectConfig, Source, SourceRoot, derive_execution_plan_with_env,
-        derive_execution_plan_with_env_and_fs, derive_execution_plan_with_injectables, load_config,
-        parse_config, run,
+        ProgramError, SelectConfig, Source, SourceRoot, derive_execution_plan,
+        derive_execution_plan_with_env, derive_execution_plan_with_env_and_fs,
+        derive_execution_plan_with_injectables, load_config, parse_config, run,
     };
     use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
@@ -1792,14 +1792,8 @@ sources:
             &BTreeMap::new(),
             &|_| false,
             &|path: &Path| {
-                if path == Path::new("/inc/a.yml") {
-                    Ok(included.clone())
-                } else {
-                    Err(ProgramError::ReadConfiguration {
-                        path: path.to_path_buf(),
-                        message: "not found".to_string(),
-                    })
-                }
+                assert_eq!(path, Path::new("/inc/a.yml"));
+                Ok(included.clone())
             },
         )
         .expect("planning should succeed with a valid include");
@@ -1842,13 +1836,13 @@ sources:
             None,
             &BTreeMap::new(),
             &|_| false,
-            &|path: &Path| match path.to_str().unwrap_or("") {
-                "/inc/a.yml" => Ok(a.clone()),
-                "/inc/c.yml" => Ok(c.clone()),
-                _ => Err(ProgramError::ReadConfiguration {
-                    path: path.to_path_buf(),
-                    message: "not found".to_string(),
-                }),
+            &|path: &Path| {
+                if path == Path::new("/inc/a.yml") {
+                    Ok(a.clone())
+                } else {
+                    assert_eq!(path, Path::new("/inc/c.yml"));
+                    Ok(c.clone())
+                }
             },
         )
         .expect("planning should succeed with nested includes");
@@ -1891,13 +1885,13 @@ sources:
             None,
             &BTreeMap::new(),
             &|_| false,
-            &|path: &Path| match path.to_str().unwrap_or("") {
-                "/inc/a.yml" => Ok(a.clone()),
-                "/inc/shared.yml" => Ok(shared.clone()),
-                _ => Err(ProgramError::ReadConfiguration {
-                    path: path.to_path_buf(),
-                    message: "not found".to_string(),
-                }),
+            &|path: &Path| {
+                if path == Path::new("/inc/a.yml") {
+                    Ok(a.clone())
+                } else {
+                    assert_eq!(path, Path::new("/inc/shared.yml"));
+                    Ok(shared.clone())
+                }
             },
         )
         .expect("planning should succeed and deduplicate shared includes");
@@ -2007,13 +2001,13 @@ sources:
             None,
             &BTreeMap::new(),
             &|_| false,
-            &|path: &Path| match path.to_str().unwrap_or("") {
-                "/inc/a.yml" => Ok(a.clone()),
-                "/inc/b.yml" => Ok(b.clone()),
-                _ => Err(ProgramError::ReadConfiguration {
-                    path: path.to_path_buf(),
-                    message: "not found".to_string(),
-                }),
+            &|path: &Path| {
+                if path == Path::new("/inc/a.yml") {
+                    Ok(a.clone())
+                } else {
+                    assert_eq!(path, Path::new("/inc/b.yml"));
+                    Ok(b.clone())
+                }
             },
         )
         .expect_err("planning should fail when an include cycle is detected");
@@ -2051,14 +2045,8 @@ sources:
             &environment,
             &|_| false,
             &|path: &Path| {
-                if path == Path::new("/private/.gitenv.yml") {
-                    Ok(included.clone())
-                } else {
-                    Err(ProgramError::ReadConfiguration {
-                        path: path.to_path_buf(),
-                        message: "not found".to_string(),
-                    })
-                }
+                assert_eq!(path, Path::new("/private/.gitenv.yml"));
+                Ok(included.clone())
             },
         )
         .expect("planning should resolve an environment-backed include path");
@@ -2077,19 +2065,9 @@ sources:
             ..single_source_config(".", ".zshrc")
         };
 
-        let plan = derive_execution_plan_with_injectables(
-            &root,
-            None,
-            &BTreeMap::new(),
-            &|_| false,
-            &|path: &Path| {
-                Err(ProgramError::ReadConfiguration {
-                    path: path.to_path_buf(),
-                    message: "not found".to_string(),
-                })
-            },
-        )
-        .expect("planning should succeed when an optional env-backed include variable is unset");
+        let plan = derive_execution_plan_with_env(&root, &BTreeMap::new()).expect(
+            "planning should succeed when an optional env-backed include variable is unset",
+        );
 
         assert_eq!(
             plan.sources.len(),
@@ -2108,19 +2086,9 @@ sources:
             ..single_source_config(".", ".zshrc")
         };
 
-        let error = derive_execution_plan_with_injectables(
-            &root,
-            None,
-            &BTreeMap::new(),
-            &|_| false,
-            &|path: &Path| {
-                Err(ProgramError::ReadConfiguration {
-                    path: path.to_path_buf(),
-                    message: "not found".to_string(),
-                })
-            },
-        )
-        .expect_err("planning should fail when a required env-backed include variable is unset");
+        let error = derive_execution_plan_with_env(&root, &BTreeMap::new()).expect_err(
+            "planning should fail when a required env-backed include variable is unset",
+        );
 
         assert_eq!(
             error,
@@ -2196,14 +2164,8 @@ sources:
             &BTreeMap::new(),
             &|_| false,
             &|path: &Path| {
-                if path == Path::new("/inc/a.yml") {
-                    Ok(included.clone())
-                } else {
-                    Err(ProgramError::ReadConfiguration {
-                        path: path.to_path_buf(),
-                        message: "not found".to_string(),
-                    })
-                }
+                assert_eq!(path, Path::new("/inc/a.yml"));
+                Ok(included.clone())
             },
         )
         .expect("planning should succeed and isolate defaults per included config");
@@ -2233,6 +2195,199 @@ sources:
                 to: "~".to_string(),
                 mkdir: true,
                 conflict_policy: ConflictPolicy::Skip,
+            })
+        );
+    }
+
+    #[test]
+    fn include_bare_dollar_shorthand_is_treated_as_a_literal_path() {
+        // "$" has an empty env name after stripping the "$" prefix. The
+        // deserializer must treat it as a literal path, not an env-backed
+        // include, to avoid silently ignoring the dollar sign.
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - .zshrc
+includes:
+  - $
+"#;
+
+        let config = parse_config(yaml)
+            .expect("config with a bare-dollar include should parse successfully");
+
+        assert_eq!(
+            config.includes,
+            vec![Include::Path {
+                path: "$".to_string(),
+                optional: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn parse_error_in_included_config_propagates_immediately() {
+        // An include whose file returns a non-ReadConfiguration error (e.g. a
+        // structural parse failure) must be propagated immediately rather than
+        // collected into an IncludeNotFound set.
+        let root = Config {
+            includes: vec![Include::Path {
+                path: "/inc/bad.yml".to_string(),
+                optional: false,
+            }],
+            ..single_source_config(".", ".zshrc")
+        };
+
+        let error = derive_execution_plan_with_injectables(
+            &root,
+            None,
+            &BTreeMap::new(),
+            &|_| false,
+            &|_| {
+                Err(ProgramError::InvalidConfiguration {
+                    message: "unknown field `oops`".to_string(),
+                })
+            },
+        )
+        .expect_err("a parse error from an included config should propagate immediately");
+
+        assert_eq!(
+            error,
+            ProgramError::InvalidConfiguration {
+                message: "unknown field `oops`".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn source_root_bare_dollar_shorthand_is_treated_as_a_literal_path() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: $
+    configs:
+      - .zshrc
+"#;
+
+        let config = parse_config(yaml)
+            .expect("config with a bare-dollar source root should parse successfully");
+
+        assert_eq!(
+            config.sources,
+            vec![Source {
+                from: SourceRoot::Path("$".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                })],
+            }]
+        );
+    }
+
+    #[test]
+    fn derive_execution_plan_uses_real_environment_and_filesystem() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                overwrite: false,
+                backup_on_overwrite: false,
+            },
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: Some(Guard::DirectoryExists(".".to_string())),
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan(&config)
+            .expect("planning should succeed when the current directory exists");
+
+        assert_eq!(plan.repository, "~/projects/env");
+        assert_eq!(plan.sources.len(), 1);
+        assert_eq!(plan.sources[0].from, ".");
+        assert_eq!(
+            plan.sources[0].actions,
+            vec![expected_file_action(".zshrc")]
+        );
+    }
+
+    #[test]
+    fn plan_explicit_path_source_roots_as_literal_paths() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::ExplicitPath {
+                    path: "$PRIVATE_ENV_DIR".to_string(),
+                },
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+            .expect("planning should keep explicit path source roots as-is");
+
+        assert_eq!(plan.sources.len(), 1);
+        assert_eq!(plan.sources[0].from, "$PRIVATE_ENV_DIR");
+    }
+
+    #[test]
+    fn overwrite_with_backup_produces_backup_conflict_policy() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                overwrite: true,
+                backup_on_overwrite: true,
+            },
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+            .expect("planning should produce overwrite-with-backup conflict policy");
+
+        assert_eq!(
+            plan.sources[0].actions[0],
+            PlannedAction::File(PlannedFileAction {
+                file: ".zshrc".to_string(),
+                as_name: ".zshrc".to_string(),
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                conflict_policy: ConflictPolicy::OverwriteWithBackup,
             })
         );
     }
