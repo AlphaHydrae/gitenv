@@ -212,6 +212,64 @@ sources:
     }
 
     #[test]
+    fn accept_select_entries_in_source_configs() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+defaults:
+  mode: symlink
+  to: "~"
+  mkdir: true
+  overwrite: false
+  backup_on_overwrite: true
+sources:
+  - from: "."
+    configs:
+      - select:
+          dotfiles: true
+          exclude:
+            - .DS_Store
+            - .git
+"#;
+
+        let config = parse_config(yaml).expect("config should parse with a select item");
+
+        let expected = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                overwrite: false,
+                backup_on_overwrite: true,
+            },
+            sources: vec![Source {
+                from: ".".to_string(),
+                configs: vec![ConfigItem::Select(SelectConfig {
+                    dotfiles: true,
+                    exclude: vec![".DS_Store".to_string(), ".git".to_string()],
+                })],
+            }],
+        };
+
+        assert_eq!(config, expected);
+    }
+
+    #[test]
+    fn cannot_load_a_missing_config_file() {
+        let file_path = unique_temp_file_path("missing_config");
+
+        let error = load_config(&file_path).expect_err("missing file should fail to load");
+
+        assert!(matches!(
+            &error,
+            ProgramError::ReadConfiguration { path, message }
+                if path == &file_path && !message.is_empty()
+        ));
+    }
+
+    #[test]
     fn reject_config_missing_repository() {
         let yaml = r#"
 version: 1
@@ -229,12 +287,11 @@ sources:
 
         let error = parse_config(yaml).expect_err("config should fail without repository");
 
-        match error {
-            ProgramError::InvalidConfiguration { message } => {
-                assert!(message.contains("missing field `repository`"));
-            }
-            other => panic!("unexpected error variant: {other:?}"),
-        }
+        assert!(matches!(
+            error,
+            ProgramError::InvalidConfiguration { message }
+                if message.contains("missing field `repository`")
+        ));
     }
 
     #[test]
@@ -243,12 +300,11 @@ sources:
 
         let error = parse_config(yaml).expect_err("malformed yaml should fail");
 
-        match error {
-            ProgramError::InvalidConfiguration { message } => {
-                assert!(message.contains("failed to parse config YAML"));
-            }
-            other => panic!("unexpected error variant: {other:?}"),
-        }
+        assert!(matches!(
+            error,
+            ProgramError::InvalidConfiguration { message }
+                if message.contains("failed to parse config YAML")
+        ));
     }
 
     fn unique_temp_file_path(prefix: &str) -> PathBuf {

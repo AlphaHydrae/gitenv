@@ -1,16 +1,19 @@
 # Migration Increment Log
 
 This file is the historical log of completed Rust migration increments. Use it
-as the durable record of what has already been completed and why it was done.
+as the durable record of what has already been completed.
 
 Entries should be simple bullet points in reverse chronological order.
 
 Suggested entry shape:
 
-- YYYY-MM-DD: <short title> - <what was completed and why it mattered>
+- YYYY-MM-DD: <short title> - <what was completed>
 
 ## Entries
 
+- 2026-05-02: Added targeted Rust tests for select-item parsing and missing-file
+  read failures, and tightened invalid-config assertions so parser error
+  behavior is fully exercised.
 - 2026-05-01: Parse the smallest valid YAML config - Added `serde_yaml` parsing
   for the canonical config model, including a file-loading boundary and clear
   invalid-configuration errors for malformed YAML and missing required fields.

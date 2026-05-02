@@ -18,20 +18,6 @@ are not forgotten.
 
 ## Current Backlog
 
-### Increment 3 follow-up: Recover parser coverage after Increment 3
-
-Why this increment exists:
-
-- Increment 3 introduced new parser/file-read paths that reduced total line
-  coverage from 94.64% to 92.54%.
-- Keep the migration coverage contract explicit and actionable.
-
-Review target:
-
-- Add coverage for file-read error handling and parser paths that remain
-  untested.
-- Return total line coverage to at least the pre-Increment-3 baseline.
-
 ### Increment 4: Allow omitted defaults in configuration
 
 Why this increment exists:

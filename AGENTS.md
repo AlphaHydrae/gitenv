@@ -170,6 +170,9 @@ them to EVERY task, EVERY time.**
 - Maintain increment history in [`MIGRATION-LOG.md`](./MIGRATION-LOG.md)
   (historical record only). Keep entries concise and ordered so completed work
   remains easy to scan.
+- For migration log entries, describe what changed. Do not add explicit
+  coverage-outcome narration when the entry already states the added tests or
+  behavior work.
 - Maintain the active next-step backlog in
   [`MIGRATION-INCREMENTS.md`](./MIGRATION-INCREMENTS.md) (living plan only).
   Keep it focused on immediate agreed increments.
@@ -180,14 +183,21 @@ them to EVERY task, EVERY time.**
      [`MIGRATION-INCREMENTS.md`](./MIGRATION-INCREMENTS.md).
 - When an increment is completed, provide a suggested commit message in the
   conversation that is easy to copy for human review:
-  1. Start with an imperative title line.
-  2. Follow with a short body describing what changed and why.
-  3. Focus the body on product/code behavior changes, not expected maintenance
+  1. Present the suggested commit message in a fenced code block so it is
+     directly copyable.
+  2. Start with an imperative title line that states what changed.
+  3. Do not use the title to explain why the change was done.
+  4. Follow with a short body describing what changed.
+  5. For commits that include multiple meaningful changes, you may use `-`
+     bullet points in the body when that improves readability.
+  6. Focus the body on product/code behavior changes, not expected maintenance
      steps.
-  4. Do not mention routine test additions unless the change introduces new
+  7. Do not mention routine test additions unless the change introduces new
      test utilities, test infrastructure, or testing tools.
-  5. Do not mention routine migration log/backlog updates unless those
+  8. Do not mention routine migration log/backlog updates unless those
      documentation changes are themselves the primary deliverable.
+  9. Do not mention normal repository-upkeep tasks in suggested commit
+     messages when those tasks are evident from the diff.
 - Be proactive with migration documentation upkeep. Do not wait for explicit
   user prompts: when work changes scope, sequencing, assumptions, or outcomes,
   update [`MIGRATION-LOG.md`](./MIGRATION-LOG.md) and/or
