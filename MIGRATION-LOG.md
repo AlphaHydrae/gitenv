@@ -11,6 +11,11 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-02: Add deterministic config includes - Add declarative YAML
+  `includes` support with deterministic include ordering (including file
+  sources before included sources), per-config default isolation, include
+  de-duplication, cycle detection, and stable include diagnostics for missing
+  files and missing environment-backed include variables.
 - 2026-05-02: Add declarative filesystem guards - Add source-level destination
   overrides and declarative `when` guards (`to_exists` and `directory_exists`),
   evaluate guard outcomes deterministically during planning without executing

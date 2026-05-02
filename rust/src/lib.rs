@@ -16,6 +16,8 @@ pub struct Config {
     #[serde(default)]
     pub defaults: Defaults,
     pub sources: Vec<Source>,
+    #[serde(default)]
+    pub includes: Vec<Include>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -154,6 +156,68 @@ impl<'de> Deserialize<'de> for Guard {
     }
 }
 
+/// A reference to another config file to compose into this one.
+///
+/// Shorthand string forms:
+/// - `"~/path/to/file.yml"` — required literal path include.
+/// - `"$VAR"` — required environment-backed path include.
+///
+/// Canonical forms accept an `optional` flag to silently skip when the
+/// file or environment variable is absent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Include {
+    Path { path: String, optional: bool },
+    Environment { env: String, optional: bool },
+}
+
+impl<'de> Deserialize<'de> for Include {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum IncludeWire {
+            Shorthand(String),
+            Path {
+                path: String,
+                #[serde(default)]
+                optional: bool,
+            },
+            Environment {
+                env: String,
+                #[serde(default)]
+                optional: bool,
+            },
+        }
+
+        match IncludeWire::deserialize(deserializer)? {
+            IncludeWire::Shorthand(s) => {
+                if let Some(env) = s.strip_prefix('$') {
+                    if env.is_empty() {
+                        Ok(Self::Path {
+                            path: s,
+                            optional: false,
+                        })
+                    } else {
+                        Ok(Self::Environment {
+                            env: env.to_string(),
+                            optional: false,
+                        })
+                    }
+                } else {
+                    Ok(Self::Path {
+                        path: s,
+                        optional: false,
+                    })
+                }
+            }
+            IncludeWire::Path { path, optional } => Ok(Self::Path { path, optional }),
+            IncludeWire::Environment { env, optional } => Ok(Self::Environment { env, optional }),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigItem {
     File(FileConfig),
@@ -202,9 +266,27 @@ pub struct SelectConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProgramError {
-    InvalidConfiguration { message: String },
-    ReadConfiguration { path: PathBuf, message: String },
-    MissingEnvironment { vars: Vec<String> },
+    InvalidConfiguration {
+        message: String,
+    },
+    ReadConfiguration {
+        path: PathBuf,
+        message: String,
+    },
+    MissingEnvironment {
+        vars: Vec<String>,
+    },
+    /// One or more required include files could not be found. The paths are
+    /// sorted for deterministic output.
+    IncludeNotFound {
+        paths: Vec<PathBuf>,
+    },
+    /// A config file was encountered more than once in the same include chain,
+    /// forming a cycle. Contains the full cycle path in traversal order,
+    /// ending with the repeated path that closes the cycle.
+    IncludeCycle {
+        cycle: Vec<PathBuf>,
+    },
     UnsupportedConfiguration,
 }
 
@@ -275,20 +357,104 @@ pub fn derive_execution_plan_with_env(
     })
 }
 
-/// Core planning function. `is_directory` is injected so tests can evaluate guards
-/// against a controlled set of paths rather than the real filesystem.
+/// Core planning function. `is_directory` is injected so tests can evaluate
+/// guards without touching the real filesystem.
+///
+/// Delegates to `derive_execution_plan_with_injectables` with the real
+/// file-reader so include resolution works against actual config files.
 pub fn derive_execution_plan_with_env_and_fs(
     config: &Config,
     environment: &BTreeMap<String, String>,
     is_directory: &impl Fn(&str) -> bool,
 ) -> Result<ExecutionPlan, ProgramError> {
-    let mut missing_environment = BTreeSet::new();
-    let mut sources = Vec::new();
+    derive_execution_plan_with_injectables(config, None, environment, is_directory, &load_config)
+}
+
+/// Fully injectable planning function used by tests to exercise include
+/// resolution without writing real config files.
+///
+/// `config_path` is the canonical path of the root config file, used to seed
+/// the cycle-detection stack. Pass `None` when there is no file on disk (e.g.
+/// configs built in tests via `parse_config`).
+///
+/// `read_config_file` is called once per include path. Tests supply a closure
+/// that returns pre-parsed configs from an in-memory map.
+pub fn derive_execution_plan_with_injectables(
+    config: &Config,
+    config_path: Option<&Path>,
+    environment: &BTreeMap<String, String>,
+    is_directory: &impl Fn(&str) -> bool,
+    read_config_file: &impl Fn(&Path) -> Result<Config, ProgramError>,
+) -> Result<ExecutionPlan, ProgramError> {
+    let mut missing_env: BTreeSet<String> = BTreeSet::new();
+    let mut missing_files: BTreeSet<PathBuf> = BTreeSet::new();
+    // in_flight tracks the ancestor chain for cycle detection; seed with the
+    // root config path so a self-referencing include is caught.
+    let mut in_flight: Vec<PathBuf> = config_path
+        .map(|p| vec![p.to_path_buf()])
+        .unwrap_or_default();
+    let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
+
+    let sources = plan_sources_recursively(
+        config,
+        environment,
+        is_directory,
+        read_config_file,
+        &mut in_flight,
+        &mut seen,
+        &mut missing_env,
+        &mut missing_files,
+    )?;
+
+    if !missing_env.is_empty() {
+        return Err(ProgramError::MissingEnvironment {
+            vars: missing_env.into_iter().collect(),
+        });
+    }
+
+    if !missing_files.is_empty() {
+        return Err(ProgramError::IncludeNotFound {
+            paths: missing_files.into_iter().collect(),
+        });
+    }
+
+    Ok(ExecutionPlan {
+        repository: config.repository.clone(),
+        sources,
+    })
+}
+
+/// Recursively plans sources for one config and all its transitive includes.
+///
+/// Returns the config's own planned sources followed by each include's planned
+/// sources in declaration order (includes-after ordering: the including file's
+/// sources always appear before the included ones).
+///
+/// Errors:
+/// - `IncludeCycle`: returned immediately when a path already in the ancestor
+///   chain is encountered again. The returned `cycle` field contains the full
+///   repeated chain. This is a structural error that cannot be recovered from.
+/// - `MissingEnvironment` and `IncludeNotFound` diagnostics are collected into
+///   `missing_env` and `missing_files` and handled by the caller after the
+///   full tree has been walked.
+#[allow(clippy::too_many_arguments)]
+fn plan_sources_recursively(
+    config: &Config,
+    environment: &BTreeMap<String, String>,
+    is_directory: &impl Fn(&str) -> bool,
+    read_config_file: &impl Fn(&Path) -> Result<Config, ProgramError>,
+    in_flight: &mut Vec<PathBuf>,
+    seen: &mut BTreeSet<PathBuf>,
+    missing_env: &mut BTreeSet<String>,
+    missing_files: &mut BTreeSet<PathBuf>,
+) -> Result<Vec<PlannedSource>, ProgramError> {
     let conflict_policy = resolve_conflict_policy(
         config.defaults.overwrite,
         config.defaults.backup_on_overwrite,
     );
 
+    // Plan this config's own sources first (includes-after ordering).
+    let mut own_sources = Vec::new();
     for source in &config.sources {
         let from = match &source.from {
             SourceRoot::Path(path) => Some(path.clone()),
@@ -299,7 +465,7 @@ pub fn derive_execution_plan_with_env_and_fs(
             } => match environment.get(env) {
                 Some(value) => Some(value.clone()),
                 None => {
-                    missing_environment.insert(env.clone());
+                    missing_env.insert(env.clone());
                     None
                 }
             },
@@ -331,7 +497,7 @@ pub fn derive_execution_plan_with_env_and_fs(
             }
         }
 
-        sources.push(PlannedSource {
+        own_sources.push(PlannedSource {
             from,
             actions: source
                 .configs
@@ -363,16 +529,84 @@ pub fn derive_execution_plan_with_env_and_fs(
         });
     }
 
-    if !missing_environment.is_empty() {
-        return Err(ProgramError::MissingEnvironment {
-            vars: missing_environment.into_iter().collect(),
-        });
+    // Resolve and plan each include, appending their sources after own sources.
+    let mut included_sources = Vec::new();
+    for include in &config.includes {
+        let (include_path, optional) = match include {
+            Include::Path { path, optional } => (Some(PathBuf::from(path)), *optional),
+            Include::Environment { env, optional } => match environment.get(env) {
+                Some(value) => (Some(PathBuf::from(value)), *optional),
+                None if *optional => (None, true),
+                None => {
+                    missing_env.insert(env.clone());
+                    (None, false)
+                }
+            },
+        };
+
+        let Some(include_path) = include_path else {
+            continue;
+        };
+
+        // Skip already-processed includes (dedup across the whole include tree).
+        if seen.contains(&include_path) {
+            continue;
+        }
+
+        // A path already in the ancestor chain means a cycle.
+        if let Some(start) = in_flight.iter().position(|path| path == &include_path) {
+            let mut cycle = in_flight[start..].to_vec();
+            cycle.push(include_path.clone());
+            return Err(ProgramError::IncludeCycle { cycle });
+        }
+
+        // Attempt to load the included config file.
+        let included_config = match read_config_file(&include_path) {
+            Ok(c) => c,
+            // Optional includes are silently skipped when the file is missing.
+            Err(ProgramError::ReadConfiguration { .. }) if optional => {
+                seen.insert(include_path);
+                continue;
+            }
+            // Required includes that cannot be read are collected for the
+            // caller to surface as a single IncludeNotFound error.
+            Err(ProgramError::ReadConfiguration { .. }) => {
+                missing_files.insert(include_path);
+                continue;
+            }
+            // Parse errors and other structural failures are propagated
+            // immediately — they indicate a malformed config, not a
+            // missing file.
+            Err(e) => return Err(e),
+        };
+
+        // Push to in_flight before recursing to make this path visible to
+        // cycle detection in the subtree. Seen is updated only after full
+        // processing completes so that in-flight ancestors are never mistaken
+        // for already-finished (deduplicated) nodes.
+        in_flight.push(include_path.clone());
+
+        let sub_sources = plan_sources_recursively(
+            &included_config,
+            environment,
+            is_directory,
+            read_config_file,
+            in_flight,
+            seen,
+            missing_env,
+            missing_files,
+        )?;
+
+        in_flight.pop();
+        // Mark as seen after full processing so sibling branches that
+        // reference the same path are deduplicated without re-processing.
+        seen.insert(include_path);
+
+        included_sources.extend(sub_sources);
     }
 
-    Ok(ExecutionPlan {
-        repository: config.repository.clone(),
-        sources,
-    })
+    own_sources.extend(included_sources);
+    Ok(own_sources)
 }
 
 fn resolve_conflict_policy(overwrite: bool, backup_on_overwrite: bool) -> ConflictPolicy {
@@ -395,12 +629,13 @@ pub fn run() -> Result<ProgramOutput, ProgramError> {
 mod tests {
     use super::{
         ActionMode, Config, ConfigItem, ConflictPolicy, Defaults, ExecutionPlan, FileConfig, Guard,
-        PlannedAction, PlannedFileAction, PlannedSelectAction, PlannedSource, ProgramError,
-        SelectConfig, Source, SourceRoot, derive_execution_plan_with_env,
-        derive_execution_plan_with_env_and_fs, load_config, parse_config, run,
+        Include, PlannedAction, PlannedFileAction, PlannedSelectAction, PlannedSource,
+        ProgramError, SelectConfig, Source, SourceRoot, derive_execution_plan_with_env,
+        derive_execution_plan_with_env_and_fs, derive_execution_plan_with_injectables, load_config,
+        parse_config, run,
     };
     use std::collections::BTreeMap;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -420,6 +655,7 @@ mod tests {
             version: 1,
             repository: "~/projects/env".to_string(),
             defaults: Defaults::default(),
+            includes: vec![],
             sources: vec![Source {
                 from: SourceRoot::Path(".".to_string()),
                 to: None,
@@ -481,6 +717,7 @@ sources:
                 overwrite: false,
                 backup_on_overwrite: true,
             },
+            includes: vec![],
             sources: vec![Source {
                 from: SourceRoot::Path(".".to_string()),
                 to: None,
@@ -571,6 +808,7 @@ sources:
                 overwrite: false,
                 backup_on_overwrite: true,
             },
+            includes: vec![],
             sources: vec![Source {
                 from: SourceRoot::Path(".".to_string()),
                 to: None,
@@ -602,6 +840,7 @@ sources:
             version: 1,
             repository: "~/projects/env".to_string(),
             defaults: Defaults::default(),
+            includes: vec![],
             sources: vec![Source {
                 from: SourceRoot::Path(".".to_string()),
                 to: None,
@@ -664,6 +903,7 @@ sources:
                 overwrite: true,
                 backup_on_overwrite: false,
             },
+            includes: vec![],
             sources: vec![Source {
                 from: SourceRoot::Path(".".to_string()),
                 to: None,
@@ -743,6 +983,7 @@ sources:
             version: 1,
             repository: "~/projects/env".to_string(),
             defaults: Defaults::default(),
+            includes: vec![],
             sources: vec![Source {
                 from: SourceRoot::Environment {
                     env: "PRIVATE_ENV_DIR".to_string(),
@@ -779,6 +1020,7 @@ sources:
             version: 1,
             repository: "~/projects/env".to_string(),
             defaults: Defaults::default(),
+            includes: vec![],
             sources: vec![Source {
                 from: SourceRoot::Environment {
                     env: "PRIVATE_ENV_DIR".to_string(),
@@ -815,6 +1057,7 @@ sources:
             version: 1,
             repository: "~/projects/env".to_string(),
             defaults: Defaults::default(),
+            includes: vec![],
             sources: vec![Source {
                 from: SourceRoot::ExplicitPath {
                     path: "$PRIVATE_ENV_DIR".to_string(),
@@ -843,6 +1086,7 @@ sources:
                 overwrite: true,
                 backup_on_overwrite: false,
             },
+            includes: vec![],
             sources: vec![Source {
                 from: SourceRoot::Environment {
                     env: "PRIVATE_ENV_DIR".to_string(),
@@ -894,6 +1138,7 @@ sources:
                 overwrite: false,
                 backup_on_overwrite: true,
             },
+            includes: vec![],
             sources: vec![Source {
                 from: SourceRoot::Path(".".to_string()),
                 to: None,
@@ -932,6 +1177,7 @@ sources:
             version: 1,
             repository: "~/projects/env".to_string(),
             defaults: Defaults::default(),
+            includes: vec![],
             sources: vec![
                 Source {
                     from: SourceRoot::Environment {
@@ -977,6 +1223,7 @@ sources:
             version: 1,
             repository: "~/projects/env".to_string(),
             defaults: Defaults::default(),
+            includes: vec![],
             sources: vec![Source {
                 from: SourceRoot::Environment {
                     env: "PRIVATE_ENV_DIR".to_string(),
@@ -1205,6 +1452,7 @@ sources:
                 overwrite: false,
                 backup_on_overwrite: true,
             },
+            includes: vec![],
             sources: vec![Source {
                 from: SourceRoot::Path("vscode".to_string()),
                 to: Some("~/Library/Application Support/Code/User".to_string()),
@@ -1238,6 +1486,7 @@ sources:
             version: 1,
             repository: "~/projects/env".to_string(),
             defaults: Defaults::default(),
+            includes: vec![],
             sources: vec![Source {
                 from: SourceRoot::Path("vscode".to_string()),
                 to: Some("~/Library/Application Support/Code/User".to_string()),
@@ -1268,6 +1517,7 @@ sources:
             version: 1,
             repository: "~/projects/env".to_string(),
             defaults: Defaults::default(),
+            includes: vec![],
             sources: vec![Source {
                 from: SourceRoot::Path("vscode".to_string()),
                 to: Some("~/Library/Application Support/Code/User".to_string()),
@@ -1294,6 +1544,7 @@ sources:
             version: 1,
             repository: "~/projects/env".to_string(),
             defaults: Defaults::default(),
+            includes: vec![],
             sources: vec![Source {
                 from: SourceRoot::Path("macos".to_string()),
                 to: None,
@@ -1321,6 +1572,7 @@ sources:
             version: 1,
             repository: "~/projects/env".to_string(),
             defaults: Defaults::default(),
+            includes: vec![],
             sources: vec![Source {
                 from: SourceRoot::Path("macos".to_string()),
                 to: None,
@@ -1348,5 +1600,640 @@ sources:
             .as_nanos();
 
         std::env::temp_dir().join(format!("gitenv_{prefix}_{nanos}.yml"))
+    }
+
+    // ---------------------------------------------------------------------------
+    // Include parsing tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn accept_includes_as_shorthand_literal_paths() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - .zshrc
+includes:
+  - ~/projects/private-env/.gitenv.yml
+"#;
+
+        let config = parse_config(yaml).expect("config should parse with a shorthand include");
+
+        assert_eq!(
+            config.includes,
+            vec![Include::Path {
+                path: "~/projects/private-env/.gitenv.yml".to_string(),
+                optional: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn accept_includes_as_shorthand_dollar_prefixed_env_paths() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - .zshrc
+includes:
+  - $WORK_ENV_CONFIG
+"#;
+
+        let config =
+            parse_config(yaml).expect("config should parse with a dollar-prefixed include");
+
+        assert_eq!(
+            config.includes,
+            vec![Include::Environment {
+                env: "WORK_ENV_CONFIG".to_string(),
+                optional: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn accept_canonical_path_includes_with_optional_flag() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - .zshrc
+includes:
+  - path: ~/projects/work-env/.gitenv.yml
+    optional: true
+"#;
+
+        let config =
+            parse_config(yaml).expect("config should parse with a canonical optional include");
+
+        assert_eq!(
+            config.includes,
+            vec![Include::Path {
+                path: "~/projects/work-env/.gitenv.yml".to_string(),
+                optional: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn accept_canonical_env_backed_includes_with_optional_flag() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - .zshrc
+includes:
+  - env: EXTRA_ENV_CONFIG
+    optional: true
+"#;
+
+        let config =
+            parse_config(yaml).expect("config should parse with a canonical optional env include");
+
+        assert_eq!(
+            config.includes,
+            vec![Include::Environment {
+                env: "EXTRA_ENV_CONFIG".to_string(),
+                optional: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn accept_a_config_without_an_includes_section() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - .zshrc
+"#;
+
+        let config = parse_config(yaml).expect("config should parse without includes");
+
+        assert!(config.includes.is_empty());
+    }
+
+    // ---------------------------------------------------------------------------
+    // Include planning tests
+    //
+    // These tests use `derive_execution_plan_with_injectables` and supply a
+    // `read_config_file` closure that returns pre-built in-memory configs keyed
+    // by path string, so no real files need to be written.
+    // ---------------------------------------------------------------------------
+
+    /// Returns a minimal config with one file source rooted at `from`.
+    fn single_source_config(from: &str, file: &str) -> Config {
+        Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            sources: vec![Source {
+                from: SourceRoot::Path(from.to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: file.to_string(),
+                    as_name: None,
+                })],
+            }],
+            includes: vec![],
+        }
+    }
+
+    /// Minimal planned file action with symlink/skip defaults pointing to `~`.
+    fn expected_file_action(file: &str) -> PlannedAction {
+        PlannedAction::File(PlannedFileAction {
+            file: file.to_string(),
+            as_name: file.to_string(),
+            mode: ActionMode::Symlink,
+            to: "~".to_string(),
+            mkdir: true,
+            conflict_policy: ConflictPolicy::Skip,
+        })
+    }
+
+    #[test]
+    fn include_declared_files_sources_after_own_sources() {
+        // Root declares .zshrc; includes /inc/a.yml which declares .tmux.conf.
+        // Expected order: root's source first, then the include's source.
+        let included = single_source_config("inc", ".tmux.conf");
+        let root = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                })],
+            }],
+            includes: vec![Include::Path {
+                path: "/inc/a.yml".to_string(),
+                optional: false,
+            }],
+        };
+
+        let plan = derive_execution_plan_with_injectables(
+            &root,
+            None,
+            &BTreeMap::new(),
+            &|_| false,
+            &|path: &Path| {
+                if path == Path::new("/inc/a.yml") {
+                    Ok(included.clone())
+                } else {
+                    Err(ProgramError::ReadConfiguration {
+                        path: path.to_path_buf(),
+                        message: "not found".to_string(),
+                    })
+                }
+            },
+        )
+        .expect("planning should succeed with a valid include");
+
+        assert_eq!(plan.sources.len(), 2);
+        assert_eq!(plan.sources[0].from, ".");
+        assert_eq!(
+            plan.sources[0].actions,
+            vec![expected_file_action(".zshrc")]
+        );
+        assert_eq!(plan.sources[1].from, "inc");
+        assert_eq!(
+            plan.sources[1].actions,
+            vec![expected_file_action(".tmux.conf")]
+        );
+    }
+
+    #[test]
+    fn include_sources_from_nested_includes_depth_first() {
+        // Root includes /inc/a.yml; /inc/a.yml itself includes /inc/c.yml.
+        // Expected order: root → a → c (depth-first, includes-after at each level).
+        let c = single_source_config("c_src", ".bashrc");
+        let a = Config {
+            includes: vec![Include::Path {
+                path: "/inc/c.yml".to_string(),
+                optional: false,
+            }],
+            ..single_source_config("a_src", ".aliases")
+        };
+        let root = Config {
+            includes: vec![Include::Path {
+                path: "/inc/a.yml".to_string(),
+                optional: false,
+            }],
+            ..single_source_config("root_src", ".zshrc")
+        };
+
+        let plan = derive_execution_plan_with_injectables(
+            &root,
+            None,
+            &BTreeMap::new(),
+            &|_| false,
+            &|path: &Path| match path.to_str().unwrap_or("") {
+                "/inc/a.yml" => Ok(a.clone()),
+                "/inc/c.yml" => Ok(c.clone()),
+                _ => Err(ProgramError::ReadConfiguration {
+                    path: path.to_path_buf(),
+                    message: "not found".to_string(),
+                }),
+            },
+        )
+        .expect("planning should succeed with nested includes");
+
+        assert_eq!(plan.sources.len(), 3);
+        // root_src comes first (includes-after), then a_src, then c_src.
+        assert_eq!(plan.sources[0].from, "root_src");
+        assert_eq!(plan.sources[1].from, "a_src");
+        assert_eq!(plan.sources[2].from, "c_src");
+    }
+
+    #[test]
+    fn skip_duplicate_includes_across_the_include_tree() {
+        // Both root and /inc/a.yml include /inc/shared.yml.
+        // /inc/shared.yml should only appear once in the plan.
+        let shared = single_source_config("shared_src", ".shared");
+        let a = Config {
+            includes: vec![Include::Path {
+                path: "/inc/shared.yml".to_string(),
+                optional: false,
+            }],
+            ..single_source_config("a_src", ".aliases")
+        };
+        let root = Config {
+            includes: vec![
+                Include::Path {
+                    path: "/inc/a.yml".to_string(),
+                    optional: false,
+                },
+                Include::Path {
+                    path: "/inc/shared.yml".to_string(),
+                    optional: false,
+                },
+            ],
+            ..single_source_config("root_src", ".zshrc")
+        };
+
+        let plan = derive_execution_plan_with_injectables(
+            &root,
+            None,
+            &BTreeMap::new(),
+            &|_| false,
+            &|path: &Path| match path.to_str().unwrap_or("") {
+                "/inc/a.yml" => Ok(a.clone()),
+                "/inc/shared.yml" => Ok(shared.clone()),
+                _ => Err(ProgramError::ReadConfiguration {
+                    path: path.to_path_buf(),
+                    message: "not found".to_string(),
+                }),
+            },
+        )
+        .expect("planning should succeed and deduplicate shared includes");
+
+        // root_src, a_src, shared_src — shared only once despite two references.
+        let froms: Vec<&str> = plan.sources.iter().map(|s| s.from.as_str()).collect();
+        assert_eq!(froms, vec!["root_src", "a_src", "shared_src"]);
+    }
+
+    #[test]
+    fn skip_optional_includes_when_file_is_missing() {
+        let root = Config {
+            includes: vec![Include::Path {
+                path: "/inc/missing.yml".to_string(),
+                optional: true,
+            }],
+            ..single_source_config("root_src", ".zshrc")
+        };
+
+        let plan = derive_execution_plan_with_injectables(
+            &root,
+            None,
+            &BTreeMap::new(),
+            &|_| false,
+            &|path: &Path| {
+                Err(ProgramError::ReadConfiguration {
+                    path: path.to_path_buf(),
+                    message: "not found".to_string(),
+                })
+            },
+        )
+        .expect("planning should succeed when an optional include is missing");
+
+        // Only the root's own source is present; the missing optional include is silently skipped.
+        assert_eq!(plan.sources.len(), 1);
+        assert_eq!(plan.sources[0].from, "root_src");
+    }
+
+    #[test]
+    fn reject_missing_required_includes() {
+        let root = Config {
+            includes: vec![
+                Include::Path {
+                    path: "/inc/missing_a.yml".to_string(),
+                    optional: false,
+                },
+                Include::Path {
+                    path: "/inc/missing_b.yml".to_string(),
+                    optional: false,
+                },
+            ],
+            ..single_source_config(".", ".zshrc")
+        };
+
+        let error = derive_execution_plan_with_injectables(
+            &root,
+            None,
+            &BTreeMap::new(),
+            &|_| false,
+            &|path: &Path| {
+                Err(ProgramError::ReadConfiguration {
+                    path: path.to_path_buf(),
+                    message: "not found".to_string(),
+                })
+            },
+        )
+        .expect_err("planning should fail when required includes are missing");
+
+        assert_eq!(
+            error,
+            ProgramError::IncludeNotFound {
+                paths: vec![
+                    PathBuf::from("/inc/missing_a.yml"),
+                    PathBuf::from("/inc/missing_b.yml"),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn reject_include_cycles() {
+        // /inc/a.yml includes /inc/b.yml, which includes /inc/a.yml — a cycle.
+        let b = Config {
+            includes: vec![Include::Path {
+                path: "/inc/a.yml".to_string(),
+                optional: false,
+            }],
+            ..single_source_config("b_src", ".b")
+        };
+        let a = Config {
+            includes: vec![Include::Path {
+                path: "/inc/b.yml".to_string(),
+                optional: false,
+            }],
+            ..single_source_config("a_src", ".a")
+        };
+        let root = Config {
+            includes: vec![Include::Path {
+                path: "/inc/a.yml".to_string(),
+                optional: false,
+            }],
+            ..single_source_config("root_src", ".zshrc")
+        };
+
+        let error = derive_execution_plan_with_injectables(
+            &root,
+            None,
+            &BTreeMap::new(),
+            &|_| false,
+            &|path: &Path| match path.to_str().unwrap_or("") {
+                "/inc/a.yml" => Ok(a.clone()),
+                "/inc/b.yml" => Ok(b.clone()),
+                _ => Err(ProgramError::ReadConfiguration {
+                    path: path.to_path_buf(),
+                    message: "not found".to_string(),
+                }),
+            },
+        )
+        .expect_err("planning should fail when an include cycle is detected");
+
+        assert_eq!(
+            error,
+            ProgramError::IncludeCycle {
+                cycle: vec![
+                    PathBuf::from("/inc/a.yml"),
+                    PathBuf::from("/inc/b.yml"),
+                    PathBuf::from("/inc/a.yml"),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_env_backed_include_paths_from_environment() {
+        let included = single_source_config("private_src", ".secrets");
+        let root = Config {
+            includes: vec![Include::Environment {
+                env: "PRIVATE_CONFIG".to_string(),
+                optional: false,
+            }],
+            ..single_source_config(".", ".zshrc")
+        };
+        let environment = BTreeMap::from([(
+            "PRIVATE_CONFIG".to_string(),
+            "/private/.gitenv.yml".to_string(),
+        )]);
+
+        let plan = derive_execution_plan_with_injectables(
+            &root,
+            None,
+            &environment,
+            &|_| false,
+            &|path: &Path| {
+                if path == Path::new("/private/.gitenv.yml") {
+                    Ok(included.clone())
+                } else {
+                    Err(ProgramError::ReadConfiguration {
+                        path: path.to_path_buf(),
+                        message: "not found".to_string(),
+                    })
+                }
+            },
+        )
+        .expect("planning should resolve an environment-backed include path");
+
+        assert_eq!(plan.sources.len(), 2);
+        assert_eq!(plan.sources[1].from, "private_src");
+    }
+
+    #[test]
+    fn skip_optional_env_backed_includes_when_variable_is_unset() {
+        let root = Config {
+            includes: vec![Include::Environment {
+                env: "PRIVATE_CONFIG".to_string(),
+                optional: true,
+            }],
+            ..single_source_config(".", ".zshrc")
+        };
+
+        let plan = derive_execution_plan_with_injectables(
+            &root,
+            None,
+            &BTreeMap::new(),
+            &|_| false,
+            &|path: &Path| {
+                Err(ProgramError::ReadConfiguration {
+                    path: path.to_path_buf(),
+                    message: "not found".to_string(),
+                })
+            },
+        )
+        .expect("planning should succeed when an optional env-backed include variable is unset");
+
+        assert_eq!(
+            plan.sources.len(),
+            1,
+            "only the root source should be present"
+        );
+    }
+
+    #[test]
+    fn reject_required_env_backed_includes_when_variable_is_unset() {
+        let root = Config {
+            includes: vec![Include::Environment {
+                env: "PRIVATE_CONFIG".to_string(),
+                optional: false,
+            }],
+            ..single_source_config(".", ".zshrc")
+        };
+
+        let error = derive_execution_plan_with_injectables(
+            &root,
+            None,
+            &BTreeMap::new(),
+            &|_| false,
+            &|path: &Path| {
+                Err(ProgramError::ReadConfiguration {
+                    path: path.to_path_buf(),
+                    message: "not found".to_string(),
+                })
+            },
+        )
+        .expect_err("planning should fail when a required env-backed include variable is unset");
+
+        assert_eq!(
+            error,
+            ProgramError::MissingEnvironment {
+                vars: vec!["PRIVATE_CONFIG".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn each_included_configs_defaults_apply_only_to_its_own_sources() {
+        // Root uses copy mode; the included config uses symlink mode.
+        // Each should plan with its own defaults, not the other's.
+        let included = Config {
+            defaults: Defaults {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                overwrite: false,
+                backup_on_overwrite: true,
+            },
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path("inc_src".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".tmux.conf".to_string(),
+                    as_name: None,
+                })],
+            }],
+            ..Config {
+                version: 1,
+                repository: "~/projects/env".to_string(),
+                defaults: Defaults::default(),
+                sources: vec![],
+                includes: vec![],
+            }
+        };
+        let root = Config {
+            defaults: Defaults {
+                mode: ActionMode::Copy,
+                to: "~/dest".to_string(),
+                mkdir: false,
+                overwrite: true,
+                backup_on_overwrite: false,
+            },
+            includes: vec![Include::Path {
+                path: "/inc/a.yml".to_string(),
+                optional: false,
+            }],
+            sources: vec![Source {
+                from: SourceRoot::Path("root_src".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                })],
+            }],
+            ..Config {
+                version: 1,
+                repository: "~/projects/env".to_string(),
+                defaults: Defaults::default(),
+                sources: vec![],
+                includes: vec![],
+            }
+        };
+
+        let plan = derive_execution_plan_with_injectables(
+            &root,
+            None,
+            &BTreeMap::new(),
+            &|_| false,
+            &|path: &Path| {
+                if path == Path::new("/inc/a.yml") {
+                    Ok(included.clone())
+                } else {
+                    Err(ProgramError::ReadConfiguration {
+                        path: path.to_path_buf(),
+                        message: "not found".to_string(),
+                    })
+                }
+            },
+        )
+        .expect("planning should succeed and isolate defaults per included config");
+
+        assert_eq!(plan.sources.len(), 2);
+
+        // Root's source uses copy mode with root's defaults.
+        assert_eq!(
+            plan.sources[0].actions[0],
+            PlannedAction::File(PlannedFileAction {
+                file: ".zshrc".to_string(),
+                as_name: ".zshrc".to_string(),
+                mode: ActionMode::Copy,
+                to: "~/dest".to_string(),
+                mkdir: false,
+                conflict_policy: ConflictPolicy::Overwrite,
+            })
+        );
+
+        // Included source uses symlink mode with included config's defaults.
+        assert_eq!(
+            plan.sources[1].actions[0],
+            PlannedAction::File(PlannedFileAction {
+                file: ".tmux.conf".to_string(),
+                as_name: ".tmux.conf".to_string(),
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                conflict_policy: ConflictPolicy::Skip,
+            })
+        );
     }
 }

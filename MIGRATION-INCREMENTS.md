@@ -27,20 +27,24 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 10: Add deterministic config includes
+### Increment 10a: Recover include planning coverage after include rollout
 
 Why this increment exists:
 
-- Existing Ruby configs compose additional private config through `include`.
-- Composition semantics should be locked before broader planner and CLI work.
+- Increment 10 introduces include parsing/planning behavior and new branches,
+  and overall line coverage drops from 97.92% to 94.48%.
+- The current tests cover primary include semantics but leave several fallback
+  and error paths under-covered.
 
 Review target:
 
-- Add include support for YAML config composition with deterministic merge
-  behavior.
-- Detect include cycles and return stable, actionable diagnostics.
-- Add parser/planning tests for include ordering, cycle rejection, and
-  duplicate-handling behavior.
+- Add focused tests for include planning edge branches, especially around
+  non-`ReadConfiguration` include load errors and root-path-seeded cycle
+  detection.
+- Add direct unit assertions for include-path diagnostic determinism (sorted,
+  deduplicated reporting).
+- Restore coverage trend upward from the post-Increment-10 baseline while
+  preserving existing include behavior.
 
 ### Increment 11: Support per-config-item option overrides
 
@@ -79,9 +83,13 @@ Review target:
 - Add concise doc comments on non-obvious public types/functions and targeted
   inline comments only for non-trivial planning branches.
 - Preserve library/CLI behavior and keep coverage at least stable.
+- Make sure that each individual test has been migrated to the new module
+  structure and add doc comments to test modules and functions where helpful for
+  clarity.
 - Take the time to thoroughly review test code against test code guidelines and
   fix any issues to ensure the tests are of sufficient quality and
-  maintainability for the next increments to build on.
+  maintainability for the next increments to build on. Pay particular attention
+  to test naming and assertion quality.
 
 ### Increment 13: Inspect one narrow symlink status case
 
