@@ -76,6 +76,9 @@ Business modules must not print directly to terminal output.
 - If complete assertions are intentionally not used, include a brief comment
   explaining the reason.
 - Cover edge cases and failure modes explicitly.
+- Avoid duplicate behavior coverage across layers when a lower-layer test
+  already proves the behavior and the higher layer adds no new transformation
+  or decision logic.
 - Coverage target is 100%; if lower, document uncovered paths and rationale.
 - Treat coverage as a signal, not a substitute for assertion quality.
 - Include parity tests for equivalent library and CLI workflows.
@@ -136,8 +139,10 @@ Apply checks that match your change scope.
 4. Run build checks.
 5. Run documentation lint checks when Markdown files changed.
 6. Run formatting checks (and formatting write mode only when intended).
-7. Run coverage for code changes. If coverage decreases, capture required
-   follow-up work (living increment backlog item and/or inline TODO).
+7. Run coverage for code changes. If coverage decreases significantly, capture
+   required follow-up work (living increment backlog item and/or inline TODO).
+   Treat a drop of about 0.25 percentage points or more as significant unless
+   there is a stronger project-specific reason.
 
 ## Setup
 

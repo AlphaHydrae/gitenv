@@ -33,6 +33,7 @@ strategy, and quality gates.
   instructions instead.
 - Prioritize maintainability and correctness over performance.
 - Stabilize the canonical data model and programmatic API first.
+- Use a two-stage planning model: intent plan first, then operation plan.
 - Require feature parity between library and CLI surfaces.
 - Require configurable logging from both CLI and library.
 - Aim for 100% test coverage (slightly under is acceptable if justified).
@@ -61,8 +62,10 @@ strategy, and quality gates.
   removal/closure condition.
 - Add increment-level regression tests whenever bugs or edge cases are found.
 - For every increment, report test coverage before and after the change. If
-  coverage decreases, explain why and document follow-up work in the living
-  increments backlog and/or inline TODO comments.
+  coverage decreases significantly, explain why and document follow-up work in
+  the living increments backlog and/or inline TODO comments. Treat a drop of
+  about 0.25 percentage points or more as significant unless there is a
+  stronger project-specific reason.
 - Avoid mixing architectural refactors and feature delivery in the same
   increment unless explicitly approved.
 
@@ -153,14 +156,17 @@ Exit criteria:
 
 - Implement YAML parser and schema validation.
 - Implement normalization from shorthand to canonical model.
-- Implement execution planning (without filesystem side effects).
+- Implement intent planning with defaults resolved (without filesystem side
+  effects).
+- Implement operation planning that derives concrete actions after selection
+  expansion.
 - Define and lock the canonical public library API for planning and execution.
 
 Exit criteria:
 
 - [ ] Parser unit tests cover valid/invalid examples.
 - [ ] Normalization tests verify shorthand and canonical equivalence.
-- [ ] Plan snapshots cover core combinations.
+- [ ] Intent and operation plan snapshots cover core combinations.
 
 ### Phase 2: Filesystem execution
 
@@ -205,7 +211,8 @@ Exit criteria:
 - Use unit tests for parser, schema validation, normalization, and utilities.
 - Use integration tests for filesystem behavior in temporary directories.
 - Use end-to-end tests for CLI behavior and output contracts.
-- Use golden/snapshot tests for normalized plans and user-facing diagnostics.
+- Use golden/snapshot tests for intent plans, operation plans, and user-facing
+  diagnostics.
 - Add parity tests to ensure CLI workflows and library workflows produce
   equivalent outcomes.
 - Add logging tests for level filtering and destination behavior.

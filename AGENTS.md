@@ -63,9 +63,10 @@ them to EVERY task, EVERY time.**
     when applying formatting changes) for formatting checks once the wrapper exists.
   - For migration increments, always run `./scripts/run-coverage.sh` and
     report both previous and current coverage.
-  - If coverage decreases, explicitly explain why and document follow-up work
-    in [`MIGRATION-INCREMENTS.md`](./MIGRATION-INCREMENTS.md) and/or inline TODO
-    comments.
+  - If coverage decreases significantly, explicitly explain why and document
+    follow-up work in [`MIGRATION-INCREMENTS.md`](./MIGRATION-INCREMENTS.md)
+    and/or inline TODO comments. Treat a drop of about 0.25 percentage points
+    or more as significant unless there is a stronger project-specific reason.
   - When wrappers are not applicable for a task, run interim checks documented
     in [CONTRIBUTING.md](./CONTRIBUTING.md#common-commands).
   - Show full command output including exit code, test count, or failure details.
@@ -254,6 +255,9 @@ them to EVERY task, EVERY time.**
   implementations.
 - Keep behavior exposed by both library and CLI unless an explicit design
   exception is documented.
+- Avoid re-testing behavior at a higher abstraction layer when that behavior is
+  already fully covered at a lower layer and the higher layer adds no unique
+  logic.
 - Ensure logging is thorough and configurable by log level when working on
   diagnostics or command execution paths.
 

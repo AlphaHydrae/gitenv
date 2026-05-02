@@ -106,6 +106,46 @@ pub enum ProgramError {
     UnsupportedConfiguration,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExecutionPlan {
+    pub repository: String,
+    pub sources: Vec<PlannedSource>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedSource {
+    pub from: String,
+    pub actions: Vec<PlannedAction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlannedAction {
+    File(PlannedFileAction),
+    Select(PlannedSelectAction),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedFileAction {
+    pub file: String,
+    pub as_name: String,
+    pub mode: ActionMode,
+    pub to: String,
+    pub mkdir: bool,
+    pub overwrite: bool,
+    pub backup_on_overwrite: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedSelectAction {
+    pub dotfiles: bool,
+    pub exclude: Vec<String>,
+    pub mode: ActionMode,
+    pub to: String,
+    pub mkdir: bool,
+    pub overwrite: bool,
+    pub backup_on_overwrite: bool,
+}
+
 pub fn parse_config(yaml: &str) -> Result<Config, ProgramError> {
     serde_yaml::from_str(yaml).map_err(|error| ProgramError::InvalidConfiguration {
         message: format!("failed to parse config YAML: {error}"),
@@ -121,6 +161,50 @@ pub fn load_config(path: &Path) -> Result<Config, ProgramError> {
     parse_config(&yaml)
 }
 
+pub fn derive_execution_plan(config: &Config) -> ExecutionPlan {
+    let sources = config
+        .sources
+        .iter()
+        .map(|source| PlannedSource {
+            from: source.from.clone(),
+            actions: source
+                .configs
+                .iter()
+                .map(|item| match item {
+                    ConfigItem::File(file_config) => PlannedAction::File(PlannedFileAction {
+                        file: file_config.file.clone(),
+                        as_name: file_config
+                            .as_name
+                            .clone()
+                            .unwrap_or_else(|| file_config.file.clone()),
+                        mode: config.defaults.mode.clone(),
+                        to: config.defaults.to.clone(),
+                        mkdir: config.defaults.mkdir,
+                        overwrite: config.defaults.overwrite,
+                        backup_on_overwrite: config.defaults.backup_on_overwrite,
+                    }),
+                    ConfigItem::Select(select_config) => {
+                        PlannedAction::Select(PlannedSelectAction {
+                            dotfiles: select_config.dotfiles,
+                            exclude: select_config.exclude.clone(),
+                            mode: config.defaults.mode.clone(),
+                            to: config.defaults.to.clone(),
+                            mkdir: config.defaults.mkdir,
+                            overwrite: config.defaults.overwrite,
+                            backup_on_overwrite: config.defaults.backup_on_overwrite,
+                        })
+                    }
+                })
+                .collect(),
+        })
+        .collect();
+
+    ExecutionPlan {
+        repository: config.repository.clone(),
+        sources,
+    }
+}
+
 pub fn run() -> Result<ProgramOutput, ProgramError> {
     Ok(ProgramOutput {
         message: "Hello, World!",
@@ -130,8 +214,9 @@ pub fn run() -> Result<ProgramOutput, ProgramError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ActionMode, Config, ConfigItem, Defaults, FileConfig, ProgramError, SelectConfig, Source,
-        load_config, parse_config, run,
+        ActionMode, Config, ConfigItem, Defaults, ExecutionPlan, FileConfig, PlannedAction,
+        PlannedFileAction, PlannedSelectAction, PlannedSource, ProgramError, SelectConfig, Source,
+        derive_execution_plan, load_config, parse_config, run,
     };
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -375,6 +460,71 @@ sources:
             .expect("canonical config should parse to the normalized model");
 
         assert_eq!(shorthand, canonical);
+    }
+
+    #[test]
+    fn derive_a_deterministic_execution_plan_from_a_config() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+defaults:
+  mode: copy
+  to: "~/dest"
+  mkdir: false
+  overwrite: true
+  backup_on_overwrite: false
+sources:
+  - from: "."
+    configs:
+      - file: .zshrc
+      - file: .tmux
+        as: .tmux.conf
+      - select:
+          dotfiles: true
+          exclude:
+            - .git
+"#;
+
+        let config = parse_config(yaml).expect("config should parse for execution planning");
+        let plan = derive_execution_plan(&config);
+
+        let expected = ExecutionPlan {
+            repository: "~/projects/env".to_string(),
+            sources: vec![PlannedSource {
+                from: ".".to_string(),
+                actions: vec![
+                    PlannedAction::File(PlannedFileAction {
+                        file: ".zshrc".to_string(),
+                        as_name: ".zshrc".to_string(),
+                        mode: ActionMode::Copy,
+                        to: "~/dest".to_string(),
+                        mkdir: false,
+                        overwrite: true,
+                        backup_on_overwrite: false,
+                    }),
+                    PlannedAction::File(PlannedFileAction {
+                        file: ".tmux".to_string(),
+                        as_name: ".tmux.conf".to_string(),
+                        mode: ActionMode::Copy,
+                        to: "~/dest".to_string(),
+                        mkdir: false,
+                        overwrite: true,
+                        backup_on_overwrite: false,
+                    }),
+                    PlannedAction::Select(PlannedSelectAction {
+                        dotfiles: true,
+                        exclude: vec![".git".to_string()],
+                        mode: ActionMode::Copy,
+                        to: "~/dest".to_string(),
+                        mkdir: false,
+                        overwrite: true,
+                        backup_on_overwrite: false,
+                    }),
+                ],
+            }],
+        };
+
+        assert_eq!(plan, expected);
     }
 
     #[test]

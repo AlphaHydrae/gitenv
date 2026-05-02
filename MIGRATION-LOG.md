@@ -11,6 +11,9 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-02: Add a deterministic execution plan model - Derive structured,
+  side-effect-free execution plans from normalized config and keep plan output
+  deterministic across equivalent shorthand and canonical inputs.
 - 2026-05-02: Normalize shorthand into the canonical model - Accept shorthand
   file config entries and normalize them to canonical file config items.
 - 2026-05-02: Reject unknown keys in config parsing - Enforce strict serde

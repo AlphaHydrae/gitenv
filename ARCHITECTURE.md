@@ -106,6 +106,18 @@ micro-optimizations.
 Stabilize the canonical data model and programmatic API before extending feature
 surface.
 
+### Two-stage planning model
+
+Planning is represented in two deterministic stages.
+
+- Intent plan: config-shaped data after shorthand normalization and default
+  resolution. This stage keeps user intent explicit and side-effect free.
+- Operation plan: execution-shaped data with concrete copy/symlink operations,
+  produced after expanding selections into concrete targets.
+
+This split keeps planning testable and predictable while still making the final
+execution model action-oriented.
+
 ### Library and CLI parity
 
 Features are implemented in the library layer first, then exposed by the CLI.
@@ -128,7 +140,7 @@ Business modules must not write directly to terminal output.
 Business modules are responsible for:
 
 - Parsing and validating configuration.
-- Building deterministic execution plans.
+- Building deterministic intent plans and operation plans.
 - Executing filesystem operations and returning structured outcomes.
 
 CLI modules are responsible for:
@@ -143,7 +155,7 @@ effects.
 ## Proposed Module Boundaries (Rust)
 
 - `config`: parse + schema validate + normalize input.
-- `plan`: convert normalized config into execution plan.
+- `plan`: build intent plans and derive operation plans.
 - `actions`: symlink/copy operations.
 - `status`: structured status model.
 - `logging`: log level filtering and structured diagnostic emission contracts.
