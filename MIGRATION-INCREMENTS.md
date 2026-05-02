@@ -69,6 +69,9 @@ Review target:
 
 - File/select config items can override relevant default execution options.
 - Planning resolves item-level overrides deterministically.
+- Item-level explicit `overwrite: false` with `backup_on_overwrite: true` is
+  rejected as an invalid combination, while inherited backup defaults remain
+  valid when overwrite resolves to false.
 - Shared resolved-option fields are factored into one reusable plan type to
   reduce duplication across planned action variants.
 

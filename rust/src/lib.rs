@@ -47,6 +47,13 @@ pub enum ActionMode {
     Copy,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConflictPolicy {
+    Skip,
+    Overwrite,
+    OverwriteWithBackup,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Source {
@@ -144,8 +151,7 @@ pub struct PlannedFileAction {
     pub mode: ActionMode,
     pub to: String,
     pub mkdir: bool,
-    pub overwrite: bool,
-    pub backup_on_overwrite: bool,
+    pub conflict_policy: ConflictPolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,8 +161,7 @@ pub struct PlannedSelectAction {
     pub mode: ActionMode,
     pub to: String,
     pub mkdir: bool,
-    pub overwrite: bool,
-    pub backup_on_overwrite: bool,
+    pub conflict_policy: ConflictPolicy,
 }
 
 pub fn parse_config(yaml: &str) -> Result<Config, ProgramError> {
@@ -186,6 +191,10 @@ pub fn derive_execution_plan_with_env(
 ) -> Result<ExecutionPlan, ProgramError> {
     let mut missing_environment = BTreeSet::new();
     let mut sources = Vec::new();
+    let conflict_policy = resolve_conflict_policy(
+        config.defaults.overwrite,
+        config.defaults.backup_on_overwrite,
+    );
 
     for source in &config.sources {
         let from = match &source.from {
@@ -225,8 +234,7 @@ pub fn derive_execution_plan_with_env(
                         mode: config.defaults.mode.clone(),
                         to: config.defaults.to.clone(),
                         mkdir: config.defaults.mkdir,
-                        overwrite: config.defaults.overwrite,
-                        backup_on_overwrite: config.defaults.backup_on_overwrite,
+                        conflict_policy: conflict_policy.clone(),
                     }),
                     ConfigItem::Select(select_config) => {
                         PlannedAction::Select(PlannedSelectAction {
@@ -235,8 +243,7 @@ pub fn derive_execution_plan_with_env(
                             mode: config.defaults.mode.clone(),
                             to: config.defaults.to.clone(),
                             mkdir: config.defaults.mkdir,
-                            overwrite: config.defaults.overwrite,
-                            backup_on_overwrite: config.defaults.backup_on_overwrite,
+                            conflict_policy: conflict_policy.clone(),
                         })
                     }
                 })
@@ -256,6 +263,16 @@ pub fn derive_execution_plan_with_env(
     })
 }
 
+fn resolve_conflict_policy(overwrite: bool, backup_on_overwrite: bool) -> ConflictPolicy {
+    if !overwrite {
+        ConflictPolicy::Skip
+    } else if backup_on_overwrite {
+        ConflictPolicy::OverwriteWithBackup
+    } else {
+        ConflictPolicy::Overwrite
+    }
+}
+
 pub fn run() -> Result<ProgramOutput, ProgramError> {
     Ok(ProgramOutput {
         message: "Hello, World!",
@@ -265,9 +282,10 @@ pub fn run() -> Result<ProgramOutput, ProgramError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ActionMode, Config, ConfigItem, Defaults, ExecutionPlan, FileConfig, PlannedAction,
-        PlannedFileAction, PlannedSelectAction, PlannedSource, ProgramError, SelectConfig, Source,
-        SourceRoot, derive_execution_plan_with_env, load_config, parse_config, run,
+        ActionMode, Config, ConfigItem, ConflictPolicy, Defaults, ExecutionPlan, FileConfig,
+        PlannedAction, PlannedFileAction, PlannedSelectAction, PlannedSource, ProgramError,
+        SelectConfig, Source, SourceRoot, derive_execution_plan_with_env, load_config,
+        parse_config, run,
     };
     use std::collections::BTreeMap;
     use std::path::PathBuf;
@@ -559,8 +577,7 @@ sources:
                         mode: ActionMode::Copy,
                         to: "~/dest".to_string(),
                         mkdir: false,
-                        overwrite: true,
-                        backup_on_overwrite: false,
+                        conflict_policy: ConflictPolicy::Overwrite,
                     }),
                     PlannedAction::File(PlannedFileAction {
                         file: ".tmux".to_string(),
@@ -568,8 +585,7 @@ sources:
                         mode: ActionMode::Copy,
                         to: "~/dest".to_string(),
                         mkdir: false,
-                        overwrite: true,
-                        backup_on_overwrite: false,
+                        conflict_policy: ConflictPolicy::Overwrite,
                     }),
                     PlannedAction::Select(PlannedSelectAction {
                         dotfiles: true,
@@ -577,8 +593,7 @@ sources:
                         mode: ActionMode::Copy,
                         to: "~/dest".to_string(),
                         mkdir: false,
-                        overwrite: true,
-                        backup_on_overwrite: false,
+                        conflict_policy: ConflictPolicy::Overwrite,
                     }),
                 ],
             }],
@@ -662,8 +677,49 @@ sources:
                     mode: ActionMode::Copy,
                     to: "~/.config".to_string(),
                     mkdir: false,
-                    overwrite: true,
-                    backup_on_overwrite: false,
+                    conflict_policy: ConflictPolicy::Overwrite,
+                })],
+            }],
+        };
+
+        assert_eq!(plan, expected);
+    }
+
+    #[test]
+    fn collapse_backup_preference_when_overwrite_is_disabled_in_planning() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                overwrite: false,
+                backup_on_overwrite: true,
+            },
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                })],
+            }],
+        };
+
+        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+            .expect("planning should collapse overwrite-disabled defaults to skip");
+
+        let expected = ExecutionPlan {
+            repository: "~/projects/env".to_string(),
+            sources: vec![PlannedSource {
+                from: ".".to_string(),
+                actions: vec![PlannedAction::File(PlannedFileAction {
+                    file: ".zshrc".to_string(),
+                    as_name: ".zshrc".to_string(),
+                    mode: ActionMode::Symlink,
+                    to: "~".to_string(),
+                    mkdir: true,
+                    conflict_policy: ConflictPolicy::Skip,
                 })],
             }],
         };
