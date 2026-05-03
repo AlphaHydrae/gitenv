@@ -64,8 +64,8 @@ elif [[ -z "$LYCHEE_BIN" ]]; then
   echo "If installed via asdf, run: asdf reshim rust" | tee -a "$OUTPUT_LOG"
   EXIT_CODE=127
 else
-  echo "Running: $LYCHEE_BIN --offline --no-progress <markdown files>" | tee "$OUTPUT_LOG"
-  "$LYCHEE_BIN" --offline --no-progress "${MARKDOWN_FILES[@]}" 2>&1 | tee -a "$OUTPUT_LOG"
+  echo "Running: $LYCHEE_BIN --include-fragments --offline --no-progress <markdown files>" | tee "$OUTPUT_LOG"
+  "$LYCHEE_BIN" --include-fragments --offline --no-progress "${MARKDOWN_FILES[@]}" 2>&1 | tee -a "$OUTPUT_LOG"
   EXIT_CODE=${PIPESTATUS[0]}
 fi
 set -e

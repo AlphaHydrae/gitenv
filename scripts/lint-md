@@ -7,4 +7,4 @@ find . -type f -name '*.md' \
   -not -path './$(RUST_DIR)/target/*' \
   -not -path './coverage/*' \
   -not -path './tmp/*' \
-  -print0 | xargs -0 lychee --offline --no-progress
+  -print0 | xargs -0 lychee --include-fragments --offline --no-progress

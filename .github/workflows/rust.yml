@@ -63,7 +63,7 @@ jobs:
             -not -path './rust/target/*' \
             -not -path './coverage/*' \
             -not -path './tmp/*' \
-            -print0 | xargs -0 lychee --offline --no-progress
+            -print0 | xargs -0 lychee --include-fragments --offline --no-progress
 
   rust-wrapper-scripts:
     runs-on: ubuntu-24.04
