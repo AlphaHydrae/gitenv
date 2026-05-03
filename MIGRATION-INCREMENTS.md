@@ -48,6 +48,8 @@ Review target:
 
 - Add concrete copy execution that respects `mkdir` and conflict policy
   behavior.
+- Preserve original operation kind in apply outcomes so renderers can
+  distinguish symlink vs copy without side mappings.
 - Add Unix fixture/integration tests that mirror symlink executor
   expectations.
 
