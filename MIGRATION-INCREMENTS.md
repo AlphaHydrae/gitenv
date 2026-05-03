@@ -36,20 +36,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 18: Add core intent/operation snapshot coverage
-
-Why this increment exists:
-
-- Phase 1 still has one open exit criterion for snapshot coverage.
-- Intent and operation plans are now stable enough to lock representative
-  combinations.
-
-Review target:
-
-- Add golden/snapshot-style tests that lock representative intent and operation
-  plan combinations (shorthand vs canonical, include ordering, guards,
-  selectors, item-level overrides).
-
 ### Increment 19: Introduce a minimal symlink apply executor slice
 
 Why this increment exists:

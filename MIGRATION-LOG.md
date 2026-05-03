@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-03: Add core intent/operation snapshot coverage - Add representative
+  golden coverage that locks intent and operation planning outcomes for
+  shorthand and canonical config parity, include ordering, guard evaluation,
+  selector expansion, and item-level option overrides.
 - 2026-05-03: Add config-path override and setup diagnostics - Support
   `GITENV_CONFIG` environment variable to override the default config path,
   add deterministic setup guidance to missing/invalid config errors that

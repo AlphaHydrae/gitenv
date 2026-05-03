@@ -242,7 +242,7 @@ Exit criteria:
 - [x] Normalization tests verify shorthand and canonical equivalence.
 - [x] Dynamic-behavior parity tests cover env resolution, missing required env
       diagnostics, include behavior, and filesystem-gated conditions.
-- [ ] Intent and operation plan snapshots cover core combinations.
+- [x] Intent and operation plan snapshots cover core combinations.
 
 Current status:
 
@@ -251,8 +251,9 @@ Current status:
   include behavior are implemented.
 - [x] The intent-stage output is represented by `IntentPlan`, and the
   operation stage resolves concrete source/target operations.
-- [ ] Keep this phase open until explicit intent/operation snapshot coverage
-  is added for the documented core combinations.
+- [x] Intent and operation snapshot coverage is implemented for representative
+  shorthand/canonical parity, include ordering, guard evaluation, selector
+  expansion, and item-level overrides.
 
 ### Phase 2: Filesystem execution
 
