@@ -25,38 +25,39 @@ pub struct ResolvedOptions {
     pub conflict_policy: ConflictPolicy,
 }
 
-/// The fully resolved set of actions that the executor should carry out.
+/// The intent-stage planning output derived from configuration semantics.
 ///
-/// Produced by `derive_execution_plan` and its variants after all config
-/// sources and transitive includes have been resolved.
+/// This stage resolves defaults, source roots, includes, and guards, but keeps
+/// selector intent (for example `dotfiles` and `exclude`) unexpanded.
+/// Concrete file expansion is the responsibility of the operation-plan stage.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ExecutionPlan {
+pub struct IntentPlan {
     /// Canonical path to the repository root (from the top-level config).
     pub repository: String,
-    /// Ordered list of sources with their resolved actions.
-    pub sources: Vec<PlannedSource>,
+    /// Ordered list of sources with their resolved intent actions.
+    pub sources: Vec<IntentSource>,
 }
 
 /// A resolved source directory together with the actions to be run from it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PlannedSource {
+pub struct IntentSource {
     /// Resolved filesystem path to the source directory.
     pub from: String,
-    pub actions: Vec<PlannedAction>,
+    pub actions: Vec<IntentAction>,
 }
 
 /// A single resolved action to be executed against a source directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PlannedAction {
+pub enum IntentAction {
     /// Copy or link a specific named file.
-    File(PlannedFileAction),
+    File(IntentFileAction),
     /// Copy or link all matching files from the source directory.
-    Select(PlannedSelectAction),
+    Select(IntentSelectAction),
 }
 
 /// Resolved action that operates on a single named file.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PlannedFileAction {
+pub struct IntentFileAction {
     /// Source-relative filename to operate on.
     pub file: String,
     /// Destination filename; defaults to `file` when no `as` override is set.
@@ -66,7 +67,7 @@ pub struct PlannedFileAction {
 
 /// Resolved action that operates on a glob-selected set of files.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PlannedSelectAction {
+pub struct IntentSelectAction {
     /// When `true`, dotfiles (names starting with `.`) are included.
     pub dotfiles: bool,
     /// Filenames explicitly excluded from selection.
@@ -74,24 +75,24 @@ pub struct PlannedSelectAction {
     pub options: ResolvedOptions,
 }
 
-/// Derives an execution plan from `config` using the real process environment
-/// and real filesystem access.
+/// Derives an intent plan from `config` using the real process environment and
+/// real filesystem access.
 ///
 /// This is the primary entry point for production use.
-pub fn derive_execution_plan(config: &Config) -> Result<ExecutionPlan, ProgramError> {
+pub fn derive_intent_plan(config: &Config) -> Result<IntentPlan, ProgramError> {
     let environment = std::env::vars().collect::<BTreeMap<_, _>>();
-    derive_execution_plan_with_env(config, &environment)
+    derive_intent_plan_with_env(config, &environment)
 }
 
-/// Like `derive_execution_plan` but accepts an explicit environment map.
+/// Like `derive_intent_plan` but accepts an explicit environment map.
 ///
 /// Useful in tests that need to control environment variables without mutating
 /// the real process environment.
-pub fn derive_execution_plan_with_env(
+pub fn derive_intent_plan_with_env(
     config: &Config,
     environment: &BTreeMap<String, String>,
-) -> Result<ExecutionPlan, ProgramError> {
-    derive_execution_plan_with_env_and_fs(config, environment, &|path| {
+) -> Result<IntentPlan, ProgramError> {
+    derive_intent_plan_with_env_and_fs(config, environment, &|path| {
         std::fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false)
     })
 }
@@ -99,14 +100,14 @@ pub fn derive_execution_plan_with_env(
 /// Core planning function. `is_directory` is injected so tests can evaluate
 /// guards without touching the real filesystem.
 ///
-/// Delegates to `derive_execution_plan_with_injectables` with the real
+/// Delegates to `derive_intent_plan_with_injectables` with the real
 /// file-reader so include resolution works against actual config files.
-pub fn derive_execution_plan_with_env_and_fs(
+pub fn derive_intent_plan_with_env_and_fs(
     config: &Config,
     environment: &BTreeMap<String, String>,
     is_directory: &impl Fn(&str) -> bool,
-) -> Result<ExecutionPlan, ProgramError> {
-    derive_execution_plan_with_injectables(config, None, environment, is_directory, &load_config)
+) -> Result<IntentPlan, ProgramError> {
+    derive_intent_plan_with_injectables(config, None, environment, is_directory, &load_config)
 }
 
 /// Fully injectable planning function used by tests to exercise include
@@ -118,13 +119,13 @@ pub fn derive_execution_plan_with_env_and_fs(
 ///
 /// `read_config_file` is called once per include path. Tests supply a closure
 /// that returns pre-parsed configs from an in-memory map.
-pub fn derive_execution_plan_with_injectables(
+pub fn derive_intent_plan_with_injectables(
     config: &Config,
     config_path: Option<&Path>,
     environment: &BTreeMap<String, String>,
     is_directory: &impl Fn(&str) -> bool,
     read_config_file: &impl Fn(&Path) -> Result<Config, ProgramError>,
-) -> Result<ExecutionPlan, ProgramError> {
+) -> Result<IntentPlan, ProgramError> {
     let mut missing_env: BTreeSet<String> = BTreeSet::new();
     let mut missing_files: BTreeSet<PathBuf> = BTreeSet::new();
     // in_flight tracks the ancestor chain for cycle detection; seed with the
@@ -157,7 +158,7 @@ pub fn derive_execution_plan_with_injectables(
         });
     }
 
-    Ok(ExecutionPlan {
+    Ok(IntentPlan {
         repository: config.repository.clone(),
         sources,
     })
@@ -186,7 +187,7 @@ fn plan_sources_recursively(
     seen: &mut BTreeSet<PathBuf>,
     missing_env: &mut BTreeSet<String>,
     missing_files: &mut BTreeSet<PathBuf>,
-) -> Result<Vec<PlannedSource>, ProgramError> {
+) -> Result<Vec<IntentSource>, ProgramError> {
     // Plan this config's own sources first (includes-after ordering).
     let mut own_sources = Vec::new();
     for source in &config.sources {
@@ -245,7 +246,7 @@ fn plan_sources_recursively(
                         file_config.overwrite,
                         file_config.backup_on_overwrite,
                     )?;
-                    Ok(PlannedAction::File(PlannedFileAction {
+                    Ok(IntentAction::File(IntentFileAction {
                         file: file_config.file.clone(),
                         as_name: file_config
                             .as_name
@@ -264,7 +265,7 @@ fn plan_sources_recursively(
                         select_config.overwrite,
                         select_config.backup_on_overwrite,
                     )?;
-                    Ok(PlannedAction::Select(PlannedSelectAction {
+                    Ok(IntentAction::Select(IntentSelectAction {
                         dotfiles: select_config.dotfiles,
                         exclude: select_config.exclude.clone(),
                         options,
@@ -272,7 +273,7 @@ fn plan_sources_recursively(
                 }
             })
             .collect::<Result<Vec<_>, _>>()?;
-        own_sources.push(PlannedSource { from, actions });
+        own_sources.push(IntentSource { from, actions });
     }
 
     // Resolve and plan each include, appending their sources after own sources.
@@ -407,9 +408,9 @@ fn resolve_item_options(
 #[cfg(test)]
 mod tests {
     use super::{
-        ConflictPolicy, ExecutionPlan, PlannedAction, PlannedFileAction, PlannedSelectAction,
-        PlannedSource, ResolvedOptions, derive_execution_plan, derive_execution_plan_with_env,
-        derive_execution_plan_with_env_and_fs, derive_execution_plan_with_injectables,
+        ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction,
+        IntentSource, ResolvedOptions, derive_intent_plan, derive_intent_plan_with_env,
+        derive_intent_plan_with_env_and_fs, derive_intent_plan_with_injectables,
     };
     use crate::{
         ActionMode, Config, ConfigItem, Defaults, FileConfig, Guard, Include, ProgramError,
@@ -447,8 +448,8 @@ mod tests {
     }
 
     /// Minimal planned file action with symlink/skip defaults pointing to `~`.
-    fn expected_file_action(file: &str) -> PlannedAction {
-        PlannedAction::File(PlannedFileAction {
+    fn expected_file_action(file: &str) -> IntentAction {
+        IntentAction::File(IntentFileAction {
             file: file.to_string(),
             as_name: file.to_string(),
             options: ResolvedOptions {
@@ -461,19 +462,36 @@ mod tests {
     }
 
     /// Minimal execution plan rooted at the standard test repository path.
-    fn expected_plan(sources: Vec<PlannedSource>) -> ExecutionPlan {
-        ExecutionPlan {
+    fn expected_plan(sources: Vec<IntentSource>) -> IntentPlan {
+        IntentPlan {
             repository: "~/projects/env".to_string(),
             sources,
         }
     }
 
     // ---------------------------------------------------------------------------
-    // Execution plan derivation
+    // Intent plan derivation
     // ---------------------------------------------------------------------------
 
     #[test]
-    fn derive_a_deterministic_execution_plan_from_a_config() {
+    fn derive_a_minimal_intent_plan_with_the_intent_entrypoint() {
+        let config = single_source_config(".", ".zshrc");
+        let environment = BTreeMap::new();
+
+        let plan = derive_intent_plan_with_env(&config, &environment)
+            .expect("config should produce an intent plan");
+
+        assert_eq!(
+            plan,
+            expected_plan(vec![IntentSource {
+                from: ".".to_string(),
+                actions: vec![expected_file_action(".zshrc")],
+            }])
+        );
+    }
+
+    #[test]
+    fn derive_a_deterministic_intent_plan_from_a_config() {
         let config = Config {
             version: 1,
             repository: "~/projects/env".to_string(),
@@ -521,15 +539,15 @@ mod tests {
             }],
         };
 
-        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
-            .expect("config should produce an execution plan");
+        let plan = derive_intent_plan_with_env(&config, &BTreeMap::new())
+            .expect("config should produce an intent plan");
 
-        let expected = ExecutionPlan {
+        let expected = IntentPlan {
             repository: "~/projects/env".to_string(),
-            sources: vec![PlannedSource {
+            sources: vec![IntentSource {
                 from: ".".to_string(),
                 actions: vec![
-                    PlannedAction::File(PlannedFileAction {
+                    IntentAction::File(IntentFileAction {
                         file: ".zshrc".to_string(),
                         as_name: ".zshrc".to_string(),
                         options: ResolvedOptions {
@@ -539,7 +557,7 @@ mod tests {
                             conflict_policy: ConflictPolicy::Overwrite,
                         },
                     }),
-                    PlannedAction::File(PlannedFileAction {
+                    IntentAction::File(IntentFileAction {
                         file: ".tmux".to_string(),
                         as_name: ".tmux.conf".to_string(),
                         options: ResolvedOptions {
@@ -549,7 +567,7 @@ mod tests {
                             conflict_policy: ConflictPolicy::Overwrite,
                         },
                     }),
-                    PlannedAction::Select(PlannedSelectAction {
+                    IntentAction::Select(IntentSelectAction {
                         dotfiles: true,
                         exclude: vec![".git".to_string()],
                         options: ResolvedOptions {
@@ -567,7 +585,7 @@ mod tests {
     }
 
     #[test]
-    fn derive_execution_plan_uses_real_environment_and_filesystem() {
+    fn derive_intent_plan_uses_real_environment_and_filesystem() {
         let config = Config {
             version: 1,
             repository: "~/projects/env".to_string(),
@@ -595,12 +613,12 @@ mod tests {
             }],
         };
 
-        let plan = derive_execution_plan(&config)
+        let plan = derive_intent_plan(&config)
             .expect("planning should succeed when the current directory exists");
 
         assert_eq!(
             plan,
-            expected_plan(vec![PlannedSource {
+            expected_plan(vec![IntentSource {
                 from: ".".to_string(),
                 actions: vec![expected_file_action(".zshrc")],
             }])
@@ -643,14 +661,14 @@ mod tests {
             "~/projects/private-env".to_string(),
         )]);
 
-        let plan = derive_execution_plan_with_env(&config, &environment)
+        let plan = derive_intent_plan_with_env(&config, &environment)
             .expect("planning should resolve the environment-backed source");
 
-        let expected = ExecutionPlan {
+        let expected = IntentPlan {
             repository: "~/projects/env".to_string(),
-            sources: vec![PlannedSource {
+            sources: vec![IntentSource {
                 from: "~/projects/private-env".to_string(),
-                actions: vec![PlannedAction::File(PlannedFileAction {
+                actions: vec![IntentAction::File(IntentFileAction {
                     file: ".secrets".to_string(),
                     as_name: ".secrets".to_string(),
                     options: ResolvedOptions {
@@ -691,12 +709,12 @@ mod tests {
             }],
         };
 
-        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+        let plan = derive_intent_plan_with_env(&config, &BTreeMap::new())
             .expect("planning should keep explicit path source roots as-is");
 
         assert_eq!(
             plan,
-            expected_plan(vec![PlannedSource {
+            expected_plan(vec![IntentSource {
                 from: "$PRIVATE_ENV_DIR".to_string(),
                 actions: vec![expected_file_action(".zshrc")],
             }])
@@ -732,14 +750,14 @@ mod tests {
             }],
         };
 
-        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+        let plan = derive_intent_plan_with_env(&config, &BTreeMap::new())
             .expect("planning should collapse overwrite-disabled defaults to skip");
 
-        let expected = ExecutionPlan {
+        let expected = IntentPlan {
             repository: "~/projects/env".to_string(),
-            sources: vec![PlannedSource {
+            sources: vec![IntentSource {
                 from: ".".to_string(),
-                actions: vec![PlannedAction::File(PlannedFileAction {
+                actions: vec![IntentAction::File(IntentFileAction {
                     file: ".zshrc".to_string(),
                     as_name: ".zshrc".to_string(),
                     options: ResolvedOptions {
@@ -800,7 +818,7 @@ mod tests {
             ],
         };
 
-        let error = derive_execution_plan_with_env(&config, &BTreeMap::new())
+        let error = derive_intent_plan_with_env(&config, &BTreeMap::new())
             .expect_err("planning should fail when environment variables are missing");
 
         assert_eq!(
@@ -837,7 +855,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+        let plan = derive_intent_plan_with_env(&config, &BTreeMap::new())
             .expect("planning should succeed when an optional environment-backed source is unset");
 
         assert_eq!(plan, expected_plan(vec![]));
@@ -876,14 +894,14 @@ mod tests {
             }],
         };
 
-        let plan = derive_execution_plan_with_env_and_fs(&config, &BTreeMap::new(), &|_| false)
+        let plan = derive_intent_plan_with_env_and_fs(&config, &BTreeMap::new(), &|_| false)
             .expect("planning should succeed with a source-level to");
 
         assert_eq!(
             plan,
-            expected_plan(vec![PlannedSource {
+            expected_plan(vec![IntentSource {
                 from: "vscode".to_string(),
-                actions: vec![PlannedAction::File(PlannedFileAction {
+                actions: vec![IntentAction::File(IntentFileAction {
                     file: "settings.json".to_string(),
                     as_name: "settings.json".to_string(),
                     options: ResolvedOptions {
@@ -924,16 +942,16 @@ mod tests {
             "~/Library/Application Support/Code/User".to_string(),
         ]);
 
-        let plan = derive_execution_plan_with_env_and_fs(&config, &BTreeMap::new(), &|path| {
+        let plan = derive_intent_plan_with_env_and_fs(&config, &BTreeMap::new(), &|path| {
             known_dirs.contains(path)
         })
         .expect("planning should succeed when the to_exists guard is satisfied");
 
         assert_eq!(
             plan,
-            expected_plan(vec![PlannedSource {
+            expected_plan(vec![IntentSource {
                 from: "vscode".to_string(),
-                actions: vec![PlannedAction::File(PlannedFileAction {
+                actions: vec![IntentAction::File(IntentFileAction {
                     file: "settings.json".to_string(),
                     as_name: "settings.json".to_string(),
                     options: ResolvedOptions {
@@ -970,7 +988,7 @@ mod tests {
             }],
         };
         // Destination directory is absent.
-        let plan = derive_execution_plan_with_env_and_fs(&config, &BTreeMap::new(), &|_| false)
+        let plan = derive_intent_plan_with_env_and_fs(&config, &BTreeMap::new(), &|_| false)
             .expect("planning should succeed when the to_exists guard is not satisfied");
 
         assert_eq!(plan, expected_plan(vec![]));
@@ -1000,14 +1018,14 @@ mod tests {
         };
         let known_dirs = std::collections::BTreeSet::from(["/Applications".to_string()]);
 
-        let plan = derive_execution_plan_with_env_and_fs(&config, &BTreeMap::new(), &|path| {
+        let plan = derive_intent_plan_with_env_and_fs(&config, &BTreeMap::new(), &|path| {
             known_dirs.contains(path)
         })
         .expect("planning should succeed when the directory_exists guard is satisfied");
 
         assert_eq!(
             plan,
-            expected_plan(vec![PlannedSource {
+            expected_plan(vec![IntentSource {
                 from: "macos".to_string(),
                 actions: vec![expected_file_action(".macos-defaults")],
             }])
@@ -1037,7 +1055,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_execution_plan_with_env_and_fs(&config, &BTreeMap::new(), &|_| false)
+        let plan = derive_intent_plan_with_env_and_fs(&config, &BTreeMap::new(), &|_| false)
             .expect("planning should succeed when the directory_exists guard is not satisfied");
 
         assert_eq!(plan, expected_plan(vec![]));
@@ -1076,14 +1094,14 @@ mod tests {
             }],
         };
 
-        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+        let plan = derive_intent_plan_with_env(&config, &BTreeMap::new())
             .expect("planning should produce overwrite-with-backup conflict policy");
 
         assert_eq!(
             plan,
-            expected_plan(vec![PlannedSource {
+            expected_plan(vec![IntentSource {
                 from: ".".to_string(),
-                actions: vec![PlannedAction::File(PlannedFileAction {
+                actions: vec![IntentAction::File(IntentFileAction {
                     file: ".zshrc".to_string(),
                     as_name: ".zshrc".to_string(),
                     options: ResolvedOptions {
@@ -1100,7 +1118,7 @@ mod tests {
     // ---------------------------------------------------------------------------
     // Include planning
     //
-    // These tests use `derive_execution_plan_with_injectables` and supply a
+    // These tests use `derive_intent_plan_with_injectables` and supply a
     // `read_config_file` closure that returns pre-built in-memory configs keyed
     // by path string, so no real files need to be written.
     // ---------------------------------------------------------------------------
@@ -1134,7 +1152,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_execution_plan_with_injectables(
+        let plan = derive_intent_plan_with_injectables(
             &root,
             None,
             &BTreeMap::new(),
@@ -1149,11 +1167,11 @@ mod tests {
         assert_eq!(
             plan,
             expected_plan(vec![
-                PlannedSource {
+                IntentSource {
                     from: ".".to_string(),
                     actions: vec![expected_file_action(".zshrc")],
                 },
-                PlannedSource {
+                IntentSource {
                     from: "inc".to_string(),
                     actions: vec![expected_file_action(".tmux.conf")],
                 },
@@ -1181,7 +1199,7 @@ mod tests {
             ..single_source_config("root_src", ".zshrc")
         };
 
-        let plan = derive_execution_plan_with_injectables(
+        let plan = derive_intent_plan_with_injectables(
             &root,
             None,
             &BTreeMap::new(),
@@ -1200,15 +1218,15 @@ mod tests {
         assert_eq!(
             plan,
             expected_plan(vec![
-                PlannedSource {
+                IntentSource {
                     from: "root_src".to_string(),
                     actions: vec![expected_file_action(".zshrc")],
                 },
-                PlannedSource {
+                IntentSource {
                     from: "a_src".to_string(),
                     actions: vec![expected_file_action(".aliases")],
                 },
-                PlannedSource {
+                IntentSource {
                     from: "c_src".to_string(),
                     actions: vec![expected_file_action(".bashrc")],
                 },
@@ -1242,7 +1260,7 @@ mod tests {
             ..single_source_config("root_src", ".zshrc")
         };
 
-        let plan = derive_execution_plan_with_injectables(
+        let plan = derive_intent_plan_with_injectables(
             &root,
             None,
             &BTreeMap::new(),
@@ -1261,15 +1279,15 @@ mod tests {
         assert_eq!(
             plan,
             expected_plan(vec![
-                PlannedSource {
+                IntentSource {
                     from: "root_src".to_string(),
                     actions: vec![expected_file_action(".zshrc")],
                 },
-                PlannedSource {
+                IntentSource {
                     from: "a_src".to_string(),
                     actions: vec![expected_file_action(".aliases")],
                 },
-                PlannedSource {
+                IntentSource {
                     from: "shared_src".to_string(),
                     actions: vec![expected_file_action(".shared")],
                 },
@@ -1287,7 +1305,7 @@ mod tests {
             ..single_source_config("root_src", ".zshrc")
         };
 
-        let plan = derive_execution_plan_with_injectables(
+        let plan = derive_intent_plan_with_injectables(
             &root,
             None,
             &BTreeMap::new(),
@@ -1303,7 +1321,7 @@ mod tests {
 
         assert_eq!(
             plan,
-            expected_plan(vec![PlannedSource {
+            expected_plan(vec![IntentSource {
                 from: "root_src".to_string(),
                 actions: vec![expected_file_action(".zshrc")],
             }])
@@ -1326,7 +1344,7 @@ mod tests {
             ..single_source_config(".", ".zshrc")
         };
 
-        let error = derive_execution_plan_with_injectables(
+        let error = derive_intent_plan_with_injectables(
             &root,
             None,
             &BTreeMap::new(),
@@ -1376,7 +1394,7 @@ mod tests {
             ..single_source_config("root_src", ".zshrc")
         };
 
-        let error = derive_execution_plan_with_injectables(
+        let error = derive_intent_plan_with_injectables(
             &root,
             None,
             &BTreeMap::new(),
@@ -1419,7 +1437,7 @@ mod tests {
             "/private/.gitenv.yml".to_string(),
         )]);
 
-        let plan = derive_execution_plan_with_injectables(
+        let plan = derive_intent_plan_with_injectables(
             &root,
             None,
             &environment,
@@ -1434,11 +1452,11 @@ mod tests {
         assert_eq!(
             plan,
             expected_plan(vec![
-                PlannedSource {
+                IntentSource {
                     from: ".".to_string(),
                     actions: vec![expected_file_action(".zshrc")],
                 },
-                PlannedSource {
+                IntentSource {
                     from: "private_src".to_string(),
                     actions: vec![expected_file_action(".secrets")],
                 },
@@ -1456,13 +1474,13 @@ mod tests {
             ..single_source_config(".", ".zshrc")
         };
 
-        let plan = derive_execution_plan_with_env(&root, &BTreeMap::new()).expect(
+        let plan = derive_intent_plan_with_env(&root, &BTreeMap::new()).expect(
             "planning should succeed when an optional env-backed include variable is unset",
         );
 
         assert_eq!(
             plan,
-            expected_plan(vec![PlannedSource {
+            expected_plan(vec![IntentSource {
                 from: ".".to_string(),
                 actions: vec![expected_file_action(".zshrc")],
             }])
@@ -1479,7 +1497,7 @@ mod tests {
             ..single_source_config(".", ".zshrc")
         };
 
-        let error = derive_execution_plan_with_env(&root, &BTreeMap::new()).expect_err(
+        let error = derive_intent_plan_with_env(&root, &BTreeMap::new()).expect_err(
             "planning should fail when a required env-backed include variable is unset",
         );
 
@@ -1561,7 +1579,7 @@ mod tests {
             }
         };
 
-        let plan = derive_execution_plan_with_injectables(
+        let plan = derive_intent_plan_with_injectables(
             &root,
             None,
             &BTreeMap::new(),
@@ -1577,9 +1595,9 @@ mod tests {
             plan,
             expected_plan(vec![
                 // Root's source uses copy mode with root's defaults.
-                PlannedSource {
+                IntentSource {
                     from: "root_src".to_string(),
-                    actions: vec![PlannedAction::File(PlannedFileAction {
+                    actions: vec![IntentAction::File(IntentFileAction {
                         file: ".zshrc".to_string(),
                         as_name: ".zshrc".to_string(),
                         options: ResolvedOptions {
@@ -1591,9 +1609,9 @@ mod tests {
                     })],
                 },
                 // Included source uses symlink mode with included config's defaults.
-                PlannedSource {
+                IntentSource {
                     from: "inc_src".to_string(),
-                    actions: vec![PlannedAction::File(PlannedFileAction {
+                    actions: vec![IntentAction::File(IntentFileAction {
                         file: ".tmux.conf".to_string(),
                         as_name: ".tmux.conf".to_string(),
                         options: ResolvedOptions {
@@ -1621,18 +1639,13 @@ mod tests {
             ..single_source_config(".", ".zshrc")
         };
 
-        let error = derive_execution_plan_with_injectables(
-            &root,
-            None,
-            &BTreeMap::new(),
-            &|_| false,
-            &|_| {
+        let error =
+            derive_intent_plan_with_injectables(&root, None, &BTreeMap::new(), &|_| false, &|_| {
                 Err(ProgramError::InvalidConfiguration {
                     message: "unknown field `oops`".to_string(),
                 })
-            },
-        )
-        .expect_err("a parse error from an included config should propagate immediately");
+            })
+            .expect_err("a parse error from an included config should propagate immediately");
 
         assert_eq!(
             error,
@@ -1676,14 +1689,14 @@ mod tests {
             }],
         };
 
-        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+        let plan = derive_intent_plan_with_env(&config, &BTreeMap::new())
             .expect("planning should apply item-level mode override");
 
         assert_eq!(
             plan,
-            expected_plan(vec![PlannedSource {
+            expected_plan(vec![IntentSource {
                 from: ".".to_string(),
-                actions: vec![PlannedAction::File(PlannedFileAction {
+                actions: vec![IntentAction::File(IntentFileAction {
                     file: ".zshrc".to_string(),
                     as_name: ".zshrc".to_string(),
                     options: ResolvedOptions {
@@ -1721,14 +1734,14 @@ mod tests {
             }],
         };
 
-        let plan = derive_execution_plan_with_env_and_fs(&config, &BTreeMap::new(), &|_| false)
+        let plan = derive_intent_plan_with_env_and_fs(&config, &BTreeMap::new(), &|_| false)
             .expect("planning should apply item-level to override");
 
         assert_eq!(
             plan,
-            expected_plan(vec![PlannedSource {
+            expected_plan(vec![IntentSource {
                 from: ".".to_string(),
-                actions: vec![PlannedAction::File(PlannedFileAction {
+                actions: vec![IntentAction::File(IntentFileAction {
                     file: ".zshrc".to_string(),
                     as_name: ".zshrc".to_string(),
                     options: ResolvedOptions {
@@ -1772,14 +1785,14 @@ mod tests {
             }],
         };
 
-        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+        let plan = derive_intent_plan_with_env(&config, &BTreeMap::new())
             .expect("planning should apply item-level overwrite override");
 
         assert_eq!(
             plan,
-            expected_plan(vec![PlannedSource {
+            expected_plan(vec![IntentSource {
                 from: ".".to_string(),
-                actions: vec![PlannedAction::File(PlannedFileAction {
+                actions: vec![IntentAction::File(IntentFileAction {
                     file: ".zshrc".to_string(),
                     as_name: ".zshrc".to_string(),
                     options: ResolvedOptions {
@@ -1823,14 +1836,14 @@ mod tests {
             }],
         };
 
-        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
+        let plan = derive_intent_plan_with_env(&config, &BTreeMap::new())
             .expect("planning should apply select item overrides");
 
         assert_eq!(
             plan,
-            expected_plan(vec![PlannedSource {
+            expected_plan(vec![IntentSource {
                 from: ".".to_string(),
-                actions: vec![PlannedAction::Select(PlannedSelectAction {
+                actions: vec![IntentAction::Select(IntentSelectAction {
                     dotfiles: true,
                     exclude: vec![],
                     options: ResolvedOptions {
@@ -1869,7 +1882,7 @@ mod tests {
             }],
         };
 
-        let error = derive_execution_plan_with_env(&config, &BTreeMap::new())
+        let error = derive_intent_plan_with_env(&config, &BTreeMap::new())
             .expect_err("planning should reject explicit overwrite: false with backup_on_overwrite: true at item level");
 
         assert!(matches!(
@@ -1902,7 +1915,7 @@ mod tests {
             }],
         };
 
-        let error = derive_execution_plan_with_env(&config, &BTreeMap::new()).expect_err(
+        let error = derive_intent_plan_with_env(&config, &BTreeMap::new()).expect_err(
             "planning should reject explicit overwrite: false with backup_on_overwrite: true at select item level",
         );
 
@@ -1946,15 +1959,15 @@ mod tests {
             }],
         };
 
-        let plan = derive_execution_plan_with_env(&config, &BTreeMap::new()).expect(
+        let plan = derive_intent_plan_with_env(&config, &BTreeMap::new()).expect(
             "planning should succeed when backup default is inherited and overwrite is false",
         );
 
         assert_eq!(
             plan,
-            expected_plan(vec![PlannedSource {
+            expected_plan(vec![IntentSource {
                 from: ".".to_string(),
-                actions: vec![PlannedAction::File(PlannedFileAction {
+                actions: vec![IntentAction::File(IntentFileAction {
                     file: ".zshrc".to_string(),
                     as_name: ".zshrc".to_string(),
                     options: ResolvedOptions {

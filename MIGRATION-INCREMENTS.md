@@ -36,21 +36,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 13: Clarify plan-stage naming and lock intent semantics
-
-Why this increment exists:
-
-- The current `ExecutionPlan` model is config-shaped intent output, not the
-  final execution-shaped operation plan.
-- Two-stage planning is easier to review when type names mirror stage intent
-  (`IntentPlan` versus operation-plan naming) before adding the second stage.
-
-Review target:
-
-- Public planner naming makes the current stage explicit as intent planning.
-- Backward-compatibility strategy for the existing `ExecutionPlan` name is
-  documented and tested.
-
 ### Increment 14: Add the first operation-plan expansion slice
 
 Why this increment exists:

@@ -248,9 +248,9 @@ Current status:
 - Parser coverage, shorthand/canonical normalization, required environment
   resolution, filesystem-gated guards, and deterministic include behavior are
   implemented.
-- The current `ExecutionPlan` shape remains config-shaped intent planning
-  output; the operation plan stage (with concrete file-selection expansion) and
-  full intent/operation snapshot coverage are still pending.
+- The current intent-stage output is represented by `IntentPlan`; the
+  operation plan stage (with concrete file-selection expansion) and full
+  intent/operation snapshot coverage are still pending.
 
 ### Phase 2: Filesystem execution
 

@@ -6,9 +6,9 @@ pub use config::{
     SourceRoot, load_config, parse_config,
 };
 pub use plan::{
-    ConflictPolicy, ExecutionPlan, PlannedAction, PlannedFileAction, PlannedSelectAction,
-    PlannedSource, ResolvedOptions, derive_execution_plan, derive_execution_plan_with_env,
-    derive_execution_plan_with_env_and_fs, derive_execution_plan_with_injectables,
+    ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction, IntentSource,
+    ResolvedOptions, derive_intent_plan, derive_intent_plan_with_env,
+    derive_intent_plan_with_env_and_fs, derive_intent_plan_with_injectables,
 };
 
 use std::path::PathBuf;

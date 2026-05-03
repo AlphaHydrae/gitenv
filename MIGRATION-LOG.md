@@ -11,6 +11,11 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-03: Clarify intent-stage planner naming - Introduce intent-stage
+  planner names (`IntentPlan`, `IntentSource`, `IntentAction`, and intent
+  derivation entrypoints), remove legacy `ExecutionPlan`/`Planned*` naming and
+  `derive_execution_plan*` entrypoints, and update planner tests to assert the
+  intent entrypoints directly.
 - 2026-05-03: Realign migration documents with current planning state - Update
   phase checklist status in `MIGRATION.md`, clarify that the current
   `ExecutionPlan` output is the intent-plan stage while operation-plan
