@@ -1,7 +1,5 @@
 # Contributing
 
-## Start Here
-
 Before making changes, review:
 
 - [README.md](./README.md) for project overview and usage.
@@ -65,26 +63,20 @@ Business modules must not print directly to terminal output.
 
 - Inject dependencies rather than constructing them inside business logic.
 - In unit tests, use fakes/mocks for injectable dependencies.
-- Keep runtime composition in a clear composition root at the CLI boundary.
 
-## Rust Code Guidelines
+## Coding Guidelines
 
-- Do not use `expect`, `unwrap`, `panic!`, or `unreachable!` in implementation
-  code (non-test code). Every failure path must be represented as a typed
-  `Result` or `Option` and propagated to the caller. Use `?` for propagation.
-  If a path is genuinely unreachable due to invariants already enforced
-  elsewhere, document why and return a typed error instead of panicking.
+- **DO NOT** use `expect`, `unwrap`, `panic!`, or `unreachable!` in
+  implementation code (non-test code). Every failure path must be represented as
+  a typed `Result` or `Option` and propagated to the caller. Use `?` for
+  propagation. If a path is genuinely unreachable due to invariants already
+  enforced elsewhere, document why and return a typed error instead of
+  panicking.
 - `expect` and `unwrap` are acceptable in test code only, where a panic
   produces a clear failure at the test site.
 
 ## Testing Guidelines
 
-- Write tests in behavior-focused language.
-- Prefer clear, externally observable outcomes over implementation detail checks.
-- Make assertions complete for the behavior under test. Do not stop at partial
-  checks when the full structured outcome can be asserted directly.
-- If complete assertions are intentionally not used, include a brief comment
-  explaining the reason.
 - Cover edge cases and failure modes explicitly.
 - Avoid duplicate behavior coverage across layers when a lower-layer test
   already proves the behavior and the higher layer adds no new transformation
@@ -94,46 +86,42 @@ Business modules must not print directly to terminal output.
 - Include parity tests for equivalent library and CLI workflows.
 - Include logging tests for level filtering and expected diagnostic visibility.
 
-## Test Code Guidelines
+### Test naming style
 
-### General style
-
-- Describe the expected behavior or outcome rather than the action under test.
-- Use `describe` blocks sparingly and only when they improve the structure of
-  the tests. Do not group tests by method name.
+- Describe the observable behavior and outcomes in plain human-readable
+  language.
+- Use sentence-style `snake_case`. Prefer an imperative verb at the start (for
+  example: `show_the_default_message_on_stdout`), but declarative sentences are
+  acceptable when they more clearly describe the expected behavior (for example:
+  `the_default_action_is_a_home_symlink`). Avoid third-person singular forms
+  such as `shows_...`.
 - Keep test names human-readable and avoid technical details that do not help
-  explain the expected behavior. Put necessary technical context in inline
-  comments instead.
+  explain the expected behavior (e.g. method name, return value, implementation
+  details). Put necessary technical context in inline comments instead.
+- Keep names focused on externally observable behavior and avoid implementation
+  terms such as `returns`, `checks`, `calls`.
 - Do not include implementation technology in test names when it does not change
   the expected behavior (for example, avoid format labels such as `yaml` in
   config behavior tests, since we only parse YAML configs anyway).
-- For test function names, use sentence-style `snake_case`. Prefer an
-  imperative verb at the start (for example:
-  `show_the_default_message_on_stdout`), but declarative sentences are
-  acceptable when they more clearly describe the expected behavior (for
-  example: `the_default_action_is_a_home_symlink`). Avoid third-person
-  singular forms such as `shows_...`.
 - Avoid redundant wording in test names (for example, do not pair `missing`
   with `required` when one already implies the other).
-
-### Spec description style
-
-- Do not include method names, return values, or implementation details in test
-  descriptions. Focus on describing the observable behavior and outcomes
-  instead.
-- Describe observable outcomes in plain language.
-- Avoid return-value and state-machine framing where a behavioral sentence is
-  clearer.
-- Prefer concise verb-led behavior phrases for most examples.
-- Keep names focused on externally observable behavior and avoid implementation
-  terms such as `returns`, `checks`, `calls`, or explicit method names.
 - Use `cannot` for constraints and failure-mode examples.
-- Use plain imperative verb phrases for action-oriented examples.
 
-### Output side-effect tests
+### Assertion quality
 
-- In business-layer tests, assert structured return values and emitted events
-  instead of asserting terminal output side effects.
+- Test clear, externally observable outcomes rather than implementation details.
+- Make assertions complete for the behavior under test. When a function returns
+  a full structured result that can be asserted directly, assert that full
+  result rather than a partial subset.
+- If complete assertions become too long or repetitive, extract test helper
+  constructors/builders to keep tests readable while still asserting full
+  outcomes.
+- If complete assertions are not feasible without disproportionate complexity,
+  stop and ask for guidance instead of defaulting to partial assertions.
+- If complete assertions are intentionally not used, include a brief comment
+  explaining the reason.
+- In domain tests, assert structured return values and emitted events instead of
+  asserting terminal output side effects.
 - In CLI-layer tests, assert output behavior at the CLI boundary only
   (`stdout`, `stderr`, log level gating, and rendering decisions).
 - Keep parseable `stdout` contracts stable. When adding output modes, include

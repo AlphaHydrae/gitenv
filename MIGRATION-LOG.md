@@ -11,11 +11,11 @@ Suggested entry shape:
 
 ## Entries
 
-- 2026-05-02: Move parser-focused tests into config.rs and document config API
-  - Relocate parse/load/guard/include/source-root/item-override parsing tests
-  from `rust/src/plan.rs` into `rust/src/config.rs` so parser behavior is
-  tested alongside parser code; keep planning-behavior tests in `plan.rs`.
-  Add doc comments to non-obvious config public models and parsing functions.
+- 2026-05-02: Move parser-focused tests into config.rs and document config API -
+  Relocate parse/load/guard/include/source-root/item-override parsing tests from
+  `rust/src/plan.rs` into `rust/src/config.rs` so parser behavior is tested
+  alongside parser code; keep planning-behavior tests in `plan.rs`. Add doc
+  comments to non-obvious config public models and parsing functions.
 - 2026-05-02: Add doc comments to plan.rs public types and functions - Add
   concise doc comments to all public types (`ConflictPolicy`, `ExecutionPlan`,
   `PlannedSource`, `PlannedAction`, `PlannedFileAction`, `PlannedSelectAction`)

@@ -55,14 +55,14 @@ them to EVERY task, EVERY time.**
   critical quality failure.
 - **🔴 TEST-NAMING GATE IS MANDATORY BEFORE ANY TEST EDIT.** Before writing or
   changing any test code, re-read [test code
-  guidelines](./CONTRIBUTING.md#test-code-guidelines) and [spec description
-  style](./CONTRIBUTING.md#spec-description-style), then explicitly self-check
-  each new/edited test name against those rules. Do not proceed if any test
-  name violates them.
-- **🔴 TEST-ASSERTION GATE IS MANDATORY BEFORE ANY TEST EDIT.** Before finalizing
-  a test change, verify that each test makes complete assertions for the
-  behavior under test whenever practical. If a test intentionally uses partial
-  assertions, add a brief justification comment in the test.
+  guidelines](./CONTRIBUTING.md#testing-guidelines) and [test naming
+  style](./CONTRIBUTING.md#test-naming-style), then explicitly self-check each
+  new/edited test name against those rules. Do not proceed if any test name
+  violates them.
+- **🔴 TEST-ASSERTION GATE IS MANDATORY BEFORE ANY TEST EDIT.** Before
+  finalizing a test change, verify that each test fulfills [assertion quality
+  criteria](./CONTRIBUTING.md#assertion-quality). Fix any mismatches before
+  claiming completion. Ask for guidance if necessary.
 
 ### 🚨 VERIFICATION — STILL MANDATORY TOP PRIORITY
 
@@ -317,9 +317,6 @@ them to EVERY task, EVERY time.**
   implementations.
 - Keep behavior exposed by both library and CLI unless an explicit design
   exception is documented.
-- Avoid re-testing behavior at a higher abstraction layer when that behavior is
-  already fully covered at a lower layer and the higher layer adds no unique
-  logic.
 - Ensure logging is thorough and configurable by log level when working on
   diagnostics or command execution paths.
 - **🔴 Never use `expect`, `unwrap`, `panic!`, or `unreachable!` in
@@ -328,6 +325,12 @@ them to EVERY task, EVERY time.**
   believe a path is unreachable due to enforced invariants, document that
   reasoning and return a typed error anyway — do not panic. `expect` and
   `unwrap` are only acceptable in test code.
+- Test code
+  - Avoid re-testing behavior at a higher abstraction layer when that behavior
+    is already fully covered at a lower layer and the higher layer adds no
+    unique logic.
+  - If complete assertions are not feasible without disproportionate complexity,
+    stop and ask for guidance instead of defaulting to partial assertions.
 
 ## Agent verification helpers
 
