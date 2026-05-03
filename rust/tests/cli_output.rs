@@ -2,6 +2,16 @@ use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
 
+fn gitenv_command_for_home(home: &TempDir) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_gitenv"));
+    command
+        .env("HOME", home.path())
+        // Keep tests deterministic when CI sets global config path variables.
+        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("GITENV_CONFIG");
+    command
+}
+
 #[test]
 fn show_the_default_inspection_output_for_a_missing_symlink() {
     let home = TempDir::new().expect("temporary home directory should be created");
@@ -33,8 +43,7 @@ fn show_the_default_inspection_output_for_a_missing_symlink() {
     .expect("config directory should be created");
     fs::write(config_path, config).expect("config file should be written");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_gitenv"))
-        .env("HOME", home.path())
+    let output = gitenv_command_for_home(&home)
         .output()
         .expect("binary should run");
 
@@ -53,8 +62,7 @@ fn show_the_default_inspection_output_for_a_missing_symlink() {
 fn fail_the_default_inspection_when_the_config_file_is_missing() {
     let home = TempDir::new().expect("temporary home directory should be created");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_gitenv"))
-        .env("HOME", home.path())
+    let output = gitenv_command_for_home(&home)
         .output()
         .expect("binary should run");
 
