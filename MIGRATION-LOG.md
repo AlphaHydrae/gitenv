@@ -11,6 +11,13 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-03: Wire the default CLI inspection flow - Replace the placeholder
+  Rust CLI path with a thin config -> intent -> operation -> symlink-status
+  inspection pipeline, resolve the default config location from XDG
+  (`$XDG_CONFIG_HOME/gitenv/config.yml`) with
+  `~/.config/gitenv/config.yml` fallback, render default no-arg status output
+  from structured inspection data, and add CLI tests for default output and
+  missing-config exit behavior.
 - 2026-05-03: Add the first symlink status inspection slice - Introduce a
   dedicated Rust `status` module with structured symlink inspection results,
   add a typed entrypoint that inspects one concrete symlink operation without

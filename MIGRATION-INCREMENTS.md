@@ -36,15 +36,18 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 16: Wire the default CLI inspection flow
+### Increment 17: Add config-path override and setup diagnostics
 
 Why this increment exists:
 
-- Deliver the first thin end-to-end vertical slice through config, planning,
-  inspection, and rendering.
-- Confirm the CLI is acting as an adapter over library behavior.
+- Keep the default inspection path usable when config is not in the default
+  location.
+- Align missing/invalid config behavior with the architecture requirement to
+  print clear setup instructions.
 
 Review target:
 
-- The default CLI path loads config, plans, inspects status, and renders output.
-- CLI tests cover observable output and exit behavior.
+- The CLI resolves config path from `GITENV_CONFIG` before falling back to the
+  default path.
+- Missing/invalid config errors include deterministic setup guidance and are
+  covered by CLI tests.
