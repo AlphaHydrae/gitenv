@@ -1,8 +1,13 @@
+mod actions;
 mod config;
 mod intent;
 mod operation;
 mod status;
 
+pub use actions::{
+    ApplyOperationOutcome, ApplyOperationReport, apply_operation_plan,
+    apply_operation_plan_with_injectables,
+};
 pub use config::{
     ActionMode, Config, ConfigItem, Defaults, FileConfig, Guard, Include, SelectConfig, Source,
     SourceRoot, load_config, parse_config,
@@ -62,6 +67,12 @@ pub enum ProgramError {
     /// A symlink target could not be read while deriving status.
     ReadSymlinkTarget {
         path: PathBuf,
+        message: String,
+    },
+    /// A symlink could not be created while applying operations.
+    CreateSymlink {
+        source: PathBuf,
+        target: PathBuf,
         message: String,
     },
     /// The current home directory is required to resolve home-relative paths.
@@ -230,6 +241,18 @@ impl fmt::Display for ProgramError {
                     f,
                     "cannot read symlink target for {} ({message})",
                     path.display()
+                )
+            }
+            ProgramError::CreateSymlink {
+                source,
+                target,
+                message,
+            } => {
+                write!(
+                    f,
+                    "cannot create symlink {} -> {} ({message})",
+                    target.display(),
+                    source.display(),
                 )
             }
             ProgramError::HomeDirectoryUnavailable => {
@@ -514,6 +537,15 @@ mod tests {
             }
             .to_string(),
             "cannot read symlink target for /home/.gitconfig (broken link)"
+        );
+        assert_eq!(
+            ProgramError::CreateSymlink {
+                source: PathBuf::from("/repo/.gitconfig"),
+                target: PathBuf::from("/home/.gitconfig"),
+                message: "operation not permitted".to_string(),
+            }
+            .to_string(),
+            "cannot create symlink /home/.gitconfig -> /repo/.gitconfig (operation not permitted)"
         );
         assert_eq!(
             ProgramError::HomeDirectoryUnavailable.to_string(),

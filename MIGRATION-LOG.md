@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-03: Add a minimal symlink apply executor slice - Introduce an
+  `actions` execution entrypoint that applies only missing-target symlink
+  operations, reports structured per-operation outcomes for existing-target
+  and copy branches.
 - 2026-05-03: Add core intent/operation snapshot coverage - Add representative
   golden coverage that locks intent and operation planning outcomes for
   shorthand and canonical config parity, include ordering, guard evaluation,

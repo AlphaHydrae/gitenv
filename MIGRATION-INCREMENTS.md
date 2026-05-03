@@ -36,20 +36,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 19: Introduce a minimal symlink apply executor slice
-
-Why this increment exists:
-
-- The current implementation inspects status but does not mutate the
-  filesystem.
-- A small first apply slice keeps execution work reviewable.
-
-Review target:
-
-- Add an `actions` execution entrypoint that performs only the simplest
-  symlink apply path (target absent, no conflicts).
-- Add focused integration tests in temporary directories.
-
 ### Increment 20: Implement symlink conflict semantics
 
 Why this increment exists:
