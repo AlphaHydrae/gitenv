@@ -36,5 +36,99 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-<!-- Empty - all planned increments are complete. See MIGRATION-LOG.md for what has been completed. -->
+### Increment 18: Add core intent/operation snapshot coverage
 
+Why this increment exists:
+
+- Phase 1 still has one open exit criterion for snapshot coverage.
+- Intent and operation plans are now stable enough to lock representative
+  combinations.
+
+Review target:
+
+- Add golden/snapshot-style tests that lock representative intent and operation
+  plan combinations (shorthand vs canonical, include ordering, guards,
+  selectors, item-level overrides).
+
+### Increment 19: Introduce a minimal symlink apply executor slice
+
+Why this increment exists:
+
+- The current implementation inspects status but does not mutate the
+  filesystem.
+- A small first apply slice keeps execution work reviewable.
+
+Review target:
+
+- Add an `actions` execution entrypoint that performs only the simplest
+  symlink apply path (target absent, no conflicts).
+- Add focused integration tests in temporary directories.
+
+### Increment 20: Implement symlink conflict semantics
+
+Why this increment exists:
+
+- Symlink apply cannot be considered complete without deterministic conflict
+  handling.
+- `skip`/`overwrite`/backup behavior and `mkdir` are core semantics from the
+  planning model.
+
+Review target:
+
+- Extend symlink apply behavior to honor conflict policies and `mkdir`.
+- Add deterministic errors and integration coverage for each branch.
+
+### Increment 21: Introduce copy apply execution with option parity
+
+Why this increment exists:
+
+- Operation planning already emits copy actions.
+- Execution parity requires a concrete copy path with the same option semantics
+  as symlink actions.
+
+Review target:
+
+- Add concrete copy execution that respects `mkdir` and conflict policy
+  behavior.
+- Add Unix fixture/integration tests that mirror symlink executor
+  expectations.
+
+### Increment 22: Expand status modeling for info and apply workflows
+
+Why this increment exists:
+
+- Status modeling currently centers on symlink inspection only.
+- Broader status modeling is needed before full info/apply CLI parity.
+
+Review target:
+
+- Generalize structured status/output models beyond symlink inspection.
+- Ensure info/apply surfaces can report typed per-operation outcomes for
+  symlink and copy actions.
+
+### Increment 23: Add explicit CLI command parsing for info and apply
+
+Why this increment exists:
+
+- The CLI is currently default-path inspection only.
+- Command-level parity requires explicit `info` and `apply` entry points.
+
+Review target:
+
+- Replace implicit default-only flow with a thin CLI adapter that maps `info`
+  and `apply` commands directly to library APIs.
+- Keep deterministic error rendering.
+
+### Increment 24: Add logging controls and finalize CLI UX parity
+
+Why this increment exists:
+
+- Configurable logging is a documented architecture requirement.
+- Phase 3 parity also requires output/UX completion with testable behavior.
+
+Review target:
+
+- Introduce a `logging` module and CLI/API log-level controls.
+- Add colorized renderer coverage for primary status states.
+- Update README examples/tests so Phase 3 exit criteria are directly
+  verifiable.

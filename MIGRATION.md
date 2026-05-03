@@ -246,12 +246,13 @@ Exit criteria:
 
 Current status:
 
-- Parser coverage, shorthand/canonical normalization, required environment
-  resolution, filesystem-gated guards, and deterministic include behavior are
-  implemented.
-- The current intent-stage output is represented by `IntentPlan`; the
-  operation stage now resolves concrete source/target operations, and fuller
-  intent/operation snapshot coverage is still pending.
+- [x] Parser coverage, shorthand/canonical normalization, required
+  environment resolution, filesystem-gated guards, and deterministic
+  include behavior are implemented.
+- [x] The intent-stage output is represented by `IntentPlan`, and the
+  operation stage resolves concrete source/target operations.
+- [ ] Keep this phase open until explicit intent/operation snapshot coverage
+  is added for the documented core combinations.
 
 ### Phase 2: Filesystem execution
 
@@ -259,6 +260,14 @@ Current status:
 - Implement copy operations.
 - Implement overwrite/backup/mkdir semantics.
 - Implement status model for "info" and "apply" workflows.
+
+Current status:
+
+- [x] A read-only symlink inspection slice exists and is wired into the
+  default CLI inspection flow.
+- [ ] No filesystem mutation executor exists yet for symlink or copy
+  operations, so apply semantics (including overwrite/backup/mkdir
+  behavior) are still pending.
 
 Exit criteria:
 
@@ -273,6 +282,13 @@ Exit criteria:
   interactive).
 - Ensure CLI commands map directly to equivalent library API operations.
 - Implement configurable logging with log level controls in CLI and library.
+
+Current status:
+
+- [x] The CLI currently supports the default no-arg inspection path and
+      prints setup guidance when config loading fails.
+- [ ] Explicit `info`/`apply` command parsing, colorized rendering parity,
+      and configurable logging controls are still pending.
 
 Exit criteria:
 
