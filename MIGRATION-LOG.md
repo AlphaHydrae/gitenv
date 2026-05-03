@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-03: Add config-path override and setup diagnostics - Support
+  `GITENV_CONFIG` environment variable to override the default config path,
+  add deterministic setup guidance to missing/invalid config errors that
+  suggests where to create the config file or how to use `GITENV_CONFIG`.
 - 2026-05-03: Wire the default CLI inspection flow - Replace the placeholder
   Rust CLI path with a thin config -> intent -> operation -> symlink-status
   inspection pipeline, resolve the default config location from XDG

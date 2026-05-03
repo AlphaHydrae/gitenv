@@ -75,7 +75,11 @@ const DEFAULT_CONFIG_FILE_NAME: &str = "config.yml";
 
 pub fn run() -> Result<ProgramOutput, ProgramError> {
     let config_path = default_config_path()?;
-    let config = load_config(&config_path)?;
+    run_with_config_path(&config_path)
+}
+
+fn run_with_config_path(config_path: &Path) -> Result<ProgramOutput, ProgramError> {
+    let config = load_config(config_path)?;
     let intent_plan = derive_intent_plan(&config)?;
     let operation_plan = derive_operation_plan(&intent_plan)?;
 
@@ -85,10 +89,23 @@ pub fn run() -> Result<ProgramOutput, ProgramError> {
 }
 
 fn default_config_path() -> Result<PathBuf, ProgramError> {
-    let home_directory = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or(ProgramError::HomeDirectoryUnavailable)?;
+    let gitenv_config = std::env::var_os("GITENV_CONFIG").map(PathBuf::from);
+    let home_directory = std::env::var_os("HOME").map(PathBuf::from);
     let xdg_config_home = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
+
+    default_config_path_from_inputs(gitenv_config, home_directory, xdg_config_home)
+}
+
+fn default_config_path_from_inputs(
+    gitenv_config: Option<PathBuf>,
+    home_directory: Option<PathBuf>,
+    xdg_config_home: Option<PathBuf>,
+) -> Result<PathBuf, ProgramError> {
+    if let Some(custom_path) = gitenv_config {
+        return Ok(custom_path);
+    }
+
+    let home_directory = home_directory.ok_or(ProgramError::HomeDirectoryUnavailable)?;
 
     Ok(default_config_path_from_env(
         &home_directory,
@@ -153,59 +170,70 @@ impl fmt::Display for ProgramError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ProgramError::InvalidConfiguration { message } => {
-                write!(f, "invalid configuration: {message}")
+                write!(f, "configuration is invalid ({message})")
             }
             ProgramError::ReadConfiguration { path, message } => {
-                write!(f, "failed to read config at {}: {message}", path.display())
+                let setup_guidance = concat!(
+                    "\n\nConfig file locations\n",
+                    "  - $GITENV_CONFIG (if set)\n",
+                    "  - ${XDG_CONFIG_HOME}/gitenv/config.yml (if $XDG_CONFIG_HOME is set)\n",
+                    "  - ${HOME}/.config/gitenv/config.yml (default fallback)"
+                );
+                write!(
+                    f,
+                    "cannot read config at {} ({message}){}",
+                    path.display(),
+                    setup_guidance,
+                )
             }
             ProgramError::MissingEnvironment { vars } => {
                 write!(
                     f,
-                    "missing required environment variables: {}",
+                    "required environment variables are missing ({})",
                     vars.join(", ")
                 )
             }
             ProgramError::IncludeNotFound { paths } => write!(
                 f,
-                "required include files not found: {}",
+                "required include files are missing\n  - {}",
                 paths
                     .iter()
                     .map(|path| path.display().to_string())
                     .collect::<Vec<_>>()
-                    .join(", ")
+                    .join("\n  - ")
             ),
             ProgramError::IncludeCycle { cycle } => write!(
                 f,
-                "include cycle detected: {}",
+                "include cycle is detected\n  - {}",
                 cycle
                     .iter()
                     .map(|path| path.display().to_string())
                     .collect::<Vec<_>>()
-                    .join(" -> ")
+                    .join("\n  - ")
             ),
             ProgramError::ReadSourceDirectory { path, message } => {
                 write!(
                     f,
-                    "failed to read source directory {}: {message}",
+                    "cannot read source directory {} ({message})",
                     path.display()
                 )
             }
             ProgramError::InspectPathMetadata { path, message } => {
                 write!(
                     f,
-                    "failed to inspect path metadata for {}: {message}",
+                    "cannot inspect path metadata for {} ({message})",
                     path.display()
                 )
             }
             ProgramError::ReadSymlinkTarget { path, message } => {
                 write!(
                     f,
-                    "failed to read symlink target for {}: {message}",
+                    "cannot read symlink target for {} ({message})",
                     path.display()
                 )
             }
             ProgramError::HomeDirectoryUnavailable => {
-                write!(f, "cannot resolve home directory from HOME")
+                write!(f, "cannot resolve home directory from $HOME")
             }
             ProgramError::UnsupportedConfiguration => write!(
                 f,
@@ -222,9 +250,12 @@ mod tests {
     use super::{
         ConflictPolicy, FileOperation, OperationAction, OperationPlan, ProgramError, ProgramOutput,
         SymlinkInspection, SymlinkInspectionState, default_config_path_from_env,
-        render_default_inspection_output, render_symlink_inspection_line,
+        default_config_path_from_inputs, render_default_inspection_output,
+        render_symlink_inspection_line, run_with_config_path,
     };
+    use std::fs;
     use std::path::{Path, PathBuf};
+    use tempfile::TempDir;
 
     #[test]
     fn render_a_missing_symlink_status_line() {
@@ -331,6 +362,73 @@ mod tests {
     }
 
     #[test]
+    fn resolve_config_path_from_gitenv_config_override() {
+        let path = default_config_path_from_inputs(
+            Some(PathBuf::from("/tmp/custom/config.yml")),
+            Some(PathBuf::from("/home/alex")),
+            Some(PathBuf::from("/tmp/runtime-config")),
+        )
+        .expect("GITENV_CONFIG override should be used");
+
+        assert_eq!(path, PathBuf::from("/tmp/custom/config.yml"));
+    }
+
+    #[test]
+    fn cannot_resolve_default_config_path_without_home_or_override() {
+        let error = default_config_path_from_inputs(None, None, None)
+            .expect_err("HOME is required when GITENV_CONFIG is absent");
+
+        assert_eq!(error, ProgramError::HomeDirectoryUnavailable);
+    }
+
+    #[test]
+    fn show_default_inspection_output_for_a_missing_symlink_with_explicit_config_path() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::write(repository.path().join(".gitconfig"), "[user]\n")
+            .expect("source file should be written");
+
+        let config = format!(
+            concat!(
+                "version: 1\n",
+                "repository: \"{}\"\n",
+                "sources:\n",
+                "  - from: \".\"\n",
+                "    to: \"{}\"\n",
+                "    configs:\n",
+                "      - file: .gitconfig\n"
+            ),
+            repository.path().display(),
+            home.path().display()
+        );
+        let config_path = home.path().join("config.yml");
+        fs::write(&config_path, config).expect("config file should be written");
+
+        let output = run_with_config_path(&config_path)
+            .expect("explicit config path should produce inspection output");
+
+        let expected = format!(
+            "{} -> {}   not yet set up",
+            home.path().join(".gitconfig").display(),
+            repository.path().join(".").join(".gitconfig").display()
+        );
+        assert_eq!(output.message, expected);
+    }
+
+    #[test]
+    fn show_setup_guidance_with_the_configured_config_path_when_file_is_missing() {
+        let missing_path = PathBuf::from("/tmp/custom-gitenv.yml");
+
+        let error = run_with_config_path(&missing_path)
+            .expect_err("missing explicit config file should return a read error");
+
+        let rendered = error.to_string();
+        assert!(rendered.contains("cannot read config at /tmp/custom-gitenv.yml ("));
+        assert!(rendered.contains("Config file locations"));
+        assert!(rendered.contains("$GITENV_CONFIG (if set)"));
+    }
+
+    #[test]
     fn format_program_errors_with_stable_messages() {
         let include_paths = vec![
             PathBuf::from("/includes/shared.yml"),
@@ -347,7 +445,7 @@ mod tests {
                 message: "bad yaml".to_string(),
             }
             .to_string(),
-            "invalid configuration: bad yaml"
+            "configuration is invalid (bad yaml)"
         );
         assert_eq!(
             ProgramError::ReadConfiguration {
@@ -355,28 +453,43 @@ mod tests {
                 message: "missing file".to_string(),
             }
             .to_string(),
-            "failed to read config at /home/.config/gitenv/config.yml: missing file"
+            concat!(
+                "cannot read config at /home/.config/gitenv/config.yml (missing file)\n\n",
+                "Config file locations\n",
+                "  - $GITENV_CONFIG (if set)\n",
+                "  - ${XDG_CONFIG_HOME}/gitenv/config.yml (if $XDG_CONFIG_HOME is set)\n",
+                "  - ${HOME}/.config/gitenv/config.yml (default fallback)",
+            )
         );
         assert_eq!(
             ProgramError::MissingEnvironment {
                 vars: vec!["PRIVATE_ENV_DIR".to_string(), "OTHER".to_string()],
             }
             .to_string(),
-            "missing required environment variables: PRIVATE_ENV_DIR, OTHER"
+            "required environment variables are missing (PRIVATE_ENV_DIR, OTHER)"
         );
         assert_eq!(
             ProgramError::IncludeNotFound {
                 paths: include_paths,
             }
             .to_string(),
-            "required include files not found: /includes/shared.yml, /includes/private.yml"
+            concat!(
+                "required include files are missing\n",
+                "  - /includes/shared.yml\n",
+                "  - /includes/private.yml"
+            )
         );
         assert_eq!(
             ProgramError::IncludeCycle {
                 cycle: include_cycle,
             }
             .to_string(),
-            "include cycle detected: /includes/root.yml -> /includes/child.yml -> /includes/root.yml"
+            concat!(
+                "include cycle is detected\n",
+                "  - /includes/root.yml\n",
+                "  - /includes/child.yml\n",
+                "  - /includes/root.yml"
+            )
         );
         assert_eq!(
             ProgramError::ReadSourceDirectory {
@@ -384,7 +497,7 @@ mod tests {
                 message: "permission denied".to_string(),
             }
             .to_string(),
-            "failed to read source directory /repo/private: permission denied"
+            "cannot read source directory /repo/private (permission denied)"
         );
         assert_eq!(
             ProgramError::InspectPathMetadata {
@@ -392,7 +505,7 @@ mod tests {
                 message: "input/output error".to_string(),
             }
             .to_string(),
-            "failed to inspect path metadata for /home/.zshrc: input/output error"
+            "cannot inspect path metadata for /home/.zshrc (input/output error)"
         );
         assert_eq!(
             ProgramError::ReadSymlinkTarget {
@@ -400,11 +513,11 @@ mod tests {
                 message: "broken link".to_string(),
             }
             .to_string(),
-            "failed to read symlink target for /home/.gitconfig: broken link"
+            "cannot read symlink target for /home/.gitconfig (broken link)"
         );
         assert_eq!(
             ProgramError::HomeDirectoryUnavailable.to_string(),
-            "cannot resolve home directory from HOME"
+            "cannot resolve home directory from $HOME"
         );
         assert_eq!(
             ProgramError::UnsupportedConfiguration.to_string(),

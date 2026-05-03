@@ -290,7 +290,7 @@ pub struct SelectConfig {
 /// Parses YAML text into the strongly typed configuration model.
 pub fn parse_config(yaml: &str) -> Result<Config, ProgramError> {
     serde_yaml::from_str(yaml).map_err(|error| ProgramError::InvalidConfiguration {
-        message: format!("failed to parse config YAML: {error}"),
+        message: format!("config YAML parse failed ({error})"),
     })
 }
 
@@ -676,7 +676,7 @@ sources:
         assert!(matches!(
             error,
             ProgramError::InvalidConfiguration { message }
-                if message.contains("failed to parse config YAML")
+                if message.contains("config YAML parse failed")
         ));
     }
 

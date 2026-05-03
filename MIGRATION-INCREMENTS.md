@@ -36,18 +36,5 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 17: Add config-path override and setup diagnostics
+<!-- Empty - all planned increments are complete. See MIGRATION-LOG.md for what has been completed. -->
 
-Why this increment exists:
-
-- Keep the default inspection path usable when config is not in the default
-  location.
-- Align missing/invalid config behavior with the architecture requirement to
-  print clear setup instructions.
-
-Review target:
-
-- The CLI resolves config path from `GITENV_CONFIG` before falling back to the
-  default path.
-- Missing/invalid config errors include deterministic setup guidance and are
-  covered by CLI tests.
