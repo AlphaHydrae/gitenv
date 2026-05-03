@@ -314,58 +314,97 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    #[test]
-    fn the_default_action_is_a_home_symlink() {
-        let defaults = Defaults::default();
-
-        assert_eq!(defaults.mode, ActionMode::Symlink);
-        assert_eq!(defaults.to, "~");
-        assert!(defaults.mkdir);
-        assert!(!defaults.overwrite);
-        assert!(defaults.backup_on_overwrite);
-    }
-
-    #[test]
-    fn create_a_canonical_config() {
-        let config = Config {
+    fn expected_single_file_source_config(
+        source_root: SourceRoot,
+        source_to: Option<&str>,
+        source_guard: Option<Guard>,
+        file: &str,
+    ) -> Config {
+        Config {
             version: 1,
             repository: "~/projects/env".to_string(),
             defaults: Defaults::default(),
             includes: vec![],
             sources: vec![Source {
+                from: source_root,
+                to: source_to.map(ToString::to_string),
+                guard: source_guard,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: file.to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        }
+    }
+
+    fn expected_config_with_includes(includes: Vec<Include>) -> Config {
+        Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes,
+            sources: vec![Source {
                 from: SourceRoot::Path(".".to_string()),
                 to: None,
                 guard: None,
-                configs: vec![
-                    ConfigItem::File(FileConfig {
-                        file: ".zshrc".to_string(),
-                        as_name: None,
-                        mode: None,
-                        to: None,
-                        mkdir: None,
-                        overwrite: None,
-                        backup_on_overwrite: None,
-                    }),
-                    ConfigItem::Select(SelectConfig {
-                        dotfiles: true,
-                        exclude: vec![".DS_Store".to_string()],
-                        mode: None,
-                        to: None,
-                        mkdir: None,
-                        overwrite: None,
-                        backup_on_overwrite: None,
-                    }),
-                ],
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
             }],
-        };
+        }
+    }
 
-        assert_eq!(config.version, 1);
-        assert_eq!(config.repository, "~/projects/env");
-        assert_eq!(config.sources.len(), 1);
+    #[test]
+    fn the_default_action_is_a_home_symlink() {
+        assert_eq!(
+            Defaults::default(),
+            Defaults {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                overwrite: false,
+                backup_on_overwrite: true,
+            }
+        );
     }
 
     #[test]
     fn load_the_smallest_valid_config() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - file: .zshrc
+"#;
+
+        let config = parse_config(yaml).expect("config should parse without defaults");
+
+        assert_eq!(
+            config,
+            expected_single_file_source_config(
+                SourceRoot::Path(".".to_string()),
+                None,
+                None,
+                ".zshrc"
+            )
+        );
+    }
+
+    #[test]
+    fn accept_a_config_with_custom_defaults() {
         let file_path = unique_temp_file_path("smallest_valid_config");
         let yaml = r#"
 version: 1
@@ -417,22 +456,6 @@ sources:
     }
 
     #[test]
-    fn accept_a_config_without_a_defaults_section() {
-        let yaml = r#"
-version: 1
-repository: ~/projects/env
-sources:
-  - from: "."
-    configs:
-      - file: .zshrc
-"#;
-
-        let config = parse_config(yaml).expect("config should parse without defaults");
-
-        assert_eq!(config.defaults, Defaults::default());
-    }
-
-    #[test]
     fn accept_a_config_with_partial_defaults() {
         let yaml = r#"
 version: 1
@@ -448,15 +471,34 @@ sources:
 
         let config = parse_config(yaml).expect("config should parse with partial defaults");
 
-        let expected_defaults = Defaults {
-            mode: ActionMode::Symlink,
-            to: "~/.config".to_string(),
-            mkdir: true,
-            overwrite: true,
-            backup_on_overwrite: true,
+        let expected = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Symlink,
+                to: "~/.config".to_string(),
+                mkdir: true,
+                overwrite: true,
+                backup_on_overwrite: true,
+            },
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
         };
 
-        assert_eq!(config.defaults, expected_defaults);
+        assert_eq!(config, expected);
     }
 
     #[test]
@@ -830,21 +872,13 @@ sources:
             .expect("config with a bare-dollar source root should parse successfully");
 
         assert_eq!(
-            config.sources,
-            vec![Source {
-                from: SourceRoot::Path("$".to_string()),
-                to: None,
-                guard: None,
-                configs: vec![ConfigItem::File(FileConfig {
-                    file: ".zshrc".to_string(),
-                    as_name: None,
-                    mode: None,
-                    to: None,
-                    mkdir: None,
-                    overwrite: None,
-                    backup_on_overwrite: None,
-                })],
-            }]
+            config,
+            expected_single_file_source_config(
+                SourceRoot::Path("$".to_string()),
+                None,
+                None,
+                ".zshrc",
+            )
         );
     }
 
@@ -863,12 +897,15 @@ sources:
 
         let config = parse_config(yaml).expect("config should parse with a to_exists guard");
 
-        let source = &config.sources[0];
         assert_eq!(
-            source.to.as_deref(),
-            Some("~/Library/Application Support/Code/User")
+            config,
+            expected_single_file_source_config(
+                SourceRoot::Path("vscode".to_string()),
+                Some("~/Library/Application Support/Code/User"),
+                Some(Guard::ToExists),
+                "keybindings.json",
+            )
         );
-        assert_eq!(source.guard, Some(Guard::ToExists));
     }
 
     #[test]
@@ -886,10 +923,14 @@ sources:
 
         let config = parse_config(yaml).expect("config should parse with a directory_exists guard");
 
-        let source = &config.sources[0];
         assert_eq!(
-            source.guard,
-            Some(Guard::DirectoryExists("/Applications".to_string()))
+            config,
+            expected_single_file_source_config(
+                SourceRoot::Path("macos".to_string()),
+                None,
+                Some(Guard::DirectoryExists("/Applications".to_string())),
+                ".macos-defaults",
+            )
         );
     }
 
@@ -930,8 +971,13 @@ sources:
         let config = parse_config(yaml).expect("config should parse with a source-level to");
 
         assert_eq!(
-            config.sources[0].to.as_deref(),
-            Some("~/Library/Application Support/Code/User")
+            config,
+            expected_single_file_source_config(
+                SourceRoot::Path("vscode".to_string()),
+                Some("~/Library/Application Support/Code/User"),
+                None,
+                "settings.json",
+            )
         );
     }
 
@@ -951,11 +997,11 @@ includes:
         let config = parse_config(yaml).expect("config should parse with a shorthand include");
 
         assert_eq!(
-            config.includes,
-            vec![Include::Path {
+            config,
+            expected_config_with_includes(vec![Include::Path {
                 path: "~/projects/private-env/.gitenv.yml".to_string(),
                 optional: false,
-            }]
+            }])
         );
     }
 
@@ -976,11 +1022,11 @@ includes:
             parse_config(yaml).expect("config should parse with a dollar-prefixed include");
 
         assert_eq!(
-            config.includes,
-            vec![Include::Environment {
+            config,
+            expected_config_with_includes(vec![Include::Environment {
                 env: "WORK_ENV_CONFIG".to_string(),
                 optional: false,
-            }]
+            }])
         );
     }
 
@@ -1002,11 +1048,11 @@ includes:
             parse_config(yaml).expect("config should parse with a canonical optional include");
 
         assert_eq!(
-            config.includes,
-            vec![Include::Path {
+            config,
+            expected_config_with_includes(vec![Include::Path {
                 path: "~/projects/work-env/.gitenv.yml".to_string(),
                 optional: true,
-            }]
+            }])
         );
     }
 
@@ -1028,11 +1074,11 @@ includes:
             parse_config(yaml).expect("config should parse with a canonical optional env include");
 
         assert_eq!(
-            config.includes,
-            vec![Include::Environment {
+            config,
+            expected_config_with_includes(vec![Include::Environment {
                 env: "EXTRA_ENV_CONFIG".to_string(),
                 optional: true,
-            }]
+            }])
         );
     }
 
@@ -1049,7 +1095,15 @@ includes:
 
         let config = parse_config(yaml).expect("config should parse without includes");
 
-        assert!(config.includes.is_empty());
+        assert_eq!(
+            config,
+            expected_single_file_source_config(
+                SourceRoot::Path(".".to_string()),
+                None,
+                None,
+                ".zshrc"
+            )
+        );
     }
 
     #[test]
@@ -1072,11 +1126,11 @@ includes:
             .expect("config with a bare-dollar include should parse successfully");
 
         assert_eq!(
-            config.includes,
-            vec![Include::Path {
+            config,
+            expected_config_with_includes(vec![Include::Path {
                 path: "$".to_string(),
                 optional: false,
-            }]
+            }])
         );
     }
 
@@ -1099,15 +1153,28 @@ sources:
         let config =
             parse_config(yaml).expect("config should parse with item-level overrides on a file");
 
-        let item = &config.sources[0].configs[0];
-        let ConfigItem::File(file_cfg) = item else {
-            panic!("expected a file config item");
+        let expected = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                    mode: Some(ActionMode::Copy),
+                    to: Some("~/dest".to_string()),
+                    mkdir: Some(false),
+                    overwrite: Some(true),
+                    backup_on_overwrite: Some(false),
+                })],
+            }],
         };
-        assert_eq!(file_cfg.mode, Some(ActionMode::Copy));
-        assert_eq!(file_cfg.to.as_deref(), Some("~/dest"));
-        assert_eq!(file_cfg.mkdir, Some(false));
-        assert_eq!(file_cfg.overwrite, Some(true));
-        assert_eq!(file_cfg.backup_on_overwrite, Some(false));
+
+        assert_eq!(config, expected);
     }
 
     #[test]
@@ -1130,15 +1197,28 @@ sources:
         let config =
             parse_config(yaml).expect("config should parse with item-level overrides on a select");
 
-        let item = &config.sources[0].configs[0];
-        let ConfigItem::Select(sel_cfg) = item else {
-            panic!("expected a select config item");
+        let expected = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::Select(SelectConfig {
+                    dotfiles: true,
+                    exclude: vec![],
+                    mode: Some(ActionMode::Copy),
+                    to: Some("~/dest".to_string()),
+                    mkdir: Some(false),
+                    overwrite: Some(true),
+                    backup_on_overwrite: Some(false),
+                })],
+            }],
         };
-        assert_eq!(sel_cfg.mode, Some(ActionMode::Copy));
-        assert_eq!(sel_cfg.to.as_deref(), Some("~/dest"));
-        assert_eq!(sel_cfg.mkdir, Some(false));
-        assert_eq!(sel_cfg.overwrite, Some(true));
-        assert_eq!(sel_cfg.backup_on_overwrite, Some(false));
+
+        assert_eq!(config, expected);
     }
 
     fn unique_temp_file_path(prefix: &str) -> PathBuf {

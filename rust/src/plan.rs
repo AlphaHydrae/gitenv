@@ -460,6 +460,14 @@ mod tests {
         })
     }
 
+    /// Minimal execution plan rooted at the standard test repository path.
+    fn expected_plan(sources: Vec<PlannedSource>) -> ExecutionPlan {
+        ExecutionPlan {
+            repository: "~/projects/env".to_string(),
+            sources,
+        }
+    }
+
     // ---------------------------------------------------------------------------
     // Execution plan derivation
     // ---------------------------------------------------------------------------
@@ -590,12 +598,12 @@ mod tests {
         let plan = derive_execution_plan(&config)
             .expect("planning should succeed when the current directory exists");
 
-        assert_eq!(plan.repository, "~/projects/env");
-        assert_eq!(plan.sources.len(), 1);
-        assert_eq!(plan.sources[0].from, ".");
         assert_eq!(
-            plan.sources[0].actions,
-            vec![expected_file_action(".zshrc")]
+            plan,
+            expected_plan(vec![PlannedSource {
+                from: ".".to_string(),
+                actions: vec![expected_file_action(".zshrc")],
+            }])
         );
     }
 
@@ -686,8 +694,13 @@ mod tests {
         let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
             .expect("planning should keep explicit path source roots as-is");
 
-        assert_eq!(plan.sources.len(), 1);
-        assert_eq!(plan.sources[0].from, "$PRIVATE_ENV_DIR");
+        assert_eq!(
+            plan,
+            expected_plan(vec![PlannedSource {
+                from: "$PRIVATE_ENV_DIR".to_string(),
+                actions: vec![expected_file_action(".zshrc")],
+            }])
+        );
     }
 
     #[test]
@@ -827,11 +840,7 @@ mod tests {
         let plan = derive_execution_plan_with_env(&config, &BTreeMap::new())
             .expect("planning should succeed when an optional environment-backed source is unset");
 
-        assert_eq!(plan.repository, "~/projects/env");
-        assert!(
-            plan.sources.is_empty(),
-            "unset optional sources should be omitted from the plan"
-        );
+        assert_eq!(plan, expected_plan(vec![]));
     }
 
     // ---------------------------------------------------------------------------
@@ -871,17 +880,20 @@ mod tests {
             .expect("planning should succeed with a source-level to");
 
         assert_eq!(
-            plan.sources[0].actions[0],
-            PlannedAction::File(PlannedFileAction {
-                file: "settings.json".to_string(),
-                as_name: "settings.json".to_string(),
-                options: ResolvedOptions {
-                    mode: ActionMode::Symlink,
-                    to: "~/Library/Application Support/Code/User".to_string(),
-                    mkdir: true,
-                    conflict_policy: ConflictPolicy::Skip,
-                },
-            })
+            plan,
+            expected_plan(vec![PlannedSource {
+                from: "vscode".to_string(),
+                actions: vec![PlannedAction::File(PlannedFileAction {
+                    file: "settings.json".to_string(),
+                    as_name: "settings.json".to_string(),
+                    options: ResolvedOptions {
+                        mode: ActionMode::Symlink,
+                        to: "~/Library/Application Support/Code/User".to_string(),
+                        mkdir: true,
+                        conflict_policy: ConflictPolicy::Skip,
+                    },
+                })],
+            }])
         );
     }
 
@@ -917,8 +929,22 @@ mod tests {
         })
         .expect("planning should succeed when the to_exists guard is satisfied");
 
-        assert_eq!(plan.sources.len(), 1, "source should be included");
-        assert_eq!(plan.sources[0].from, "vscode");
+        assert_eq!(
+            plan,
+            expected_plan(vec![PlannedSource {
+                from: "vscode".to_string(),
+                actions: vec![PlannedAction::File(PlannedFileAction {
+                    file: "settings.json".to_string(),
+                    as_name: "settings.json".to_string(),
+                    options: ResolvedOptions {
+                        mode: ActionMode::Symlink,
+                        to: "~/Library/Application Support/Code/User".to_string(),
+                        mkdir: true,
+                        conflict_policy: ConflictPolicy::Skip,
+                    },
+                })],
+            }])
+        );
     }
 
     #[test]
@@ -947,10 +973,7 @@ mod tests {
         let plan = derive_execution_plan_with_env_and_fs(&config, &BTreeMap::new(), &|_| false)
             .expect("planning should succeed when the to_exists guard is not satisfied");
 
-        assert!(
-            plan.sources.is_empty(),
-            "source should be excluded when guard is not satisfied"
-        );
+        assert_eq!(plan, expected_plan(vec![]));
     }
 
     #[test]
@@ -982,8 +1005,13 @@ mod tests {
         })
         .expect("planning should succeed when the directory_exists guard is satisfied");
 
-        assert_eq!(plan.sources.len(), 1, "source should be included");
-        assert_eq!(plan.sources[0].from, "macos");
+        assert_eq!(
+            plan,
+            expected_plan(vec![PlannedSource {
+                from: "macos".to_string(),
+                actions: vec![expected_file_action(".macos-defaults")],
+            }])
+        );
     }
 
     #[test]
@@ -1012,10 +1040,7 @@ mod tests {
         let plan = derive_execution_plan_with_env_and_fs(&config, &BTreeMap::new(), &|_| false)
             .expect("planning should succeed when the directory_exists guard is not satisfied");
 
-        assert!(
-            plan.sources.is_empty(),
-            "source should be excluded when guard is not satisfied"
-        );
+        assert_eq!(plan, expected_plan(vec![]));
     }
 
     // ---------------------------------------------------------------------------
@@ -1055,17 +1080,20 @@ mod tests {
             .expect("planning should produce overwrite-with-backup conflict policy");
 
         assert_eq!(
-            plan.sources[0].actions[0],
-            PlannedAction::File(PlannedFileAction {
-                file: ".zshrc".to_string(),
-                as_name: ".zshrc".to_string(),
-                options: ResolvedOptions {
-                    mode: ActionMode::Symlink,
-                    to: "~".to_string(),
-                    mkdir: true,
-                    conflict_policy: ConflictPolicy::OverwriteWithBackup,
-                },
-            })
+            plan,
+            expected_plan(vec![PlannedSource {
+                from: ".".to_string(),
+                actions: vec![PlannedAction::File(PlannedFileAction {
+                    file: ".zshrc".to_string(),
+                    as_name: ".zshrc".to_string(),
+                    options: ResolvedOptions {
+                        mode: ActionMode::Symlink,
+                        to: "~".to_string(),
+                        mkdir: true,
+                        conflict_policy: ConflictPolicy::OverwriteWithBackup,
+                    },
+                })],
+            }])
         );
     }
 
@@ -1118,16 +1146,18 @@ mod tests {
         )
         .expect("planning should succeed with a valid include");
 
-        assert_eq!(plan.sources.len(), 2);
-        assert_eq!(plan.sources[0].from, ".");
         assert_eq!(
-            plan.sources[0].actions,
-            vec![expected_file_action(".zshrc")]
-        );
-        assert_eq!(plan.sources[1].from, "inc");
-        assert_eq!(
-            plan.sources[1].actions,
-            vec![expected_file_action(".tmux.conf")]
+            plan,
+            expected_plan(vec![
+                PlannedSource {
+                    from: ".".to_string(),
+                    actions: vec![expected_file_action(".zshrc")],
+                },
+                PlannedSource {
+                    from: "inc".to_string(),
+                    actions: vec![expected_file_action(".tmux.conf")],
+                },
+            ])
         );
     }
 
@@ -1167,11 +1197,23 @@ mod tests {
         )
         .expect("planning should succeed with nested includes");
 
-        assert_eq!(plan.sources.len(), 3);
-        // root_src comes first (includes-after), then a_src, then c_src.
-        assert_eq!(plan.sources[0].from, "root_src");
-        assert_eq!(plan.sources[1].from, "a_src");
-        assert_eq!(plan.sources[2].from, "c_src");
+        assert_eq!(
+            plan,
+            expected_plan(vec![
+                PlannedSource {
+                    from: "root_src".to_string(),
+                    actions: vec![expected_file_action(".zshrc")],
+                },
+                PlannedSource {
+                    from: "a_src".to_string(),
+                    actions: vec![expected_file_action(".aliases")],
+                },
+                PlannedSource {
+                    from: "c_src".to_string(),
+                    actions: vec![expected_file_action(".bashrc")],
+                },
+            ])
+        );
     }
 
     #[test]
@@ -1216,9 +1258,23 @@ mod tests {
         )
         .expect("planning should succeed and deduplicate shared includes");
 
-        // root_src, a_src, shared_src — shared only once despite two references.
-        let froms: Vec<&str> = plan.sources.iter().map(|s| s.from.as_str()).collect();
-        assert_eq!(froms, vec!["root_src", "a_src", "shared_src"]);
+        assert_eq!(
+            plan,
+            expected_plan(vec![
+                PlannedSource {
+                    from: "root_src".to_string(),
+                    actions: vec![expected_file_action(".zshrc")],
+                },
+                PlannedSource {
+                    from: "a_src".to_string(),
+                    actions: vec![expected_file_action(".aliases")],
+                },
+                PlannedSource {
+                    from: "shared_src".to_string(),
+                    actions: vec![expected_file_action(".shared")],
+                },
+            ])
+        );
     }
 
     #[test]
@@ -1245,9 +1301,13 @@ mod tests {
         )
         .expect("planning should succeed when an optional include is missing");
 
-        // Only the root's own source is present; the missing optional include is silently skipped.
-        assert_eq!(plan.sources.len(), 1);
-        assert_eq!(plan.sources[0].from, "root_src");
+        assert_eq!(
+            plan,
+            expected_plan(vec![PlannedSource {
+                from: "root_src".to_string(),
+                actions: vec![expected_file_action(".zshrc")],
+            }])
+        );
     }
 
     #[test]
@@ -1371,8 +1431,19 @@ mod tests {
         )
         .expect("planning should resolve an environment-backed include path");
 
-        assert_eq!(plan.sources.len(), 2);
-        assert_eq!(plan.sources[1].from, "private_src");
+        assert_eq!(
+            plan,
+            expected_plan(vec![
+                PlannedSource {
+                    from: ".".to_string(),
+                    actions: vec![expected_file_action(".zshrc")],
+                },
+                PlannedSource {
+                    from: "private_src".to_string(),
+                    actions: vec![expected_file_action(".secrets")],
+                },
+            ])
+        );
     }
 
     #[test]
@@ -1390,9 +1461,11 @@ mod tests {
         );
 
         assert_eq!(
-            plan.sources.len(),
-            1,
-            "only the root source should be present"
+            plan,
+            expected_plan(vec![PlannedSource {
+                from: ".".to_string(),
+                actions: vec![expected_file_action(".zshrc")],
+            }])
         );
     }
 
@@ -1500,36 +1573,38 @@ mod tests {
         )
         .expect("planning should succeed and isolate defaults per included config");
 
-        assert_eq!(plan.sources.len(), 2);
-
-        // Root's source uses copy mode with root's defaults.
         assert_eq!(
-            plan.sources[0].actions[0],
-            PlannedAction::File(PlannedFileAction {
-                file: ".zshrc".to_string(),
-                as_name: ".zshrc".to_string(),
-                options: ResolvedOptions {
-                    mode: ActionMode::Copy,
-                    to: "~/dest".to_string(),
-                    mkdir: false,
-                    conflict_policy: ConflictPolicy::Overwrite,
+            plan,
+            expected_plan(vec![
+                // Root's source uses copy mode with root's defaults.
+                PlannedSource {
+                    from: "root_src".to_string(),
+                    actions: vec![PlannedAction::File(PlannedFileAction {
+                        file: ".zshrc".to_string(),
+                        as_name: ".zshrc".to_string(),
+                        options: ResolvedOptions {
+                            mode: ActionMode::Copy,
+                            to: "~/dest".to_string(),
+                            mkdir: false,
+                            conflict_policy: ConflictPolicy::Overwrite,
+                        },
+                    })],
                 },
-            })
-        );
-
-        // Included source uses symlink mode with included config's defaults.
-        assert_eq!(
-            plan.sources[1].actions[0],
-            PlannedAction::File(PlannedFileAction {
-                file: ".tmux.conf".to_string(),
-                as_name: ".tmux.conf".to_string(),
-                options: ResolvedOptions {
-                    mode: ActionMode::Symlink,
-                    to: "~".to_string(),
-                    mkdir: true,
-                    conflict_policy: ConflictPolicy::Skip,
+                // Included source uses symlink mode with included config's defaults.
+                PlannedSource {
+                    from: "inc_src".to_string(),
+                    actions: vec![PlannedAction::File(PlannedFileAction {
+                        file: ".tmux.conf".to_string(),
+                        as_name: ".tmux.conf".to_string(),
+                        options: ResolvedOptions {
+                            mode: ActionMode::Symlink,
+                            to: "~".to_string(),
+                            mkdir: true,
+                            conflict_policy: ConflictPolicy::Skip,
+                        },
+                    })],
                 },
-            })
+            ])
         );
     }
 
@@ -1605,17 +1680,20 @@ mod tests {
             .expect("planning should apply item-level mode override");
 
         assert_eq!(
-            plan.sources[0].actions[0],
-            PlannedAction::File(PlannedFileAction {
-                file: ".zshrc".to_string(),
-                as_name: ".zshrc".to_string(),
-                options: ResolvedOptions {
-                    mode: ActionMode::Copy,
-                    to: "~".to_string(),
-                    mkdir: true,
-                    conflict_policy: ConflictPolicy::Skip,
-                },
-            })
+            plan,
+            expected_plan(vec![PlannedSource {
+                from: ".".to_string(),
+                actions: vec![PlannedAction::File(PlannedFileAction {
+                    file: ".zshrc".to_string(),
+                    as_name: ".zshrc".to_string(),
+                    options: ResolvedOptions {
+                        mode: ActionMode::Copy,
+                        to: "~".to_string(),
+                        mkdir: true,
+                        conflict_policy: ConflictPolicy::Skip,
+                    },
+                })],
+            }])
         );
     }
 
@@ -1647,17 +1725,20 @@ mod tests {
             .expect("planning should apply item-level to override");
 
         assert_eq!(
-            plan.sources[0].actions[0],
-            PlannedAction::File(PlannedFileAction {
-                file: ".zshrc".to_string(),
-                as_name: ".zshrc".to_string(),
-                options: ResolvedOptions {
-                    mode: ActionMode::Symlink,
-                    to: "~/item-specific".to_string(),
-                    mkdir: true,
-                    conflict_policy: ConflictPolicy::Skip,
-                },
-            })
+            plan,
+            expected_plan(vec![PlannedSource {
+                from: ".".to_string(),
+                actions: vec![PlannedAction::File(PlannedFileAction {
+                    file: ".zshrc".to_string(),
+                    as_name: ".zshrc".to_string(),
+                    options: ResolvedOptions {
+                        mode: ActionMode::Symlink,
+                        to: "~/item-specific".to_string(),
+                        mkdir: true,
+                        conflict_policy: ConflictPolicy::Skip,
+                    },
+                })],
+            }])
         );
     }
 
@@ -1695,17 +1776,20 @@ mod tests {
             .expect("planning should apply item-level overwrite override");
 
         assert_eq!(
-            plan.sources[0].actions[0],
-            PlannedAction::File(PlannedFileAction {
-                file: ".zshrc".to_string(),
-                as_name: ".zshrc".to_string(),
-                options: ResolvedOptions {
-                    mode: ActionMode::Symlink,
-                    to: "~".to_string(),
-                    mkdir: true,
-                    conflict_policy: ConflictPolicy::Overwrite,
-                },
-            })
+            plan,
+            expected_plan(vec![PlannedSource {
+                from: ".".to_string(),
+                actions: vec![PlannedAction::File(PlannedFileAction {
+                    file: ".zshrc".to_string(),
+                    as_name: ".zshrc".to_string(),
+                    options: ResolvedOptions {
+                        mode: ActionMode::Symlink,
+                        to: "~".to_string(),
+                        mkdir: true,
+                        conflict_policy: ConflictPolicy::Overwrite,
+                    },
+                })],
+            }])
         );
     }
 
@@ -1743,22 +1827,25 @@ mod tests {
             .expect("planning should apply select item overrides");
 
         assert_eq!(
-            plan.sources[0].actions[0],
-            PlannedAction::Select(PlannedSelectAction {
-                dotfiles: true,
-                exclude: vec![],
-                options: ResolvedOptions {
-                    mode: ActionMode::Copy,
-                    to: "~/config".to_string(),
-                    mkdir: true,
-                    conflict_policy: ConflictPolicy::Skip,
-                },
-            })
+            plan,
+            expected_plan(vec![PlannedSource {
+                from: ".".to_string(),
+                actions: vec![PlannedAction::Select(PlannedSelectAction {
+                    dotfiles: true,
+                    exclude: vec![],
+                    options: ResolvedOptions {
+                        mode: ActionMode::Copy,
+                        to: "~/config".to_string(),
+                        mkdir: true,
+                        conflict_policy: ConflictPolicy::Skip,
+                    },
+                })],
+            }])
         );
     }
 
     #[test]
-    fn cannot_set_overwrite_false_and_backup_on_overwrite_true_at_item_level() {
+    fn cannot_set_overwrite_false_and_backup_on_overwrite_true_at_file_item_level() {
         // This combination is explicitly rejected when both are set at item level.
         // (Inherited defaults with the same values are fine — they resolve to Skip.)
         let config = Config {
@@ -1790,6 +1877,42 @@ mod tests {
             ProgramError::InvalidConfiguration { ref message }
                 if message.contains("overwrite: false") && message.contains("backup_on_overwrite: true")
         ));
+    }
+
+    #[test]
+    fn cannot_set_overwrite_false_and_backup_on_overwrite_true_at_select_item_level() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::Select(SelectConfig {
+                    dotfiles: true,
+                    exclude: vec![],
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: Some(false),
+                    backup_on_overwrite: Some(true),
+                })],
+            }],
+        };
+
+        let error = derive_execution_plan_with_env(&config, &BTreeMap::new()).expect_err(
+            "planning should reject explicit overwrite: false with backup_on_overwrite: true at select item level",
+        );
+
+        assert_eq!(
+            error,
+            ProgramError::InvalidConfiguration {
+                message: "item-level `overwrite: false` with `backup_on_overwrite: true` is not a valid combination"
+                    .to_string(),
+            }
+        );
     }
 
     #[test]
@@ -1828,17 +1951,20 @@ mod tests {
         );
 
         assert_eq!(
-            plan.sources[0].actions[0],
-            PlannedAction::File(PlannedFileAction {
-                file: ".zshrc".to_string(),
-                as_name: ".zshrc".to_string(),
-                options: ResolvedOptions {
-                    mode: ActionMode::Symlink,
-                    to: "~".to_string(),
-                    mkdir: true,
-                    conflict_policy: ConflictPolicy::Skip,
-                },
-            })
+            plan,
+            expected_plan(vec![PlannedSource {
+                from: ".".to_string(),
+                actions: vec![PlannedAction::File(PlannedFileAction {
+                    file: ".zshrc".to_string(),
+                    as_name: ".zshrc".to_string(),
+                    options: ResolvedOptions {
+                        mode: ActionMode::Symlink,
+                        to: "~".to_string(),
+                        mkdir: true,
+                        conflict_policy: ConflictPolicy::Skip,
+                    },
+                })],
+            }])
         );
     }
 }
