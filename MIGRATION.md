@@ -68,6 +68,9 @@ strategy, and quality gates.
   stronger project-specific reason.
 - Avoid mixing architectural refactors and feature delivery in the same
   increment unless explicitly approved.
+- As increments are completed, keep phase exit-criteria checkboxes in this file
+  up to date and mark criteria complete only when there is direct evidence in
+  code, tests, and migration-log entries.
 
 ## Living Plan
 
@@ -216,9 +219,9 @@ actions, required environment input, and deterministic composition.
 
 Exit criteria:
 
-- [ ] `ARCHITECTURE.md` documents decisions and boundaries.
-- [ ] `CONTRIBUTING.md` defines testing and verification expectations.
-- [ ] `AGENTS.md` aligns agent behavior with repository standards.
+- [x] `ARCHITECTURE.md` documents decisions and boundaries.
+- [x] `CONTRIBUTING.md` defines testing and verification expectations.
+- [x] `AGENTS.md` aligns agent behavior with repository standards.
 
 ### Phase 1: Parser, schema, and planning model
 
@@ -234,17 +237,20 @@ Exit criteria:
 
 Exit criteria:
 
-- [ ] Parser unit tests cover valid/invalid examples.
-- [ ] Normalization tests verify shorthand and canonical equivalence.
-- [ ] Dynamic-behavior parity tests cover env resolution, missing required env
+- [x] Parser unit tests cover valid/invalid examples.
+- [x] Normalization tests verify shorthand and canonical equivalence.
+- [x] Dynamic-behavior parity tests cover env resolution, missing required env
       diagnostics, include behavior, and filesystem-gated conditions.
 - [ ] Intent and operation plan snapshots cover core combinations.
 
 Current status:
 
 - Parser coverage, shorthand/canonical normalization, required environment
-  resolution, and filesystem-gated guards are implemented.
-- Include behavior and intent/operation plan snapshots are still pending.
+  resolution, filesystem-gated guards, and deterministic include behavior are
+  implemented.
+- The current `ExecutionPlan` shape remains config-shaped intent planning
+  output; the operation plan stage (with concrete file-selection expansion) and
+  full intent/operation snapshot coverage are still pending.
 
 ### Phase 2: Filesystem execution
 

@@ -36,7 +36,36 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 13: Inspect one narrow symlink status case
+### Increment 13: Clarify plan-stage naming and lock intent semantics
+
+Why this increment exists:
+
+- The current `ExecutionPlan` model is config-shaped intent output, not the
+  final execution-shaped operation plan.
+- Two-stage planning is easier to review when type names mirror stage intent
+  (`IntentPlan` versus operation-plan naming) before adding the second stage.
+
+Review target:
+
+- Public planner naming makes the current stage explicit as intent planning.
+- Backward-compatibility strategy for the existing `ExecutionPlan` name is
+  documented and tested.
+
+### Increment 14: Add the first operation-plan expansion slice
+
+Why this increment exists:
+
+- Deliver the missing second planning stage by deriving operation-shaped data
+  from the intent plan.
+- Start with a narrow, deterministic expansion scope that is easy to validate.
+
+Review target:
+
+- A new operation-plan model is derived from intent-plan output.
+- At least one concrete file-selection expansion path is covered by focused
+  tests.
+
+### Increment 15: Inspect one narrow symlink status case
 
 Why this increment exists:
 
@@ -48,7 +77,7 @@ Review target:
 - A single symlink status workflow works against temporary directories.
 - Status results are returned as structured data, not terminal output.
 
-### Increment 14: Wire the default CLI inspection flow
+### Increment 16: Wire the default CLI inspection flow
 
 Why this increment exists:
 
@@ -58,5 +87,5 @@ Why this increment exists:
 
 Review target:
 
-- The default CLI path loads config, inspects status, and renders output.
+- The default CLI path loads config, plans, inspects status, and renders output.
 - CLI tests cover observable output and exit behavior.

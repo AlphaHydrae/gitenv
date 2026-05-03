@@ -11,6 +11,12 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-03: Realign migration documents with current planning state - Update
+  phase checklist status in `MIGRATION.md`, clarify that the current
+  `ExecutionPlan` output is the intent-plan stage while operation-plan
+  expansion is still pending, and resequence `MIGRATION-INCREMENTS.md` so the
+  next increment first clarifies plan-stage naming before adding operation-plan
+  expansion and then status/CLI slices.
 - 2026-05-02: Move parser-focused tests into config.rs and document config API -
   Relocate parse/load/guard/include/source-root/item-override parsing tests from
   `rust/src/plan.rs` into `rust/src/config.rs` so parser behavior is tested
