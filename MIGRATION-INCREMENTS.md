@@ -36,20 +36,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 14: Add the first operation-plan expansion slice
-
-Why this increment exists:
-
-- Deliver the missing second planning stage by deriving operation-shaped data
-  from the intent plan.
-- Start with a narrow, deterministic expansion scope that is easy to validate.
-
-Review target:
-
-- A new operation-plan model is derived from intent-plan output.
-- At least one concrete file-selection expansion path is covered by focused
-  tests.
-
 ### Increment 15: Inspect one narrow symlink status case
 
 Why this increment exists:

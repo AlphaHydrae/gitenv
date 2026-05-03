@@ -121,8 +121,9 @@ micro-optimizations.
 
 ### API stability sequencing
 
-Stabilize the canonical data model and programmatic API before extending feature
-surface.
+During migration, shape the Rust library API for clarity and correctness rather
+than compatibility. Backward compatibility becomes a concern only after the
+migration is complete and the migration-planning documents are retired.
 
 ### Two-stage planning model
 
@@ -130,8 +131,9 @@ Planning is represented in two deterministic stages.
 
 - Intent plan: config-shaped data after shorthand normalization and default
   resolution. This stage keeps user intent explicit and side-effect free.
-- Operation plan: execution-shaped data with concrete copy/symlink operations,
-  produced after expanding selections into concrete targets.
+- Operation plan: execution-shaped data with flat concrete copy/symlink
+  operations, produced after resolving repository-relative sources and
+  home-relative targets into explicit filesystem paths.
 
 This split keeps planning testable and predictable while still making the final
 execution model action-oriented.
@@ -173,7 +175,9 @@ effects.
 ## Proposed Module Boundaries (Rust)
 
 - `config`: parse + schema validate + normalize input.
-- `plan`: build intent plans and derive operation plans.
+- `intent`: build intent plans from normalized configuration semantics.
+- `operation`: derive flat concrete operations from intent plans by resolving
+  repository-relative sources, home-relative targets, and selector expansion.
 - `actions`: symlink/copy operations.
 - `status`: structured status model.
 - `logging`: log level filtering and structured diagnostic emission contracts.

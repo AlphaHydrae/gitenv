@@ -11,6 +11,11 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-03: Add the first operation-plan expansion slice - Introduce a
+  dedicated Rust `operation` module that derives flat concrete copy/symlink
+  operations from `IntentPlan`, resolve repository-relative source paths and
+  home-relative target paths, and expose operation-stage entrypoints in the
+  public library API.
 - 2026-05-03: Clarify intent-stage planner naming - Introduce intent-stage
   planner names (`IntentPlan`, `IntentSource`, `IntentAction`, and intent
   derivation entrypoints), remove legacy `ExecutionPlan`/`Planned*` naming and

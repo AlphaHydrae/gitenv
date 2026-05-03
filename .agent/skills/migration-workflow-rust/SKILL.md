@@ -57,6 +57,9 @@ Before starting an increment:
    - Test names follow sentence-style imperative snake_case per test code
      guidelines in `CONTRIBUTING.md`.
    - Each test makes complete assertions for the behavior under test.
+   - If a planner/execution function returns a full struct or enum tree,
+     assert that full value by default rather than projecting to filenames,
+     counts, or another subset just to keep the test short.
    - All test naming rules are checked before finalizing.
 
 ## Verification

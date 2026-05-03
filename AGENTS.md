@@ -63,6 +63,11 @@ them to EVERY task, EVERY time.**
   finalizing a test change, verify that each test fulfills [assertion quality
   criteria](./CONTRIBUTING.md#assertion-quality). Fix any mismatches before
   claiming completion. Ask for guidance if necessary.
+  - For planner/model tests, when the function returns a full structured plan
+    or result, assert that full value by default. Do not reduce the assertion
+    to a projected subset such as only filenames, counts, or one field unless
+    the omitted structure is already proven elsewhere and the test includes a
+    documented justification.
 
 ### 🚨 VERIFICATION — STILL MANDATORY TOP PRIORITY
 

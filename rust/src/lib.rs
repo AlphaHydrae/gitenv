@@ -1,14 +1,19 @@
 mod config;
-mod plan;
+mod intent;
+mod operation;
 
 pub use config::{
     ActionMode, Config, ConfigItem, Defaults, FileConfig, Guard, Include, SelectConfig, Source,
     SourceRoot, load_config, parse_config,
 };
-pub use plan::{
+pub use intent::{
     ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction, IntentSource,
     ResolvedOptions, derive_intent_plan, derive_intent_plan_with_env,
     derive_intent_plan_with_env_and_fs, derive_intent_plan_with_injectables,
+};
+pub use operation::{
+    FileOperation, OperationAction, OperationPlan, derive_operation_plan,
+    derive_operation_plan_with_injectables,
 };
 
 use std::path::PathBuf;
@@ -41,6 +46,13 @@ pub enum ProgramError {
     IncludeCycle {
         cycle: Vec<PathBuf>,
     },
+    /// A source directory could not be read while expanding selectors.
+    ReadSourceDirectory {
+        path: PathBuf,
+        message: String,
+    },
+    /// The current home directory is required to resolve home-relative paths.
+    HomeDirectoryUnavailable,
     UnsupportedConfiguration,
 }
 

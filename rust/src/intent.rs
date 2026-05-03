@@ -29,7 +29,8 @@ pub struct ResolvedOptions {
 ///
 /// This stage resolves defaults, source roots, includes, and guards, but keeps
 /// selector intent (for example `dotfiles` and `exclude`) unexpanded.
-/// Concrete file expansion is the responsibility of the operation-plan stage.
+/// Concrete path and selector expansion is the responsibility of the
+/// operation stage.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IntentPlan {
     /// Canonical path to the repository root (from the top-level config).

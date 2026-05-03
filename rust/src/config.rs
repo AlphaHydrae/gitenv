@@ -311,8 +311,7 @@ mod tests {
         SourceRoot, load_config, parse_config,
     };
     use crate::ProgramError;
-    use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use tempfile::NamedTempFile;
 
     fn expected_single_file_source_config(
         source_root: SourceRoot,
@@ -390,7 +389,10 @@ sources:
       - file: .zshrc
 "#;
 
-        let config = parse_config(yaml).expect("config should parse without defaults");
+        let mut temp_file = NamedTempFile::new().expect("temporary config file should be created");
+        std::io::Write::write_all(&mut temp_file, yaml.as_bytes())
+            .expect("temp config should be written");
+        let config = load_config(temp_file.path()).expect("config should load from disk");
 
         assert_eq!(
             config,
@@ -405,7 +407,6 @@ sources:
 
     #[test]
     fn accept_a_config_with_custom_defaults() {
-        let file_path = unique_temp_file_path("smallest_valid_config");
         let yaml = r#"
 version: 1
 repository: ~/projects/env
@@ -421,9 +422,7 @@ sources:
       - file: .zshrc
 "#;
 
-        std::fs::write(&file_path, yaml).expect("temp config should be written");
-        let config = load_config(&file_path).expect("config should load");
-        std::fs::remove_file(&file_path).expect("temp config should be removed");
+        let config = parse_config(yaml).expect("config should parse with custom defaults");
 
         let expected = Config {
             version: 1,
@@ -629,7 +628,10 @@ sources:
 
     #[test]
     fn cannot_load_a_missing_config_file() {
-        let file_path = unique_temp_file_path("missing_config");
+        // Create a temp path that is guaranteed not to exist at call time.
+        let temp_file = NamedTempFile::new().expect("temp path should be created");
+        let file_path = temp_file.path().to_path_buf();
+        drop(temp_file);
 
         let error = load_config(&file_path).expect_err("missing file should fail to load");
 
@@ -1219,13 +1221,5 @@ sources:
         };
 
         assert_eq!(config, expected);
-    }
-
-    fn unique_temp_file_path(prefix: &str) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock should be after epoch")
-            .as_nanos();
-        std::env::temp_dir().join(format!("gitenv_{prefix}_{nanos}.yml"))
     }
 }

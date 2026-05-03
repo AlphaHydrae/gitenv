@@ -233,7 +233,8 @@ Exit criteria:
   effects).
 - Implement operation planning that derives concrete actions after selection
   expansion.
-- Define and lock the canonical public library API for planning and execution.
+- Define and refine the canonical public library API for planning and
+  execution during migration.
 
 Exit criteria:
 
@@ -249,8 +250,8 @@ Current status:
   resolution, filesystem-gated guards, and deterministic include behavior are
   implemented.
 - The current intent-stage output is represented by `IntentPlan`; the
-  operation plan stage (with concrete file-selection expansion) and full
-  intent/operation snapshot coverage are still pending.
+  operation stage now resolves concrete source/target operations, and fuller
+  intent/operation snapshot coverage is still pending.
 
 ### Phase 2: Filesystem execution
 
