@@ -75,6 +75,26 @@ pub enum ProgramError {
         target: PathBuf,
         message: String,
     },
+    /// The target's parent directory could not be created before apply.
+    CreateTargetDirectory {
+        path: PathBuf,
+        message: String,
+    },
+    /// An existing target could not be removed before overwrite.
+    RemoveTarget {
+        path: PathBuf,
+        message: String,
+    },
+    /// An existing target could not be moved to its backup path.
+    BackupTarget {
+        path: PathBuf,
+        backup_path: PathBuf,
+        message: String,
+    },
+    /// Backup-on-overwrite cannot proceed because the backup path exists.
+    BackupAlreadyExists {
+        path: PathBuf,
+    },
     /// The current home directory is required to resolve home-relative paths.
     HomeDirectoryUnavailable,
     UnsupportedConfiguration,
@@ -253,6 +273,39 @@ impl fmt::Display for ProgramError {
                     "cannot create symlink {} -> {} ({message})",
                     target.display(),
                     source.display(),
+                )
+            }
+            ProgramError::CreateTargetDirectory { path, message } => {
+                write!(
+                    f,
+                    "cannot create target directory {} ({message})",
+                    path.display()
+                )
+            }
+            ProgramError::RemoveTarget { path, message } => {
+                write!(
+                    f,
+                    "cannot remove existing target {} ({message})",
+                    path.display()
+                )
+            }
+            ProgramError::BackupTarget {
+                path,
+                backup_path,
+                message,
+            } => {
+                write!(
+                    f,
+                    "cannot move existing target {} to backup {} ({message})",
+                    path.display(),
+                    backup_path.display(),
+                )
+            }
+            ProgramError::BackupAlreadyExists { path } => {
+                write!(
+                    f,
+                    "cannot overwrite because backup already exists at {}",
+                    path.display()
                 )
             }
             ProgramError::HomeDirectoryUnavailable => {
@@ -546,6 +599,38 @@ mod tests {
             }
             .to_string(),
             "cannot create symlink /home/.gitconfig -> /repo/.gitconfig (operation not permitted)"
+        );
+        assert_eq!(
+            ProgramError::CreateTargetDirectory {
+                path: PathBuf::from("/home/.config"),
+                message: "permission denied".to_string(),
+            }
+            .to_string(),
+            "cannot create target directory /home/.config (permission denied)"
+        );
+        assert_eq!(
+            ProgramError::RemoveTarget {
+                path: PathBuf::from("/home/.gitconfig"),
+                message: "permission denied".to_string(),
+            }
+            .to_string(),
+            "cannot remove existing target /home/.gitconfig (permission denied)"
+        );
+        assert_eq!(
+            ProgramError::BackupTarget {
+                path: PathBuf::from("/home/.gitconfig"),
+                backup_path: PathBuf::from("/home/.gitconfig.orig"),
+                message: "permission denied".to_string(),
+            }
+            .to_string(),
+            "cannot move existing target /home/.gitconfig to backup /home/.gitconfig.orig (permission denied)"
+        );
+        assert_eq!(
+            ProgramError::BackupAlreadyExists {
+                path: PathBuf::from("/home/.gitconfig.orig"),
+            }
+            .to_string(),
+            "cannot overwrite because backup already exists at /home/.gitconfig.orig"
         );
         assert_eq!(
             ProgramError::HomeDirectoryUnavailable.to_string(),

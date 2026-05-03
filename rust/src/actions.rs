@@ -1,6 +1,8 @@
 use crate::{FileOperation, OperationAction, OperationPlan, ProgramError};
 use std::path::Path;
 
+const BACKUP_SUFFIX: &str = ".orig";
+
 /// Structured apply outcomes for one operation-plan execution pass.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApplyOperationReport {
@@ -16,9 +18,6 @@ pub enum ApplyOperationOutcome {
 }
 
 /// Applies operation-plan actions using real filesystem access.
-///
-/// This increment intentionally supports only the simplest symlink path:
-/// when the target path does not exist.
 pub fn apply_operation_plan(
     operation_plan: &OperationPlan,
 ) -> Result<ApplyOperationReport, ProgramError> {
@@ -41,14 +40,11 @@ pub fn apply_operation_plan_with_injectables(
     for action in &operation_plan.actions {
         match action {
             OperationAction::Symlink(operation) => {
-                if target_exists(&operation.target)? {
-                    outcomes.push(ApplyOperationOutcome::SkippedExistingTarget(
-                        operation.clone(),
-                    ));
-                } else {
-                    create_symlink(&operation.source, &operation.target)?;
-                    outcomes.push(ApplyOperationOutcome::AppliedSymlink(operation.clone()));
-                }
+                outcomes.push(apply_symlink_operation(
+                    operation,
+                    target_exists,
+                    create_symlink,
+                )?);
             }
             unsupported => {
                 outcomes.push(ApplyOperationOutcome::UnsupportedOperation(
@@ -72,6 +68,86 @@ fn target_exists(path: &Path) -> Result<bool, ProgramError> {
     }
 }
 
+fn apply_symlink_operation(
+    operation: &FileOperation,
+    target_exists: &impl Fn(&Path) -> Result<bool, ProgramError>,
+    create_symlink: &impl Fn(&Path, &Path) -> Result<(), ProgramError>,
+) -> Result<ApplyOperationOutcome, ProgramError> {
+    if operation.mkdir {
+        ensure_parent_directory_exists(&operation.target)?;
+    }
+
+    if !target_exists(&operation.target)? {
+        create_symlink(&operation.source, &operation.target)?;
+        return Ok(ApplyOperationOutcome::AppliedSymlink(operation.clone()));
+    }
+
+    match operation.conflict_policy {
+        crate::ConflictPolicy::Skip => Ok(ApplyOperationOutcome::SkippedExistingTarget(
+            operation.clone(),
+        )),
+        crate::ConflictPolicy::Overwrite => {
+            remove_target_path(&operation.target)?;
+            create_symlink(&operation.source, &operation.target)?;
+            Ok(ApplyOperationOutcome::AppliedSymlink(operation.clone()))
+        }
+        crate::ConflictPolicy::OverwriteWithBackup => {
+            let backup_path = backup_path_for_target(&operation.target);
+            if target_exists(&backup_path)? {
+                return Err(ProgramError::BackupAlreadyExists { path: backup_path });
+            }
+
+            move_target_to_backup(&operation.target, &backup_path)?;
+            create_symlink(&operation.source, &operation.target)?;
+            Ok(ApplyOperationOutcome::AppliedSymlink(operation.clone()))
+        }
+    }
+}
+
+fn ensure_parent_directory_exists(target: &Path) -> Result<(), ProgramError> {
+    let Some(parent) = target.parent() else {
+        return Ok(());
+    };
+
+    std::fs::create_dir_all(parent).map_err(|error| ProgramError::CreateTargetDirectory {
+        path: parent.to_path_buf(),
+        message: error.to_string(),
+    })
+}
+
+fn remove_target_path(path: &Path) -> Result<(), ProgramError> {
+    let metadata = std::fs::symlink_metadata(path).map_err(|error| ProgramError::RemoveTarget {
+        path: path.to_path_buf(),
+        message: error.to_string(),
+    })?;
+
+    if metadata.file_type().is_dir() {
+        std::fs::remove_dir(path).map_err(|error| ProgramError::RemoveTarget {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        })
+    } else {
+        std::fs::remove_file(path).map_err(|error| ProgramError::RemoveTarget {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        })
+    }
+}
+
+fn move_target_to_backup(target: &Path, backup_path: &Path) -> Result<(), ProgramError> {
+    std::fs::rename(target, backup_path).map_err(|error| ProgramError::BackupTarget {
+        path: target.to_path_buf(),
+        backup_path: backup_path.to_path_buf(),
+        message: error.to_string(),
+    })
+}
+
+fn backup_path_for_target(path: &Path) -> std::path::PathBuf {
+    let mut backup = path.as_os_str().to_os_string();
+    backup.push(BACKUP_SUFFIX);
+    backup.into()
+}
+
 #[cfg(unix)]
 fn create_symlink_on_filesystem(source: &Path, target: &Path) -> Result<(), ProgramError> {
     std::os::unix::fs::symlink(source, target).map_err(|error| ProgramError::CreateSymlink {
@@ -88,4 +164,237 @@ fn create_symlink_on_filesystem(source: &Path, target: &Path) -> Result<(), Prog
         target: target.to_path_buf(),
         message: "symlink apply is not supported on this platform".to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ApplyOperationOutcome, apply_operation_plan_with_injectables, backup_path_for_target,
+        ensure_parent_directory_exists, move_target_to_backup, remove_target_path, target_exists,
+    };
+    use crate::{ConflictPolicy, FileOperation, OperationAction, OperationPlan, ProgramError};
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    fn symlink_plan(
+        source: PathBuf,
+        target: PathBuf,
+        mkdir: bool,
+        conflict_policy: ConflictPolicy,
+    ) -> OperationPlan {
+        OperationPlan {
+            actions: vec![OperationAction::Symlink(FileOperation {
+                source,
+                target,
+                mkdir,
+                conflict_policy,
+            })],
+        }
+    }
+
+    #[test]
+    fn append_orig_suffix_to_backup_paths() {
+        assert_eq!(
+            backup_path_for_target(std::path::Path::new("/home/.gitconfig")),
+            PathBuf::from("/home/.gitconfig.orig")
+        );
+    }
+
+    #[test]
+    fn allow_targets_without_a_parent_path() {
+        ensure_parent_directory_exists(std::path::Path::new(""))
+            .expect("empty targets should not require mkdir");
+    }
+
+    #[test]
+    fn report_create_directory_failures_with_typed_errors() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let parent_file = temp.path().join("parent-as-file");
+        fs::write(&parent_file, "x\n").expect("parent file should be written");
+        let nested_target = parent_file.join("target.txt");
+
+        let error = ensure_parent_directory_exists(&nested_target)
+            .expect_err("mkdir should fail when parent path is a file");
+
+        match error {
+            ProgramError::CreateTargetDirectory { path, .. } => {
+                assert_eq!(path, parent_file);
+            }
+            other => panic!("expected create-target-directory error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn report_remove_target_metadata_failures() {
+        let missing = PathBuf::from("/path/that/does/not/exist");
+
+        let error = remove_target_path(&missing)
+            .expect_err("remove should fail when target metadata cannot be read");
+
+        match error {
+            ProgramError::RemoveTarget { path, .. } => assert_eq!(path, missing),
+            other => panic!("expected remove-target error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn report_remove_target_failures_for_non_empty_directories() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let target_directory = temp.path().join("target-directory");
+        fs::create_dir_all(&target_directory).expect("target directory should be created");
+        fs::write(target_directory.join("nested.txt"), "nested\n")
+            .expect("nested file should be written");
+
+        let error = remove_target_path(&target_directory)
+            .expect_err("remove should fail for non-empty directories");
+
+        match error {
+            ProgramError::RemoveTarget { path, .. } => assert_eq!(path, target_directory),
+            other => panic!("expected remove-target error, got {other:?}"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn report_remove_target_failures_for_files_in_non_writable_directories() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let protected_directory = temp.path().join("protected");
+        fs::create_dir_all(&protected_directory).expect("protected directory should be created");
+        let target_file = protected_directory.join("target.txt");
+        fs::write(&target_file, "target\n").expect("target file should be written");
+
+        let mut permissions = fs::metadata(&protected_directory)
+            .expect("protected directory metadata should be readable")
+            .permissions();
+        permissions.set_mode(0o500);
+        fs::set_permissions(&protected_directory, permissions)
+            .expect("protected directory should be set to read-only");
+
+        let error = remove_target_path(&target_file)
+            .expect_err("remove should fail when parent directory is not writable");
+
+        let mut restore_permissions = fs::metadata(&protected_directory)
+            .expect("protected directory metadata should be readable")
+            .permissions();
+        restore_permissions.set_mode(0o700);
+        fs::set_permissions(&protected_directory, restore_permissions)
+            .expect("protected directory permissions should be restored");
+
+        match error {
+            ProgramError::RemoveTarget { path, .. } => assert_eq!(path, target_file),
+            other => panic!("expected remove-target error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn report_backup_move_failures_with_typed_errors() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let target = temp.path().join("target.txt");
+        let backup = temp.path().join("target.txt.orig");
+
+        let error = move_target_to_backup(&target, &backup)
+            .expect_err("backup move should fail when the source target is missing");
+
+        match error {
+            ProgramError::BackupTarget {
+                path, backup_path, ..
+            } => {
+                assert_eq!(path, target);
+                assert_eq!(backup_path, backup);
+            }
+            other => panic!("expected backup-target error, got {other:?}"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn report_metadata_probe_failures_when_parent_directory_is_not_accessible() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let locked_directory = temp.path().join("locked");
+        fs::create_dir_all(&locked_directory).expect("locked directory should be created");
+        let target = locked_directory.join("target.txt");
+
+        let mut permissions = fs::metadata(&locked_directory)
+            .expect("locked directory metadata should be readable")
+            .permissions();
+        permissions.set_mode(0o000);
+        fs::set_permissions(&locked_directory, permissions)
+            .expect("locked directory should be set to inaccessible");
+
+        let error = target_exists(&target)
+            .expect_err("metadata probe should fail for inaccessible directory entries");
+
+        let mut restore_permissions = fs::metadata(&locked_directory)
+            .expect("locked directory metadata should be readable")
+            .permissions();
+        restore_permissions.set_mode(0o700);
+        fs::set_permissions(&locked_directory, restore_permissions)
+            .expect("locked directory permissions should be restored");
+
+        match error {
+            ProgramError::InspectPathMetadata { path, .. } => assert_eq!(path, target),
+            other => panic!("expected inspect-path-metadata error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn propagate_target_probe_errors_from_apply_execution() {
+        let operation_plan = symlink_plan(
+            PathBuf::from("/repo/source"),
+            PathBuf::from("/home/target"),
+            true,
+            ConflictPolicy::Skip,
+        );
+
+        let error = apply_operation_plan_with_injectables(
+            &operation_plan,
+            &|path| {
+                Err(ProgramError::InspectPathMetadata {
+                    path: path.to_path_buf(),
+                    message: "permission denied".to_string(),
+                })
+            },
+            &|_, _| Ok(()),
+        )
+        .expect_err("apply should propagate target probe failures");
+
+        assert_eq!(
+            error,
+            ProgramError::InspectPathMetadata {
+                path: PathBuf::from("/home/target"),
+                message: "permission denied".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn keep_copy_operations_unsupported_in_the_actions_executor() {
+        let operation_plan = OperationPlan {
+            actions: vec![OperationAction::Copy(FileOperation {
+                source: PathBuf::from("/repo/source"),
+                target: PathBuf::from("/home/target"),
+                mkdir: true,
+                conflict_policy: ConflictPolicy::Skip,
+            })],
+        };
+
+        let report =
+            apply_operation_plan_with_injectables(&operation_plan, &|_| Ok(false), &|_, _| Ok(()))
+                .expect("copy actions should remain unsupported in this executor");
+
+        assert_eq!(
+            report.outcomes,
+            vec![ApplyOperationOutcome::UnsupportedOperation(
+                OperationAction::Copy(FileOperation {
+                    source: PathBuf::from("/repo/source"),
+                    target: PathBuf::from("/home/target"),
+                    mkdir: true,
+                    conflict_policy: ConflictPolicy::Skip,
+                })
+            )]
+        );
+    }
 }

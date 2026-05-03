@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-03: Implement symlink conflict semantics - Extend symlink apply
+  execution to honor `skip`/`overwrite`/backup conflict policies, create
+  target parent directories when `mkdir` is enabled, and return deterministic
+  typed errors for backup, remove, and directory-creation failures.
 - 2026-05-03: Add a minimal symlink apply executor slice - Introduce an
   `actions` execution entrypoint that applies only missing-target symlink
   operations, reports structured per-operation outcomes for existing-target

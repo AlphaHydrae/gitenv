@@ -247,13 +247,13 @@ Exit criteria:
 Current status:
 
 - [x] Parser coverage, shorthand/canonical normalization, required
-  environment resolution, filesystem-gated guards, and deterministic
-  include behavior are implemented.
+      environment resolution, filesystem-gated guards, and deterministic
+      include behavior are implemented.
 - [x] The intent-stage output is represented by `IntentPlan`, and the
-  operation stage resolves concrete source/target operations.
+      operation stage resolves concrete source/target operations.
 - [x] Intent and operation snapshot coverage is implemented for representative
-  shorthand/canonical parity, include ordering, guard evaluation, selector
-  expansion, and item-level overrides.
+      shorthand/canonical parity, include ordering, guard evaluation, selector
+      expansion, and item-level overrides.
 
 ### Phase 2: Filesystem execution
 
@@ -265,10 +265,10 @@ Current status:
 Current status:
 
 - [x] A read-only symlink inspection slice exists and is wired into the
-  default CLI inspection flow.
+      default CLI inspection flow.
 - [ ] No filesystem mutation executor exists yet for symlink or copy
-  operations, so apply semantics (including overwrite/backup/mkdir
-  behavior) are still pending.
+      operations, so apply semantics (including overwrite/backup/mkdir
+      behavior) are still pending.
 
 Exit criteria:
 
@@ -307,6 +307,15 @@ Exit criteria:
 - [ ] Coverage target reached (goal: 100%).
 - [ ] CI green for required checks.
 - [ ] Release checklist documented.
+
+## Pending Refactorings
+
+This section tracks refactorings that are planned but intentionally deferred to
+keep migration increments focused and reviewable. Each refactoring should be
+implemented in a future increment.
+
+- [ ] Normalize error names (ask for guidance).
+- [ ] Improve action tests by reading the whole temporary test directory state.
 
 ## Test Strategy
 

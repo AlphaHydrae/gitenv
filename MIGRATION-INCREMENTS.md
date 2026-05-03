@@ -36,20 +36,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 20: Implement symlink conflict semantics
-
-Why this increment exists:
-
-- Symlink apply cannot be considered complete without deterministic conflict
-  handling.
-- `skip`/`overwrite`/backup behavior and `mkdir` are core semantics from the
-  planning model.
-
-Review target:
-
-- Extend symlink apply behavior to honor conflict policies and `mkdir`.
-- Add deterministic errors and integration coverage for each branch.
-
 ### Increment 21: Introduce copy apply execution with option parity
 
 Why this increment exists:
