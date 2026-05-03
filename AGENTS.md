@@ -326,17 +326,33 @@ them to EVERY task, EVERY time.**
   avoid unescaped backticks and accidental command substitution. If you need
   literal Markdown/code snippets in shell input, use single quotes or
   escaped backticks so the shell cannot execute unintended commands.
-- **🔴 Backtick preflight is mandatory before EVERY `run_in_terminal` call.**
-  Never include raw `` `...` `` segments in the command string. If search text
-  needs backticks literally (for example docs that mention command names), use
-  one of these safe forms instead:
-  - `rg -F 'git stash' ...` (drop Markdown backticks in the pattern)
-  - `rg "\`git stash\`" ...` (escaped backticks)
-  - Use single-quoted shell strings where command substitution cannot execute.
-    If a command string still contains raw backticks after drafting, do not run
-    it; rewrite first.
 - If you must create temporary files, place them in `tmp/agent/` and do not
   touch the `.keep` file there.
+- **Never use stash in the active working tree** — Do not use `git stash` or any
+  in-place branch/worktree mutation in the active working tree. Stash hides
+  changes and complicates recovery. If you need to preserve state (e.g., to
+  recover a missed baseline), use a temporary worktree under `tmp/agent/`
+  instead. This preserves review context for the human.
+- If a requested change conflicts with the documented guidance, point out the
+  conflict and resolve it with the human before proceeding.
+
+### 🔴 TERMINAL COMMAND PREFLIGHT ENFORCEMENT (MANDATORY)
+
+Before sending **ANY** command to `run_in_terminal`:
+
+1. Inspect the entire command string for raw backticks (`` `...` ``)
+2. If backticks are present, **STOP**. Do not send the command to terminal.
+3. Rewrite using safe patterns:
+   - `rg -F 'literal'` — Use `-F` flag for literal string searching (no regex)
+   - `rg '\`literal\`'` — Escape backticks with backslash
+   - `'single quoted'` — Single quotes prevent all shell expansion
+4. Verify the rewritten command contains no raw backticks before executing
+5. **Rationale:** An agent once wrote:
+
+   rg "text with \`git stash\` docs"`
+
+   Backticks caused hidden `git stash` execution, wiping recovery work. This
+   is a critical security failure. The preflight gate prevents it.
 
 ## Agent coding guidelines
 

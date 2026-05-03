@@ -39,11 +39,58 @@ Before starting an increment:
    the project compiling and tests passing, mark it clearly with a TODO comment
    including the removal condition.
 
-5. **Capture baseline coverage first** — For migration increments, run
+5. **Never use stash to preserve work state** — Do not use `git stash` in the
+   active working tree. If baseline capture is missed and you need to preserve
+   changes, use a temporary worktree under `tmp/agent/` instead (see recovery
+   protocol below). Stash hides changes and complicates recovery; worktrees
+   preserve review context.
+
+6. **Capture baseline coverage first** — For migration increments, run
    `./.agent/scripts/coverage.sh` before making code changes and record the
    total line coverage as the baseline for drop detection.
 
-   **🔴 DO NOT** edit tracked repository files before this baseline exists.
+## ⚠️ BASELINE CAPTURE GATE (Mandatory before proceeding to Implementation)
+
+**🔴 STOP.** **DO NOT** read the next section or make **ANY** code changes until:
+
+- [ ] You have run `./.agent/scripts/coverage.sh` at current `HEAD`
+- [ ] You have captured the reported `Total line coverage: XX.XX%`
+- [ ] You have recorded this baseline value in your working notes or session
+      memory for later comparison
+
+If you cannot capture the baseline (e.g., the repository is in a broken state),
+stop and ask the human before proceeding.
+
+**Rationale:** Missing this baseline means you cannot detect coverage regressions
+in your implementation. Detecting the miss late forces a stash-based recovery,
+which corrupts the review context. Capture it now, before implementation starts.
+
+## ⚠️ SHELL COMMAND SAFETY PREFLIGHT (Mandatory before calling `run_in_terminal`)
+
+Before running **ANY** terminal command in this increment:
+
+1. **Review the command string** — Examine the exact string you are about to
+   send to `run_in_terminal`.
+
+2. **Check for raw backticks** — If the string contains `` `...` `` (backticks),
+   **STOP**. Do not run it.
+   - Backticks trigger shell command substitution and can cause accidental
+     commands to execute (e.g., `git stash` running without intent).
+
+3. **Rewrite using safe patterns** — Replace backticks with one of these:
+   - `rg -F 'literal string'` — Use `rg -F` for literal search (treats input as
+     literal, no regex expansion)
+   - `rg '\`literal\`'` — Escape backticks with backslash
+   - Single-quoted shell strings: `echo 'string with \` in it'` — Single quotes
+     prevent command substitution
+
+4. **Example rewrite:**
+   - ❌ Bad: `rg "search for \`git stash\` in docs"` (backticks execute)
+   - ✅ Good: `rg -F 'search for git stash in docs'` (literal string)
+   - ✅ Good: `rg '\`git stash\`'` (escaped backticks)
+
+If your command still contains raw backticks after rewriting, do not run it;
+draft it again.
 
 ## Implementation
 
