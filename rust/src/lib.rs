@@ -1,6 +1,7 @@
 mod config;
 mod intent;
 mod operation;
+mod status;
 
 pub use config::{
     ActionMode, Config, ConfigItem, Defaults, FileConfig, Guard, Include, SelectConfig, Source,
@@ -15,6 +16,7 @@ pub use operation::{
     FileOperation, OperationAction, OperationPlan, derive_operation_plan,
     derive_operation_plan_with_injectables,
 };
+pub use status::{SymlinkInspection, SymlinkInspectionState, inspect_symlink_operation_status};
 
 use std::path::PathBuf;
 
@@ -48,6 +50,16 @@ pub enum ProgramError {
     },
     /// A source directory could not be read while expanding selectors.
     ReadSourceDirectory {
+        path: PathBuf,
+        message: String,
+    },
+    /// A filesystem path could not be inspected while deriving status.
+    InspectPathMetadata {
+        path: PathBuf,
+        message: String,
+    },
+    /// A symlink target could not be read while deriving status.
+    ReadSymlinkTarget {
         path: PathBuf,
         message: String,
     },

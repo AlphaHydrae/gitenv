@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-03: Add the first symlink status inspection slice - Introduce a
+  dedicated Rust `status` module with structured symlink inspection results,
+  add a typed entrypoint that inspects one concrete symlink operation without
+  filesystem mutation.
 - 2026-05-03: Add the first operation-plan expansion slice - Introduce a
   dedicated Rust `operation` module that derives flat concrete copy/symlink
   operations from `IntentPlan`, resolve repository-relative source paths and

@@ -36,18 +36,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 15: Inspect one narrow symlink status case
-
-Why this increment exists:
-
-- Introduce the first real filesystem behavior with tightly constrained scope.
-- Start with read-only inspection before write-side apply behavior.
-
-Review target:
-
-- A single symlink status workflow works against temporary directories.
-- Status results are returned as structured data, not terminal output.
-
 ### Increment 16: Wire the default CLI inspection flow
 
 Why this increment exists:
