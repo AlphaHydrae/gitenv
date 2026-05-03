@@ -192,6 +192,8 @@ effects.
 
 ## Future Considerations
 
-- Windows support via platform abstraction boundaries.
+- Support creating links for entire relative directory trees, not just
+  individual files.
 - Additional configuration schema versions with explicit migrations.
+- Windows support via platform abstraction boundaries.
 - Optional machine-readable output mode for automation.
