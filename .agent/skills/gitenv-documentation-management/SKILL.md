@@ -153,8 +153,16 @@ After updating any core documentation file, verify:
    `CONTRIBUTING.md`, and `migration-workflow-rust`:
    - Migration increments capture pre-change coverage baseline so coverage drops
      can be detected with evidence.
+   - If baseline recovery is needed, use a detached temporary worktree under
+     `tmp/agent/` and avoid `git stash` in the active working tree so review
+     state remains stable.
    - Formatting wrapper defaults to write mode; `--check` is only for explicit
      human requests or formatting diagnostics.
+   - Shell command examples and instructions avoid unescaped backticks that can
+     trigger unintended command substitution in terminal usage.
+   - Operational command templates used by agents never contain raw backticks;
+     use plain-text fixed-string searches (`rg -F`) or escaped backticks when
+     literals are required.
    - Commit message guidance omits routine tests, migration log/backlog updates,
      and upkeep notes unless those are the primary deliverable.
 

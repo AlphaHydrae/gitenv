@@ -11,6 +11,11 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-03: Introduce copy apply execution with option parity - Execute
+  copy operations in the apply path with `mkdir` and
+  `skip`/`overwrite`/backup conflict semantics, return typed apply outcomes
+  that preserve operation kind for both copy and symlink actions, and add
+  Unix filesystem integration coverage for copy execution parity scenarios.
 - 2026-05-03: Implement symlink conflict semantics - Extend symlink apply
   execution to honor `skip`/`overwrite`/backup conflict policies, create
   target parent directories when `mkdir` is enabled, and return deterministic

@@ -6,6 +6,11 @@ learn more, this backlog should be split, merged, reordered, rewritten, and
 pruned. The overall migration plan is located in
 [`MIGRATION.md`](./MIGRATION.md).
 
+For every increment, capture a coverage baseline **BEFORE** editing tracked
+files. If baseline capture is missed, recover it from a detached temporary
+worktree at `HEAD` under `tmp/agent/` instead of using `git stash` in the active
+working tree.
+
 Completed increments must be moved to [`MIGRATION-LOG.md`](./MIGRATION-LOG.md)
 and removed from this file so it stays forward-looking.
 
@@ -35,23 +40,6 @@ Architectural and design decisions referenced by active increments:
 - [Output boundary: domain data vs CLI rendering](./ARCHITECTURE.md#output-boundary-domain-data-vs-cli-rendering)
 
 ## Current Backlog
-
-### Increment 21: Introduce copy apply execution with option parity
-
-Why this increment exists:
-
-- Operation planning already emits copy actions.
-- Execution parity requires a concrete copy path with the same option semantics
-  as symlink actions.
-
-Review target:
-
-- Add concrete copy execution that respects `mkdir` and conflict policy
-  behavior.
-- Preserve original operation kind in apply outcomes so renderers can
-  distinguish symlink vs copy without side mappings.
-- Add Unix fixture/integration tests that mirror symlink executor
-  expectations.
 
 ### Increment 22: Expand status modeling for info and apply workflows
 

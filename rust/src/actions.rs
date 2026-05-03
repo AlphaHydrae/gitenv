@@ -12,8 +12,8 @@ pub struct ApplyOperationReport {
 /// Per-operation apply result for incremental symlink execution support.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApplyOperationOutcome {
-    AppliedSymlink(FileOperation),
-    SkippedExistingTarget(FileOperation),
+    Applied(OperationAction),
+    SkippedExistingTarget(OperationAction),
     UnsupportedOperation(OperationAction),
 }
 
@@ -46,10 +46,8 @@ pub fn apply_operation_plan_with_injectables(
                     create_symlink,
                 )?);
             }
-            unsupported => {
-                outcomes.push(ApplyOperationOutcome::UnsupportedOperation(
-                    unsupported.clone(),
-                ));
+            OperationAction::Copy(operation) => {
+                outcomes.push(apply_copy_operation(operation, target_exists)?);
             }
         }
     }
@@ -79,17 +77,21 @@ fn apply_symlink_operation(
 
     if !target_exists(&operation.target)? {
         create_symlink(&operation.source, &operation.target)?;
-        return Ok(ApplyOperationOutcome::AppliedSymlink(operation.clone()));
+        return Ok(ApplyOperationOutcome::Applied(OperationAction::Symlink(
+            operation.clone(),
+        )));
     }
 
     match operation.conflict_policy {
         crate::ConflictPolicy::Skip => Ok(ApplyOperationOutcome::SkippedExistingTarget(
-            operation.clone(),
+            OperationAction::Symlink(operation.clone()),
         )),
         crate::ConflictPolicy::Overwrite => {
             remove_target_path(&operation.target)?;
             create_symlink(&operation.source, &operation.target)?;
-            Ok(ApplyOperationOutcome::AppliedSymlink(operation.clone()))
+            Ok(ApplyOperationOutcome::Applied(OperationAction::Symlink(
+                operation.clone(),
+            )))
         }
         crate::ConflictPolicy::OverwriteWithBackup => {
             let backup_path = backup_path_for_target(&operation.target);
@@ -99,9 +101,62 @@ fn apply_symlink_operation(
 
             move_target_to_backup(&operation.target, &backup_path)?;
             create_symlink(&operation.source, &operation.target)?;
-            Ok(ApplyOperationOutcome::AppliedSymlink(operation.clone()))
+            Ok(ApplyOperationOutcome::Applied(OperationAction::Symlink(
+                operation.clone(),
+            )))
         }
     }
+}
+
+fn apply_copy_operation(
+    operation: &FileOperation,
+    target_exists: &impl Fn(&Path) -> Result<bool, ProgramError>,
+) -> Result<ApplyOperationOutcome, ProgramError> {
+    if operation.mkdir {
+        ensure_parent_directory_exists(&operation.target)?;
+    }
+
+    if !target_exists(&operation.target)? {
+        copy_source_to_target(&operation.source, &operation.target)?;
+        return Ok(ApplyOperationOutcome::Applied(OperationAction::Copy(
+            operation.clone(),
+        )));
+    }
+
+    match operation.conflict_policy {
+        crate::ConflictPolicy::Skip => Ok(ApplyOperationOutcome::SkippedExistingTarget(
+            OperationAction::Copy(operation.clone()),
+        )),
+        crate::ConflictPolicy::Overwrite => {
+            remove_target_path(&operation.target)?;
+            copy_source_to_target(&operation.source, &operation.target)?;
+            Ok(ApplyOperationOutcome::Applied(OperationAction::Copy(
+                operation.clone(),
+            )))
+        }
+        crate::ConflictPolicy::OverwriteWithBackup => {
+            let backup_path = backup_path_for_target(&operation.target);
+            if target_exists(&backup_path)? {
+                return Err(ProgramError::BackupAlreadyExists { path: backup_path });
+            }
+
+            move_target_to_backup(&operation.target, &backup_path)?;
+            copy_source_to_target(&operation.source, &operation.target)?;
+            Ok(ApplyOperationOutcome::Applied(OperationAction::Copy(
+                operation.clone(),
+            )))
+        }
+    }
+}
+
+fn copy_source_to_target(source: &Path, target: &Path) -> Result<(), ProgramError> {
+    std::fs::copy(source, target)
+        .map(|_| ())
+        .map_err(|error| ProgramError::CopyFile {
+            source: source.to_path_buf(),
+            target: target.to_path_buf(),
+            message: error.to_string(),
+        })
 }
 
 fn ensure_parent_directory_exists(target: &Path) -> Result<(), ProgramError> {
@@ -169,7 +224,7 @@ fn create_symlink_on_filesystem(source: &Path, target: &Path) -> Result<(), Prog
 #[cfg(test)]
 mod tests {
     use super::{
-        ApplyOperationOutcome, apply_operation_plan_with_injectables, backup_path_for_target,
+        apply_operation_plan_with_injectables, backup_path_for_target,
         ensure_parent_directory_exists, move_target_to_backup, remove_target_path, target_exists,
     };
     use crate::{ConflictPolicy, FileOperation, OperationAction, OperationPlan, ProgramError};
@@ -371,7 +426,7 @@ mod tests {
     }
 
     #[test]
-    fn keep_copy_operations_unsupported_in_the_actions_executor() {
+    fn report_copy_failures() {
         let operation_plan = OperationPlan {
             actions: vec![OperationAction::Copy(FileOperation {
                 source: PathBuf::from("/repo/source"),
@@ -381,20 +436,16 @@ mod tests {
             })],
         };
 
-        let report =
+        let error =
             apply_operation_plan_with_injectables(&operation_plan, &|_| Ok(false), &|_, _| Ok(()))
-                .expect("copy actions should remain unsupported in this executor");
+                .expect_err("copy actions should fail when copy creation cannot run");
 
-        assert_eq!(
-            report.outcomes,
-            vec![ApplyOperationOutcome::UnsupportedOperation(
-                OperationAction::Copy(FileOperation {
-                    source: PathBuf::from("/repo/source"),
-                    target: PathBuf::from("/home/target"),
-                    mkdir: true,
-                    conflict_policy: ConflictPolicy::Skip,
-                })
-            )]
-        );
+        match error {
+            ProgramError::CopyFile { source, target, .. } => {
+                assert_eq!(source, PathBuf::from("/repo/source"));
+                assert_eq!(target, PathBuf::from("/home/target"));
+            }
+            other => panic!("expected copy-file error, got {other:?}"),
+        }
     }
 }

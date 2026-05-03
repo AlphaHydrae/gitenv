@@ -38,6 +38,10 @@ them to EVERY task, EVERY time.**
 - **🔴 GUIDELINES MUST BE APPLIED DURING CHANGES, NOT AFTER.** Keep the relevant
   contribution guideline section open while editing and review the exact rule
   before each change.
+- **🔴 PRE-CHANGE COVERAGE BASELINE GATE IS MANDATORY.** For migration
+  increments, do not edit any tracked repository file until you have captured a
+  coverage baseline from `./.agent/scripts/coverage.sh` and recorded the
+  baseline value in your working notes/output for later comparison.
 - **🔴 PROACTIVELY SURFACE MAINTAINABILITY DEBT.** Do not wait for a human to
   ask about readability issues. If a file grows large, mixes multiple concerns,
   or lacks required explanatory documentation, call it out immediately and
@@ -74,9 +78,6 @@ them to EVERY task, EVERY time.**
 - **🔴 NEVER claim a task is complete without running the required checks.**
   Do not say "tests pass" without showing the actual command output and exit
   code. This is a critical recurring failure mode.
-  - For migration increments, capture a **coverage baseline before code
-    changes** by running `./.agent/scripts/coverage.sh` first and recording the
-    current total line coverage.
   - Always run `./.agent/scripts/tests.sh` for test changes.
   - Always run `./.agent/scripts/lint.sh` for source changes.
   - Always run `./.agent/scripts/lint-md.sh` for documentation changes.
@@ -87,6 +88,17 @@ them to EVERY task, EVERY time.**
     a human or when diagnosing formatting-only issues without applying changes.
   - For migration increments, always run `./.agent/scripts/coverage.sh` again
     after changes and report both previous and current coverage.
+  - If you realize baseline was missed after edits started, stop completion
+    reporting immediately and run a recovery baseline before proceeding.
+    - **Recovery baseline protocol (safe for review state):**
+      1. Create a detached temporary worktree at current `HEAD` under
+         `tmp/agent/`.
+      2. Run `./.agent/scripts/coverage.sh` inside that temporary worktree.
+      3. Capture the reported `Total line coverage` as the baseline.
+      4. Remove the temporary worktree after capture.
+    - **🔴 NEVER use `git stash` or any in-place branch/worktree mutation in the
+      active working tree to reconstruct baseline coverage.** This can disrupt
+      human review context and changed-file visibility.
   - If coverage decreases significantly, **do not consider the increment
     complete.** Restore coverage before claiming completion. A coverage drop
     caused by new code in the current increment means the tests for that code
@@ -310,6 +322,19 @@ them to EVERY task, EVERY time.**
   Prefer direct file edits.
 - Small one-off scripts are acceptable only when they are clearly the simplest
   safe option. If a larger script seems necessary, ask for approval first.
+- **Shell command safety is mandatory.** When constructing terminal commands,
+  avoid unescaped backticks and accidental command substitution. If you need
+  literal Markdown/code snippets in shell input, use single quotes or
+  escaped backticks so the shell cannot execute unintended commands.
+- **🔴 Backtick preflight is mandatory before EVERY `run_in_terminal` call.**
+  Never include raw `` `...` `` segments in the command string. If search text
+  needs backticks literally (for example docs that mention command names), use
+  one of these safe forms instead:
+  - `rg -F 'git stash' ...` (drop Markdown backticks in the pattern)
+  - `rg "\`git stash\`" ...` (escaped backticks)
+  - Use single-quoted shell strings where command substitution cannot execute.
+    If a command string still contains raw backticks after drafting, do not run
+    it; rewrite first.
 - If you must create temporary files, place them in `tmp/agent/` and do not
   touch the `.keep` file there.
 
@@ -324,7 +349,7 @@ them to EVERY task, EVERY time.**
   exception is documented.
 - Ensure logging is thorough and configurable by log level when working on
   diagnostics or command execution paths.
-- **🔴 Never use `expect`, `unwrap`, `panic!`, or `unreachable!` in
+- **🔴 NEVER use `expect`, `unwrap`, `panic!`, or `unreachable!` in
   implementation code without explicit human approval.** Every fallible path
   must propagate a typed `Result` or `Option` to the caller using `?`. If you
   believe a path is unreachable due to enforced invariants, document that

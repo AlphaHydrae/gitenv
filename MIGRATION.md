@@ -315,6 +315,7 @@ keep migration increments focused and reviewable. Each refactoring should be
 implemented in a future increment.
 
 - [ ] Normalize error names (ask for guidance).
+- [ ] Do not copy files when the target file already matches (hash).
 - [ ] Improve action tests by reading the whole temporary test directory state.
 
 ## Test Strategy

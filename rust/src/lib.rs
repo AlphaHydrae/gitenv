@@ -75,6 +75,12 @@ pub enum ProgramError {
         target: PathBuf,
         message: String,
     },
+    /// A file copy operation could not be completed while applying operations.
+    CopyFile {
+        source: PathBuf,
+        target: PathBuf,
+        message: String,
+    },
     /// The target's parent directory could not be created before apply.
     CreateTargetDirectory {
         path: PathBuf,
@@ -273,6 +279,18 @@ impl fmt::Display for ProgramError {
                     "cannot create symlink {} -> {} ({message})",
                     target.display(),
                     source.display(),
+                )
+            }
+            ProgramError::CopyFile {
+                source,
+                target,
+                message,
+            } => {
+                write!(
+                    f,
+                    "cannot copy file {} -> {} ({message})",
+                    source.display(),
+                    target.display(),
                 )
             }
             ProgramError::CreateTargetDirectory { path, message } => {
@@ -599,6 +617,15 @@ mod tests {
             }
             .to_string(),
             "cannot create symlink /home/.gitconfig -> /repo/.gitconfig (operation not permitted)"
+        );
+        assert_eq!(
+            ProgramError::CopyFile {
+                source: PathBuf::from("/repo/.gitconfig"),
+                target: PathBuf::from("/home/.gitconfig"),
+                message: "permission denied".to_string(),
+            }
+            .to_string(),
+            "cannot copy file /repo/.gitconfig -> /home/.gitconfig (permission denied)"
         );
         assert_eq!(
             ProgramError::CreateTargetDirectory {

@@ -15,6 +15,11 @@ documenting Rust migration increments for the gitenv project.
 - Reporting coverage before/after an increment
 - Proposing new increments when the backlog is exhausted
 
+## ⚠️ EXECUTION AND VERIFICATION MANDATE ⚠️
+
+🔴 **ALWAYS** consider the **EXECUTION AND VERIFICATION MANDATE** in `AGENTS.md`
+and any other relevant instructions in that file before doing any work.
+
 ## Increment planning
 
 Before starting an increment:
@@ -37,6 +42,8 @@ Before starting an increment:
 5. **Capture baseline coverage first** — For migration increments, run
    `./.agent/scripts/coverage.sh` before making code changes and record the
    total line coverage as the baseline for drop detection.
+
+   **🔴 DO NOT** edit tracked repository files before this baseline exists.
 
 ## Implementation
 
@@ -84,13 +91,22 @@ Run these checks from the repository root (in order):
    - Output captured in `tmp/agent/coverage_output.log`.
      - Default runs also write line-by-line annotated coverage to
        `tmp/agent/coverage_annotated.log`.
-     - If coverage decreases by ~0.25 percentage points or more, restore
-       coverage in the same increment before claiming completion.
-     - Deferring coverage recovery is acceptable only for intentionally
-       incomplete intermediate increments where the missing tests fit the next
-       already-planned increment, or when restoration requires significant
-       architectural refactoring that does not fit current scope and has been
-       explicitly discussed.
+   - If baseline was missed, recover it using a detached temporary worktree
+     under `tmp/agent/` at current `HEAD`, run coverage there, then remove the
+     temporary worktree.
+
+     **🔴 NEVER** use `git stash` in the active working tree for baseline
+     recovery.
+
+   - **🔴 DO NOT** provide completion status or a suggested commit message
+     unless baseline and current coverage are both captured and compared.
+   - If coverage decreases by ~0.25 percentage points or more, restore
+     coverage in the same increment **BEFORE** claiming completion.
+   - Deferring coverage recovery is acceptable only for intentionally
+     incomplete intermediate increments where the missing tests fit the next
+     already-planned increment, or when restoration requires significant
+     architectural refactoring that does not fit current scope and has been
+     explicitly discussed.
 
 5. **Documentation** — If any Markdown files changed:
    - `./.agent/scripts/lint-md.sh`
