@@ -11,6 +11,12 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-04: Expand status modeling for info and apply workflows - Generalize
+  status inspection to return typed per-operation outcomes for both symlink and
+  copy actions, compare copy source/target content via streamed hashes instead
+  of loading full files into memory, extend default inspection rendering to
+  support copy statuses, and keep apply outcomes aligned as structured
+  per-operation results.
 - 2026-05-03: Introduce copy apply execution with option parity - Execute
   copy operations in the apply path with `mkdir` and
   `skip`/`overwrite`/backup conflict semantics, return typed apply outcomes

@@ -21,7 +21,11 @@ pub use operation::{
     FileOperation, OperationAction, OperationPlan, derive_operation_plan,
     derive_operation_plan_with_injectables,
 };
-pub use status::{SymlinkInspection, SymlinkInspectionState, inspect_symlink_operation_status};
+pub use status::{
+    CopyInspection, CopyInspectionState, OperationInspectionOutcome, OperationInspectionReport,
+    SymlinkInspection, SymlinkInspectionState, inspect_operation_plan_status,
+    inspect_symlink_operation_status,
+};
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -166,22 +170,26 @@ fn default_config_path_from_env(
 fn render_default_inspection_output(
     operation_plan: &OperationPlan,
 ) -> Result<String, ProgramError> {
-    let mut lines = Vec::new();
-
-    for action in &operation_plan.actions {
-        match action {
-            OperationAction::Symlink(operation) => {
-                let inspection = inspect_symlink_operation_status(operation)?;
-                lines.push(render_symlink_inspection_line(&inspection));
-            }
-            OperationAction::Copy(_) => return Err(ProgramError::UnsupportedConfiguration),
-        }
-    }
+    let inspection_report = inspect_operation_plan_status(operation_plan)?;
+    let lines = inspection_report
+        .outcomes
+        .iter()
+        .map(render_operation_inspection_line)
+        .collect::<Vec<_>>();
 
     if lines.is_empty() {
         Ok("No operations to inspect.".to_string())
     } else {
         Ok(lines.join("\n"))
+    }
+}
+
+fn render_operation_inspection_line(outcome: &OperationInspectionOutcome) -> String {
+    match outcome {
+        OperationInspectionOutcome::Symlink(inspection) => {
+            render_symlink_inspection_line(inspection)
+        }
+        OperationInspectionOutcome::Copy(inspection) => render_copy_inspection_line(inspection),
     }
 }
 
@@ -197,6 +205,22 @@ fn render_symlink_inspection_line(inspection: &SymlinkInspection) -> String {
 
     format!(
         "{} -> {}   {}",
+        inspection.target.display(),
+        inspection.source.display(),
+        state
+    )
+}
+
+fn render_copy_inspection_line(inspection: &CopyInspection) -> String {
+    let state = match inspection.state {
+        CopyInspectionState::Ok => "ok",
+        CopyInspectionState::Missing => "not yet set up",
+        CopyInspectionState::NotAFile => "not a file",
+        CopyInspectionState::Differs => "differs from source",
+    };
+
+    format!(
+        "{} <- {}   {}",
         inspection.target.display(),
         inspection.source.display(),
         state
@@ -342,10 +366,11 @@ impl std::error::Error for ProgramError {}
 #[cfg(test)]
 mod tests {
     use super::{
-        ConflictPolicy, FileOperation, OperationAction, OperationPlan, ProgramError, ProgramOutput,
-        SymlinkInspection, SymlinkInspectionState, default_config_path_from_env,
-        default_config_path_from_inputs, render_default_inspection_output,
-        render_symlink_inspection_line, run_with_config_path,
+        ConflictPolicy, CopyInspection, CopyInspectionState, FileOperation, OperationAction,
+        OperationInspectionOutcome, OperationPlan, ProgramError, ProgramOutput, SymlinkInspection,
+        SymlinkInspectionState, default_config_path_from_env, default_config_path_from_inputs,
+        render_copy_inspection_line, render_default_inspection_output,
+        render_operation_inspection_line, render_symlink_inspection_line, run_with_config_path,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -397,6 +422,70 @@ mod tests {
     }
 
     #[test]
+    fn render_all_copy_status_lines() {
+        let ok_line = render_copy_inspection_line(&CopyInspection {
+            source: PathBuf::from("/repo/.zshrc"),
+            target: PathBuf::from("/home/.zshrc"),
+            state: CopyInspectionState::Ok,
+        });
+        let missing_line = render_copy_inspection_line(&CopyInspection {
+            source: PathBuf::from("/repo/.gitconfig"),
+            target: PathBuf::from("/home/.gitconfig"),
+            state: CopyInspectionState::Missing,
+        });
+        let not_a_file_line = render_copy_inspection_line(&CopyInspection {
+            source: PathBuf::from("/repo/.bashrc"),
+            target: PathBuf::from("/home/.bashrc"),
+            state: CopyInspectionState::NotAFile,
+        });
+        let differs_line = render_copy_inspection_line(&CopyInspection {
+            source: PathBuf::from("/repo/.vimrc"),
+            target: PathBuf::from("/home/.vimrc"),
+            state: CopyInspectionState::Differs,
+        });
+
+        assert_eq!(ok_line, "/home/.zshrc <- /repo/.zshrc   ok");
+        assert_eq!(
+            missing_line,
+            "/home/.gitconfig <- /repo/.gitconfig   not yet set up"
+        );
+        assert_eq!(
+            not_a_file_line,
+            "/home/.bashrc <- /repo/.bashrc   not a file"
+        );
+        assert_eq!(
+            differs_line,
+            "/home/.vimrc <- /repo/.vimrc   differs from source"
+        );
+    }
+
+    #[test]
+    fn render_operation_status_line_for_each_operation_kind() {
+        let symlink_line = render_operation_inspection_line(&OperationInspectionOutcome::Symlink(
+            SymlinkInspection {
+                source: PathBuf::from("/repo/.zshrc"),
+                target: PathBuf::from("/home/.zshrc"),
+                state: SymlinkInspectionState::Missing,
+            },
+        ));
+        let copy_line =
+            render_operation_inspection_line(&OperationInspectionOutcome::Copy(CopyInspection {
+                source: PathBuf::from("/repo/.gitconfig"),
+                target: PathBuf::from("/home/.gitconfig"),
+                state: CopyInspectionState::Missing,
+            }));
+
+        assert_eq!(
+            symlink_line,
+            "/home/.zshrc -> /repo/.zshrc   not yet set up"
+        );
+        assert_eq!(
+            copy_line,
+            "/home/.gitconfig <- /repo/.gitconfig   not yet set up"
+        );
+    }
+
+    #[test]
     fn render_no_operation_message_when_nothing_is_planned() {
         let output = render_default_inspection_output(&OperationPlan { actions: vec![] })
             .expect("empty operation plans should render a stable status message");
@@ -411,20 +500,32 @@ mod tests {
     }
 
     #[test]
-    fn reject_copy_operations_in_the_default_inspection_flow() {
+    fn inspect_copy_operations_in_the_default_inspection_flow() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source = temp.path().join("source.txt");
+        let target = temp.path().join("target.txt");
+        fs::write(&source, "source\n").expect("source file should be written");
+
         let operation_plan = OperationPlan {
             actions: vec![OperationAction::Copy(FileOperation {
-                source: PathBuf::from("/repo/.gitconfig"),
-                target: PathBuf::from("/home/.gitconfig"),
+                source: source.clone(),
+                target: target.clone(),
                 mkdir: true,
                 conflict_policy: ConflictPolicy::Skip,
             })],
         };
 
-        let error = render_default_inspection_output(&operation_plan)
-            .expect_err("copy operations are not yet supported in default inspection");
+        let output = render_default_inspection_output(&operation_plan)
+            .expect("copy operations should render deterministic inspection output");
 
-        assert_eq!(error, ProgramError::UnsupportedConfiguration);
+        assert_eq!(
+            output,
+            format!(
+                "{} <- {}   not yet set up",
+                target.display(),
+                source.display(),
+            )
+        );
     }
 
     #[test]

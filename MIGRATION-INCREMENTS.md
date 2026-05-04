@@ -41,19 +41,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 22: Expand status modeling for info and apply workflows
-
-Why this increment exists:
-
-- Status modeling currently centers on symlink inspection only.
-- Broader status modeling is needed before full info/apply CLI parity.
-
-Review target:
-
-- Generalize structured status/output models beyond symlink inspection.
-- Ensure info/apply surfaces can report typed per-operation outcomes for
-  symlink and copy actions.
-
 ### Increment 23: Add explicit CLI command parsing for info and apply
 
 Why this increment exists:
