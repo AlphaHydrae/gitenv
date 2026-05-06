@@ -19,8 +19,8 @@ other gaps in the increment scope. If the follow-up is a discrete task, create
 a new increment with a clear scope and review target. If the follow-up is more
 open-ended, add inline TODO comments in the relevant code and consider adding a
 note in the next increment that explicitly references the TODOs to ensure they
-are not forgotten. Treat a drop of about 0.25 percentage points or more as
-significant unless there is a stronger project-specific reason.
+are not forgotten. Do not add new uncovered code, or cause a coverage drop in
+code modified by the current increment, without explicit human approval.
 
 ## Documentation
 
@@ -40,19 +40,6 @@ Architectural and design decisions referenced by active increments:
 - [Output boundary: domain data vs CLI rendering](./ARCHITECTURE.md#output-boundary-domain-data-vs-cli-rendering)
 
 ## Current Backlog
-
-### Increment 23: Add explicit CLI command parsing for info and apply
-
-Why this increment exists:
-
-- The CLI is currently default-path inspection only.
-- Command-level parity requires explicit `info` and `apply` entry points.
-
-Review target:
-
-- Replace implicit default-only flow with a thin CLI adapter that maps `info`
-  and `apply` commands directly to library APIs.
-- Keep deterministic error rendering.
 
 ### Increment 24: Add logging controls and finalize CLI UX parity
 

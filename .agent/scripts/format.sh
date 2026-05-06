@@ -2,11 +2,8 @@
 #
 # Run Rust formatting and capture output to "tmp/agent/format_output.log".
 #
-# By default, applies formatting changes. Use --check to check without modifying.
-#
 # Usage:
-#   .agent/scripts/format.sh          # apply formatting changes
-#   .agent/scripts/format.sh --check  # check formatting without modifying
+#   .agent/scripts/format.sh  # apply formatting changes
 #
 # Output is written to: "tmp/agent/format_output.log".
 # Exit code matches cargo fmt's exit code.
@@ -35,14 +32,15 @@ fi
 
 cd "$RUST_WORKSPACE"
 
-set +e
-if [[ "${1:-}" == "--check" ]]; then
-  echo "Running: cargo fmt -- --check" | tee "$OUTPUT_LOG"
-  cargo fmt -- --check 2>&1 | tee -a "$OUTPUT_LOG"
-else
-  echo "Running: cargo fmt" | tee "$OUTPUT_LOG"
-  cargo fmt 2>&1 | tee -a "$OUTPUT_LOG"
+if [[ "$#" -ne 0 ]]; then
+  echo "Usage: .agent/scripts/format.sh" | tee "$OUTPUT_LOG"
+  echo "Error: do not use --check with this agent wrapper; run '.agent/scripts/format.sh' without arguments to apply formatting." | tee -a "$OUTPUT_LOG"
+  exit 2
 fi
+
+set +e
+echo "Running: cargo fmt" | tee "$OUTPUT_LOG"
+cargo fmt 2>&1 | tee -a "$OUTPUT_LOG"
 
 EXIT_CODE=${PIPESTATUS[0]}
 set -e

@@ -1,5 +1,5 @@
 fn main() {
-    match gitenv::run() {
+    match gitenv::run_cli() {
         Ok(output) => println!("{}", output.message),
         Err(error) => {
             eprintln!("gitenv: {error}");

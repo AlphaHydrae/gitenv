@@ -605,11 +605,8 @@ mod tests {
 
         let operation_plan =
             derive_operation_plan_with_injectables(&intent_plan, home.path(), &|path| {
-                if path == config_source.as_path() {
-                    Ok(vec![".nvim".to_string(), ".tmux".to_string()])
-                } else {
-                    Ok(Vec::new())
-                }
+                assert_eq!(path, config_source.as_path());
+                Ok(vec![".nvim".to_string(), ".tmux".to_string()])
             })
             .expect("operation planning should combine actions from multiple sources");
 

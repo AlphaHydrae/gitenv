@@ -10,6 +10,14 @@
     },
   ],
   "settings": {
+    "chat.tools.terminal.autoApprove": {
+      "/^\\s*(?:bash +)?(?:\\.\\/)?\\.agent\\/scripts\\/(?:build|coverage|format|lint|lint-md|tests)\\.sh\\s*$/": {
+        "approve": true,
+        "matchCommandLine": true,
+      },
+    },
+    "chat.tools.terminal.enableAutoApprove": true,
+    "chat.tools.terminal.ignoreDefaultAutoApproveRules": true,
     "rust-analyzer.linkedProjects": ["rust/Cargo.toml"],
   },
 }

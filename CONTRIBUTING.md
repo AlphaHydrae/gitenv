@@ -85,6 +85,12 @@ Business modules must not print directly to terminal output.
 - Treat coverage as a signal, not a substitute for assertion quality.
 - Include parity tests for equivalent library and CLI workflows.
 - Include logging tests for level filtering and expected diagnostic visibility.
+- **Prefer unit tests over integration tests.** Unit tests (in `#[cfg(test)] mod
+tests` within source files) are faster, more precise, and easier to maintain.
+  Use integration tests in `tests/` only for behavior that genuinely requires
+  running the compiled binary as a subprocess — exit codes, the stderr/stdout
+  boundary, and binary linking. Output content and command dispatch logic belong
+  in unit tests.
 
 ### Test naming style
 
@@ -138,9 +144,7 @@ Apply checks that match your change scope.
 3. Run linting checks.
 4. Run build checks.
 5. Run documentation lint checks when Markdown files changed.
-6. Run formatting using write mode by default (`./.agent/scripts/format.sh`).
-   Use check mode only when explicitly requested or when diagnosing formatting
-   without modifying files.
+6. Run formatting.
 7. Run coverage for code changes. Avoid significant coverage drops.
 
 ## Setup

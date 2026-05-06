@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-06: Add explicit CLI command parsing for info and apply - Add clap
+  dependency with derive macro support, introduce `info` and `apply`
+  subcommands, implement command dispatch in main.rs, add render_apply_output to
+  show operation outcomes.
 - 2026-05-04: Expand status modeling for info and apply workflows - Generalize
   status inspection to return typed per-operation outcomes for both symlink and
   copy actions, compare copy source/target content via streamed hashes instead

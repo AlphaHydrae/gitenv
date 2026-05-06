@@ -82,10 +82,7 @@ them to EVERY task, EVERY time.**
   - Always run `./.agent/scripts/lint.sh` for source changes.
   - Always run `./.agent/scripts/lint-md.sh` for documentation changes.
   - Always run `./.agent/scripts/build.sh` to verify compilation.
-  - Always run `./.agent/scripts/format.sh` in write mode for formatting
-    verification.
-  - Use `./.agent/scripts/format.sh --check` only when explicitly requested by
-    a human or when diagnosing formatting-only issues without applying changes.
+  - Always run `./.agent/scripts/format.sh` for formatting verification.
   - For migration increments, always run `./.agent/scripts/coverage.sh` again
     after changes and report both previous and current coverage.
   - If you realize baseline was missed after edits started, stop completion
@@ -99,12 +96,16 @@ them to EVERY task, EVERY time.**
     - **🔴 NEVER use `git stash` or any in-place branch/worktree mutation in the
       active working tree to reconstruct baseline coverage.** This can disrupt
       human review context and changed-file visibility.
-  - If coverage decreases significantly, **do not consider the increment
-    complete.** Restore coverage before claiming completion. A coverage drop
+  - If coverage decreases, **do not consider the increment complete.** Restore
+    coverage before claiming completion. Do not add any new uncovered code, or
+    cause a coverage drop in code you modified, without explicit human approval.
+    After implementing a feature, analyze any drop: if it is trivially coverable
+    with unit tests, add them; if the code can be restructured for better
+    testability without excess complexity, do so and explain; only ask for
+    approval if a drop is genuinely warranted by the design. A coverage drop
     caused by new code in the current increment means the tests for that code
     are missing — adding those tests is part of the increment, not a separate
-    follow-up. Treat a drop of about 0.25 percentage points or more as
-    significant unless there is a stronger project-specific reason.
+    follow-up.
   - There are two narrow situations where scheduling coverage recovery in a
     separate increment is acceptable: (1) the increment is an intentionally
     incomplete intermediate step toward a larger feature, and the missing tests

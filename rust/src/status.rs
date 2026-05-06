@@ -235,12 +235,16 @@ mod tests {
     use super::{
         CopyInspection, CopyInspectionState, CopyTargetKind, OperationInspectionOutcome,
         OperationInspectionReport, SymlinkInspection, SymlinkInspectionState, TargetKind,
-        hash_file_contents_from_filesystem, inspect_copy_operation_status,
-        inspect_copy_operation_status_with_injectables, inspect_operation_plan_status,
-        inspect_symlink_operation_status, inspect_symlink_operation_status_with_injectables,
+        copy_target_kind_from_filesystem, hash_file_contents_from_filesystem,
+        inspect_copy_operation_status, inspect_copy_operation_status_with_injectables,
+        inspect_operation_plan_status, inspect_symlink_operation_status,
+        inspect_symlink_operation_status_with_injectables, read_symlink_target_from_filesystem,
+        target_kind_from_filesystem,
     };
     use crate::{ConflictPolicy, FileOperation, OperationAction, OperationPlan, ProgramError};
     use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     #[cfg(unix)]
     use std::os::unix::fs::symlink;
     use std::path::PathBuf;
@@ -370,7 +374,7 @@ mod tests {
                     message: "permission denied".to_string(),
                 })
             },
-            &|_| Ok(PathBuf::from("unused")),
+            &read_symlink_target_from_filesystem,
         )
         .expect_err("metadata failures should be propagated");
 
@@ -569,13 +573,89 @@ mod tests {
         let error = hash_file_contents_from_filesystem(&missing)
             .expect_err("missing files should fail during hash open");
 
-        match error {
-            ProgramError::InspectPathMetadata { path, message } => {
-                assert_eq!(path, missing);
-                assert!(!message.is_empty());
-            }
-            other => panic!("expected inspect-path-metadata error, got {other:?}"),
-        }
+        assert!(matches!(
+            &error,
+            ProgramError::InspectPathMetadata { path, message }
+                if path == &missing && !message.is_empty()
+        ));
+    }
+
+    #[test]
+    fn report_read_symlink_target_errors_for_missing_paths() {
+        let missing = PathBuf::from("/path/that/does/not/exist");
+
+        let error = read_symlink_target_from_filesystem(&missing)
+            .expect_err("missing paths should fail during symlink target reads");
+
+        assert!(matches!(
+            &error,
+            ProgramError::ReadSymlinkTarget { path, message }
+                if path == &missing && !message.is_empty()
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn report_symlink_kind_metadata_errors_when_parent_directory_is_not_accessible() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let locked_directory = temp.path().join("locked");
+        fs::create_dir_all(&locked_directory).expect("locked directory should be created");
+        let target = locked_directory.join("target.txt");
+
+        let mut permissions = fs::metadata(&locked_directory)
+            .expect("locked directory metadata should be readable")
+            .permissions();
+        permissions.set_mode(0o000);
+        fs::set_permissions(&locked_directory, permissions)
+            .expect("locked directory should be set to inaccessible");
+
+        let error = target_kind_from_filesystem(&target)
+            .expect_err("metadata probes should fail for inaccessible directory entries");
+
+        let mut restore_permissions = fs::metadata(&locked_directory)
+            .expect("locked directory metadata should be readable")
+            .permissions();
+        restore_permissions.set_mode(0o700);
+        fs::set_permissions(&locked_directory, restore_permissions)
+            .expect("locked directory permissions should be restored");
+
+        assert!(matches!(
+            &error,
+            ProgramError::InspectPathMetadata { path, message }
+                if path == &target && !message.is_empty()
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn report_copy_kind_metadata_errors_when_parent_directory_is_not_accessible() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let locked_directory = temp.path().join("locked");
+        fs::create_dir_all(&locked_directory).expect("locked directory should be created");
+        let target = locked_directory.join("target.txt");
+
+        let mut permissions = fs::metadata(&locked_directory)
+            .expect("locked directory metadata should be readable")
+            .permissions();
+        permissions.set_mode(0o000);
+        fs::set_permissions(&locked_directory, permissions)
+            .expect("locked directory should be set to inaccessible");
+
+        let error = copy_target_kind_from_filesystem(&target)
+            .expect_err("metadata probes should fail for inaccessible directory entries");
+
+        let mut restore_permissions = fs::metadata(&locked_directory)
+            .expect("locked directory metadata should be readable")
+            .permissions();
+        restore_permissions.set_mode(0o700);
+        fs::set_permissions(&locked_directory, restore_permissions)
+            .expect("locked directory permissions should be restored");
+
+        assert!(matches!(
+            &error,
+            ProgramError::InspectPathMetadata { path, message }
+                if path == &target && !message.is_empty()
+        ));
     }
 
     #[cfg(unix)]
@@ -588,12 +668,10 @@ mod tests {
         let error = hash_file_contents_from_filesystem(&directory)
             .expect_err("directory paths should fail during hash read");
 
-        match error {
-            ProgramError::InspectPathMetadata { path, message } => {
-                assert_eq!(path, directory);
-                assert!(!message.is_empty());
-            }
-            other => panic!("expected inspect-path-metadata error, got {other:?}"),
-        }
+        assert!(matches!(
+            &error,
+            ProgramError::InspectPathMetadata { path, message }
+                if path == &directory && !message.is_empty()
+        ));
     }
 }

@@ -274,12 +274,10 @@ mod tests {
         let error = ensure_parent_directory_exists(&nested_target)
             .expect_err("mkdir should fail when parent path is a file");
 
-        match error {
-            ProgramError::CreateTargetDirectory { path, .. } => {
-                assert_eq!(path, parent_file);
-            }
-            other => panic!("expected create-target-directory error, got {other:?}"),
-        }
+        assert!(matches!(
+            &error,
+            ProgramError::CreateTargetDirectory { path, .. } if path == &parent_file
+        ));
     }
 
     #[test]
@@ -289,10 +287,10 @@ mod tests {
         let error = remove_target_path(&missing)
             .expect_err("remove should fail when target metadata cannot be read");
 
-        match error {
-            ProgramError::RemoveTarget { path, .. } => assert_eq!(path, missing),
-            other => panic!("expected remove-target error, got {other:?}"),
-        }
+        assert!(matches!(
+            &error,
+            ProgramError::RemoveTarget { path, .. } if path == &missing
+        ));
     }
 
     #[test]
@@ -306,10 +304,10 @@ mod tests {
         let error = remove_target_path(&target_directory)
             .expect_err("remove should fail for non-empty directories");
 
-        match error {
-            ProgramError::RemoveTarget { path, .. } => assert_eq!(path, target_directory),
-            other => panic!("expected remove-target error, got {other:?}"),
-        }
+        assert!(matches!(
+            &error,
+            ProgramError::RemoveTarget { path, .. } if path == &target_directory
+        ));
     }
 
     #[cfg(unix)]
@@ -338,10 +336,10 @@ mod tests {
         fs::set_permissions(&protected_directory, restore_permissions)
             .expect("protected directory permissions should be restored");
 
-        match error {
-            ProgramError::RemoveTarget { path, .. } => assert_eq!(path, target_file),
-            other => panic!("expected remove-target error, got {other:?}"),
-        }
+        assert!(matches!(
+            &error,
+            ProgramError::RemoveTarget { path, .. } if path == &target_file
+        ));
     }
 
     #[test]
@@ -353,15 +351,14 @@ mod tests {
         let error = move_target_to_backup(&target, &backup)
             .expect_err("backup move should fail when the source target is missing");
 
-        match error {
+        assert!(matches!(
+            &error,
             ProgramError::BackupTarget {
-                path, backup_path, ..
-            } => {
-                assert_eq!(path, target);
-                assert_eq!(backup_path, backup);
-            }
-            other => panic!("expected backup-target error, got {other:?}"),
-        }
+                path,
+                backup_path,
+                ..
+            } if path == &target && backup_path == &backup
+        ));
     }
 
     #[cfg(unix)]
@@ -389,10 +386,10 @@ mod tests {
         fs::set_permissions(&locked_directory, restore_permissions)
             .expect("locked directory permissions should be restored");
 
-        match error {
-            ProgramError::InspectPathMetadata { path, .. } => assert_eq!(path, target),
-            other => panic!("expected inspect-path-metadata error, got {other:?}"),
-        }
+        assert!(matches!(
+            &error,
+            ProgramError::InspectPathMetadata { path, .. } if path == &target
+        ));
     }
 
     #[test]
@@ -412,7 +409,7 @@ mod tests {
                     message: "permission denied".to_string(),
                 })
             },
-            &|_, _| Ok(()),
+            &super::create_symlink_on_filesystem,
         )
         .expect_err("apply should propagate target probe failures");
 
@@ -440,12 +437,11 @@ mod tests {
             apply_operation_plan_with_injectables(&operation_plan, &|_| Ok(false), &|_, _| Ok(()))
                 .expect_err("copy actions should fail when copy creation cannot run");
 
-        match error {
-            ProgramError::CopyFile { source, target, .. } => {
-                assert_eq!(source, PathBuf::from("/repo/source"));
-                assert_eq!(target, PathBuf::from("/home/target"));
-            }
-            other => panic!("expected copy-file error, got {other:?}"),
-        }
+        assert!(matches!(
+            &error,
+            ProgramError::CopyFile { source, target, .. }
+                if source == &PathBuf::from("/repo/source")
+                    && target == &PathBuf::from("/home/target")
+        ));
     }
 }

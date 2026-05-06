@@ -147,8 +147,10 @@ Run these checks from the repository root (in order):
 
    - **🔴 DO NOT** provide completion status or a suggested commit message
      unless baseline and current coverage are both captured and compared.
-   - If coverage decreases by ~0.25 percentage points or more, restore
-     coverage in the same increment **BEFORE** claiming completion.
+   - If coverage decreases, restore coverage in the same increment **BEFORE**
+     claiming completion.
+   - Do not add new uncovered code, or cause a coverage drop in code modified
+     by the current increment, without explicit human approval.
    - Deferring coverage recovery is acceptable only for intentionally
      incomplete intermediate increments where the missing tests fit the next
      already-planned increment, or when restoration requires significant
@@ -204,7 +206,8 @@ See commit message expectations in `AGENTS.md` for full guidance.
 
 - **Coverage drop without recovery** — Do not close the increment until
   coverage is restored or an explicit defer decision is recorded with reason.
-  Treat ~0.25pp or more as significant.
+  Do not add new uncovered code in modified paths without explicit human
+  approval.
 
 - **Test name unclear** — Re-read spec description style in `CONTRIBUTING.md`
   and rename. Test names are behavioral documentation.

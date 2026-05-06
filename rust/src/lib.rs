@@ -1,8 +1,11 @@
 mod actions;
+mod cli;
 mod config;
 mod intent;
 mod operation;
 mod status;
+
+pub use cli::{Cli, Command, dispatch};
 
 pub use actions::{
     ApplyOperationOutcome, ApplyOperationReport, apply_operation_plan,
@@ -114,9 +117,23 @@ const DEFAULT_CONFIG_HOME_SUFFIX: &str = ".config";
 const DEFAULT_CONFIG_DIRECTORY_NAME: &str = "gitenv";
 const DEFAULT_CONFIG_FILE_NAME: &str = "config.yml";
 
-pub fn run() -> Result<ProgramOutput, ProgramError> {
-    let config_path = default_config_path()?;
-    run_with_config_path(&config_path)
+/// Parse CLI arguments and dispatch to the appropriate library function.
+///
+/// This is the main entry point for the binary.
+pub fn run_cli() -> Result<ProgramOutput, ProgramError> {
+    run_cli_with_args(std::env::args_os())
+}
+
+/// Parse injected CLI arguments and dispatch to the appropriate library function.
+///
+/// This keeps command-line parsing testable without mutating process args.
+pub fn run_cli_with_args<I, T>(args: I) -> Result<ProgramOutput, ProgramError>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+{
+    use clap::Parser;
+    cli::dispatch(Cli::parse_from(args))
 }
 
 fn run_with_config_path(config_path: &Path) -> Result<ProgramOutput, ProgramError> {
@@ -126,6 +143,45 @@ fn run_with_config_path(config_path: &Path) -> Result<ProgramOutput, ProgramErro
 
     Ok(ProgramOutput {
         message: render_default_inspection_output(&operation_plan)?,
+    })
+}
+
+/// Run the info command (status inspection for all operations).
+pub fn run_info() -> Result<ProgramOutput, ProgramError> {
+    run_info_from_env(default_config_path)
+}
+
+/// Like `run_info` but accepts an injectable config-path resolver for tests.
+pub(crate) fn run_info_from_env(
+    get_config_path: impl FnOnce() -> Result<PathBuf, ProgramError>,
+) -> Result<ProgramOutput, ProgramError> {
+    let config_path = get_config_path()?;
+    run_with_config_path(&config_path)
+}
+
+/// Run the apply command (execute all operations).
+pub fn run_apply() -> Result<ProgramOutput, ProgramError> {
+    run_apply_from_env(default_config_path)
+}
+
+/// Like `run_apply` but accepts an injectable config-path resolver for tests.
+pub(crate) fn run_apply_from_env(
+    get_config_path: impl FnOnce() -> Result<PathBuf, ProgramError>,
+) -> Result<ProgramOutput, ProgramError> {
+    let config_path = get_config_path()?;
+    run_apply_with_config_path(&config_path)
+}
+
+fn run_apply_with_config_path(config_path: &Path) -> Result<ProgramOutput, ProgramError> {
+    let config = load_config(config_path)?;
+    let intent_plan = derive_intent_plan(&config)?;
+    let operation_plan = derive_operation_plan(&intent_plan)?;
+
+    let apply_report = apply_operation_plan(&operation_plan)?;
+    let output_message = render_apply_output(&apply_report)?;
+
+    Ok(ProgramOutput {
+        message: output_message,
     })
 }
 
@@ -225,6 +281,61 @@ fn render_copy_inspection_line(inspection: &CopyInspection) -> String {
         inspection.source.display(),
         state
     )
+}
+
+fn render_apply_output(apply_report: &ApplyOperationReport) -> Result<String, ProgramError> {
+    let lines = apply_report
+        .outcomes
+        .iter()
+        .map(render_apply_outcome_line)
+        .collect::<Vec<_>>();
+
+    if lines.is_empty() {
+        Ok("No operations to apply.".to_string())
+    } else {
+        Ok(lines.join("\n"))
+    }
+}
+
+fn render_apply_outcome_line(outcome: &ApplyOperationOutcome) -> String {
+    match outcome {
+        ApplyOperationOutcome::Applied(action) => match action {
+            OperationAction::Symlink(op) => {
+                format!(
+                    "created symlink {} -> {}",
+                    op.target.display(),
+                    op.source.display()
+                )
+            }
+            OperationAction::Copy(op) => {
+                format!("copied {} to {}", op.source.display(), op.target.display())
+            }
+        },
+        ApplyOperationOutcome::SkippedExistingTarget(action) => match action {
+            OperationAction::Symlink(op) => {
+                format!("skipped symlink {} (already exists)", op.target.display())
+            }
+            OperationAction::Copy(op) => {
+                format!("skipped copy {} (already exists)", op.target.display())
+            }
+        },
+        ApplyOperationOutcome::UnsupportedOperation(action) => match action {
+            OperationAction::Symlink(op) => {
+                format!(
+                    "unsupported: symlink {} -> {}",
+                    op.target.display(),
+                    op.source.display()
+                )
+            }
+            OperationAction::Copy(op) => {
+                format!(
+                    "unsupported: copy {} to {}",
+                    op.source.display(),
+                    op.target.display()
+                )
+            }
+        },
+    }
 }
 
 impl fmt::Display for ProgramError {
@@ -366,11 +477,13 @@ impl std::error::Error for ProgramError {}
 #[cfg(test)]
 mod tests {
     use super::{
-        ConflictPolicy, CopyInspection, CopyInspectionState, FileOperation, OperationAction,
-        OperationInspectionOutcome, OperationPlan, ProgramError, ProgramOutput, SymlinkInspection,
-        SymlinkInspectionState, default_config_path_from_env, default_config_path_from_inputs,
+        ApplyOperationOutcome, ConflictPolicy, CopyInspection, CopyInspectionState, FileOperation,
+        OperationAction, OperationInspectionOutcome, OperationPlan, ProgramError, ProgramOutput,
+        SymlinkInspection, SymlinkInspectionState, default_config_path_from_env,
+        default_config_path_from_inputs, render_apply_outcome_line, render_apply_output,
         render_copy_inspection_line, render_default_inspection_output,
-        render_operation_inspection_line, render_symlink_inspection_line, run_with_config_path,
+        render_operation_inspection_line, render_symlink_inspection_line, run_apply_from_env,
+        run_apply_with_config_path, run_info_from_env, run_with_config_path,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -577,7 +690,7 @@ mod tests {
     }
 
     #[test]
-    fn show_default_inspection_output_for_a_missing_symlink_with_explicit_config_path() {
+    fn show_default_inspection_output_for_a_missing_symlink() {
         let home = TempDir::new().expect("temporary home directory should be created");
         let repository = TempDir::new().expect("temporary repository should be created");
         fs::write(repository.path().join(".gitconfig"), "[user]\n")
@@ -611,7 +724,7 @@ mod tests {
     }
 
     #[test]
-    fn show_setup_guidance_with_the_configured_config_path_when_file_is_missing() {
+    fn show_setup_guidance_when_file_is_missing() {
         let missing_path = PathBuf::from("/tmp/custom-gitenv.yml");
 
         let error = run_with_config_path(&missing_path)
@@ -621,6 +734,213 @@ mod tests {
         assert!(rendered.contains("cannot read config at /tmp/custom-gitenv.yml ("));
         assert!(rendered.contains("Config file locations"));
         assert!(rendered.contains("$GITENV_CONFIG (if set)"));
+    }
+
+    #[test]
+    fn show_apply_output_for_a_missing_symlink() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::write(repository.path().join(".gitconfig"), "[user]\n")
+            .expect("source file should be written");
+
+        let config = format!(
+            concat!(
+                "version: 1\n",
+                "repository: \"{}\"\n",
+                "sources:\n",
+                "  - from: \".\"\n",
+                "    to: \"{}\"\n",
+                "    configs:\n",
+                "      - file: .gitconfig\n"
+            ),
+            repository.path().display(),
+            home.path().display()
+        );
+        let config_path = home.path().join("config.yml");
+        fs::write(&config_path, config).expect("config file should be written");
+
+        let output = run_apply_with_config_path(&config_path)
+            .expect("explicit config path should produce apply output");
+
+        let expected = format!(
+            "created symlink {} -> {}",
+            home.path().join(".gitconfig").display(),
+            repository.path().join(".").join(".gitconfig").display()
+        );
+        assert_eq!(output.message, expected);
+    }
+
+    #[test]
+    fn show_default_inspection_output() {
+        // Verifies the env-injection path of run_info() by supplying a known
+        // config path directly, without touching process environment variables.
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::write(repository.path().join(".profile"), "# profile\n")
+            .expect("source file should be written");
+
+        let config = format!(
+            concat!(
+                "version: 1\n",
+                "repository: \"{}\"\n",
+                "sources:\n",
+                "  - from: \".\"\n",
+                "    to: \"{}\"\n",
+                "    configs:\n",
+                "      - file: .profile\n"
+            ),
+            repository.path().display(),
+            home.path().display()
+        );
+        let config_path = home.path().join("gitenv.yml");
+        fs::write(&config_path, config).expect("config file should be written");
+
+        let output = run_info_from_env(|| Ok(config_path))
+            .expect("run_info_from_env should succeed with injected config path");
+
+        let expected = format!(
+            "{} -> {}   not yet set up",
+            home.path().join(".profile").display(),
+            repository.path().join(".").join(".profile").display()
+        );
+        assert_eq!(output.message, expected);
+    }
+
+    #[test]
+    fn show_apply_output() {
+        // Verifies the env-injection path of run_apply() by supplying a known
+        // config path directly, without touching process environment variables.
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::write(repository.path().join(".profile"), "# profile\n")
+            .expect("source file should be written");
+
+        let config = format!(
+            concat!(
+                "version: 1\n",
+                "repository: \"{}\"\n",
+                "sources:\n",
+                "  - from: \".\"\n",
+                "    to: \"{}\"\n",
+                "    configs:\n",
+                "      - file: .profile\n"
+            ),
+            repository.path().display(),
+            home.path().display()
+        );
+        let config_path = home.path().join("gitenv.yml");
+        fs::write(&config_path, config).expect("config file should be written");
+
+        let output = run_apply_from_env(|| Ok(config_path))
+            .expect("run_apply_from_env should succeed with injected config path");
+
+        let expected = format!(
+            "created symlink {} -> {}",
+            home.path().join(".profile").display(),
+            repository.path().join(".").join(".profile").display()
+        );
+        assert_eq!(output.message, expected);
+    }
+
+    #[test]
+    fn show_no_operations_to_apply_message_when_outcomes_are_empty() {
+        let report = super::ApplyOperationReport { outcomes: vec![] };
+
+        let output = render_apply_output(&report)
+            .expect("empty apply report should render a stable message");
+
+        assert_eq!(output, "No operations to apply.");
+    }
+
+    #[test]
+    fn show_applied_operation_lines_for_symlink_and_copy_actions() {
+        let symlink_op = FileOperation {
+            source: PathBuf::from("/repo/.zshrc"),
+            target: PathBuf::from("/home/.zshrc"),
+            mkdir: false,
+            conflict_policy: ConflictPolicy::Skip,
+        };
+        let copy_op = FileOperation {
+            source: PathBuf::from("/repo/config.txt"),
+            target: PathBuf::from("/home/config.txt"),
+            mkdir: false,
+            conflict_policy: ConflictPolicy::Skip,
+        };
+
+        let symlink_line = render_apply_outcome_line(&ApplyOperationOutcome::Applied(
+            OperationAction::Symlink(symlink_op.clone()),
+        ));
+        let copy_line = render_apply_outcome_line(&ApplyOperationOutcome::Applied(
+            OperationAction::Copy(copy_op.clone()),
+        ));
+
+        assert_eq!(symlink_line, "created symlink /home/.zshrc -> /repo/.zshrc");
+        assert_eq!(copy_line, "copied /repo/config.txt to /home/config.txt");
+    }
+
+    #[test]
+    fn show_skipped_operation_lines_for_symlink_and_copy_actions() {
+        let symlink_op = FileOperation {
+            source: PathBuf::from("/repo/.zshrc"),
+            target: PathBuf::from("/home/.zshrc"),
+            mkdir: false,
+            conflict_policy: ConflictPolicy::Skip,
+        };
+        let copy_op = FileOperation {
+            source: PathBuf::from("/repo/config.txt"),
+            target: PathBuf::from("/home/config.txt"),
+            mkdir: false,
+            conflict_policy: ConflictPolicy::Skip,
+        };
+
+        let symlink_line =
+            render_apply_outcome_line(&ApplyOperationOutcome::SkippedExistingTarget(
+                OperationAction::Symlink(symlink_op.clone()),
+            ));
+        let copy_line = render_apply_outcome_line(&ApplyOperationOutcome::SkippedExistingTarget(
+            OperationAction::Copy(copy_op.clone()),
+        ));
+
+        assert_eq!(
+            symlink_line,
+            "skipped symlink /home/.zshrc (already exists)"
+        );
+        assert_eq!(copy_line, "skipped copy /home/config.txt (already exists)");
+    }
+
+    #[test]
+    fn show_unsupported_operation_lines_for_symlink_and_copy_actions() {
+        // UnsupportedOperation is a reserved variant in the public API for
+        // future use; it is never generated by the current executor but the
+        // renderer must handle it for exhaustive match completeness.
+        let symlink_op = FileOperation {
+            source: PathBuf::from("/repo/.zshrc"),
+            target: PathBuf::from("/home/.zshrc"),
+            mkdir: false,
+            conflict_policy: ConflictPolicy::Skip,
+        };
+        let copy_op = FileOperation {
+            source: PathBuf::from("/repo/config.txt"),
+            target: PathBuf::from("/home/config.txt"),
+            mkdir: false,
+            conflict_policy: ConflictPolicy::Skip,
+        };
+
+        let symlink_line = render_apply_outcome_line(&ApplyOperationOutcome::UnsupportedOperation(
+            OperationAction::Symlink(symlink_op.clone()),
+        ));
+        let copy_line = render_apply_outcome_line(&ApplyOperationOutcome::UnsupportedOperation(
+            OperationAction::Copy(copy_op.clone()),
+        ));
+
+        assert_eq!(
+            symlink_line,
+            "unsupported: symlink /home/.zshrc -> /repo/.zshrc"
+        );
+        assert_eq!(
+            copy_line,
+            "unsupported: copy /repo/config.txt to /home/config.txt"
+        );
     }
 
     #[test]
