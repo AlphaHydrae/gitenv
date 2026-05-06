@@ -266,9 +266,9 @@ Current status:
 
 - [x] A read-only symlink inspection slice exists and is wired into the
       default CLI inspection flow.
-- [ ] No filesystem mutation executor exists yet for symlink or copy
-      operations, so apply semantics (including overwrite/backup/mkdir
-      behavior) are still pending.
+- [x] Filesystem mutation executors exist for symlink and copy operations,
+      including `mkdir` and conflict-policy behavior (`skip`, overwrite, and
+      backup-on-overwrite).
 
 Exit criteria:
 
@@ -286,10 +286,12 @@ Exit criteria:
 
 Current status:
 
-- [x] The CLI currently supports the default no-arg inspection path and
-      prints setup guidance when config loading fails.
-- [ ] Explicit `info`/`apply` command parsing, colorized rendering parity,
-      and configurable logging controls are still pending.
+- [x] The CLI supports the default no-arg inspection path and explicit
+      `info`/`apply` commands, and prints setup guidance when config loading
+      fails.
+- [x] Primary inspection/apply status states are colorized for terminal output
+      and remain plain in non-terminal contexts.
+- [ ] Configurable logging controls for CLI and library APIs are still pending.
 
 Exit criteria:
 

@@ -41,7 +41,7 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 24: Add logging controls and finalize CLI UX parity
+### Increment 25: Add logging controls and finalize CLI UX parity
 
 Why this increment exists:
 
@@ -51,6 +51,5 @@ Why this increment exists:
 Review target:
 
 - Introduce a `logging` module and CLI/API log-level controls.
-- Add colorized renderer coverage for primary status states.
 - Update README examples/tests so Phase 3 exit criteria are directly
   verifiable.

@@ -31,7 +31,14 @@ pub use status::{
 };
 
 use std::fmt;
+#[cfg(not(test))]
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
+
+const ANSI_RESET: &str = "\x1b[0m";
+const ANSI_GREEN: &str = "\x1b[32m";
+const ANSI_YELLOW: &str = "\x1b[33m";
+const ANSI_RED: &str = "\x1b[31m";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProgramOutput {
@@ -226,11 +233,12 @@ fn default_config_path_from_env(
 fn render_default_inspection_output(
     operation_plan: &OperationPlan,
 ) -> Result<String, ProgramError> {
+    let use_color = should_use_color();
     let inspection_report = inspect_operation_plan_status(operation_plan)?;
     let lines = inspection_report
         .outcomes
         .iter()
-        .map(render_operation_inspection_line)
+        .map(|outcome| render_operation_inspection_line_with_color(outcome, use_color))
         .collect::<Vec<_>>();
 
     if lines.is_empty() {
@@ -240,23 +248,33 @@ fn render_default_inspection_output(
     }
 }
 
-fn render_operation_inspection_line(outcome: &OperationInspectionOutcome) -> String {
+fn render_operation_inspection_line_with_color(
+    outcome: &OperationInspectionOutcome,
+    use_color: bool,
+) -> String {
     match outcome {
         OperationInspectionOutcome::Symlink(inspection) => {
-            render_symlink_inspection_line(inspection)
+            render_symlink_inspection_line_with_color(inspection, use_color)
         }
-        OperationInspectionOutcome::Copy(inspection) => render_copy_inspection_line(inspection),
+        OperationInspectionOutcome::Copy(inspection) => {
+            render_copy_inspection_line_with_color(inspection, use_color)
+        }
     }
 }
 
-fn render_symlink_inspection_line(inspection: &SymlinkInspection) -> String {
+fn render_symlink_inspection_line_with_color(
+    inspection: &SymlinkInspection,
+    use_color: bool,
+) -> String {
     let state = match &inspection.state {
-        SymlinkInspectionState::Ok => "ok".to_string(),
-        SymlinkInspectionState::Missing => "not yet set up".to_string(),
-        SymlinkInspectionState::NotASymlink => "not a symlink".to_string(),
-        SymlinkInspectionState::PointsElsewhere { current_target } => {
-            format!("points to {}", current_target.display())
-        }
+        SymlinkInspectionState::Ok => colorize("ok", ANSI_GREEN, use_color),
+        SymlinkInspectionState::Missing => colorize("not yet set up", ANSI_YELLOW, use_color),
+        SymlinkInspectionState::NotASymlink => colorize("not a symlink", ANSI_RED, use_color),
+        SymlinkInspectionState::PointsElsewhere { current_target } => colorize(
+            &format!("points to {}", current_target.display()),
+            ANSI_RED,
+            use_color,
+        ),
     };
 
     format!(
@@ -267,12 +285,12 @@ fn render_symlink_inspection_line(inspection: &SymlinkInspection) -> String {
     )
 }
 
-fn render_copy_inspection_line(inspection: &CopyInspection) -> String {
+fn render_copy_inspection_line_with_color(inspection: &CopyInspection, use_color: bool) -> String {
     let state = match inspection.state {
-        CopyInspectionState::Ok => "ok",
-        CopyInspectionState::Missing => "not yet set up",
-        CopyInspectionState::NotAFile => "not a file",
-        CopyInspectionState::Differs => "differs from source",
+        CopyInspectionState::Ok => colorize("ok", ANSI_GREEN, use_color),
+        CopyInspectionState::Missing => colorize("not yet set up", ANSI_YELLOW, use_color),
+        CopyInspectionState::NotAFile => colorize("not a file", ANSI_RED, use_color),
+        CopyInspectionState::Differs => colorize("differs from source", ANSI_RED, use_color),
     };
 
     format!(
@@ -284,10 +302,11 @@ fn render_copy_inspection_line(inspection: &CopyInspection) -> String {
 }
 
 fn render_apply_output(apply_report: &ApplyOperationReport) -> Result<String, ProgramError> {
+    let use_color = should_use_color();
     let lines = apply_report
         .outcomes
         .iter()
-        .map(render_apply_outcome_line)
+        .map(|outcome| render_apply_outcome_line_with_color(outcome, use_color))
         .collect::<Vec<_>>();
 
     if lines.is_empty() {
@@ -297,44 +316,81 @@ fn render_apply_output(apply_report: &ApplyOperationReport) -> Result<String, Pr
     }
 }
 
-fn render_apply_outcome_line(outcome: &ApplyOperationOutcome) -> String {
+fn render_apply_outcome_line_with_color(
+    outcome: &ApplyOperationOutcome,
+    use_color: bool,
+) -> String {
     match outcome {
         ApplyOperationOutcome::Applied(action) => match action {
             OperationAction::Symlink(op) => {
                 format!(
-                    "created symlink {} -> {}",
-                    op.target.display(),
-                    op.source.display()
-                )
-            }
-            OperationAction::Copy(op) => {
-                format!("copied {} to {}", op.source.display(), op.target.display())
-            }
-        },
-        ApplyOperationOutcome::SkippedExistingTarget(action) => match action {
-            OperationAction::Symlink(op) => {
-                format!("skipped symlink {} (already exists)", op.target.display())
-            }
-            OperationAction::Copy(op) => {
-                format!("skipped copy {} (already exists)", op.target.display())
-            }
-        },
-        ApplyOperationOutcome::UnsupportedOperation(action) => match action {
-            OperationAction::Symlink(op) => {
-                format!(
-                    "unsupported: symlink {} -> {}",
+                    "{} {} -> {}",
+                    colorize("created symlink", ANSI_GREEN, use_color),
                     op.target.display(),
                     op.source.display()
                 )
             }
             OperationAction::Copy(op) => {
                 format!(
-                    "unsupported: copy {} to {}",
+                    "{} {} to {}",
+                    colorize("copied", ANSI_GREEN, use_color),
                     op.source.display(),
                     op.target.display()
                 )
             }
         },
+        ApplyOperationOutcome::SkippedExistingTarget(action) => match action {
+            OperationAction::Symlink(op) => {
+                format!(
+                    "{} {} (already exists)",
+                    colorize("skipped symlink", ANSI_YELLOW, use_color),
+                    op.target.display()
+                )
+            }
+            OperationAction::Copy(op) => {
+                format!(
+                    "{} {} (already exists)",
+                    colorize("skipped copy", ANSI_YELLOW, use_color),
+                    op.target.display()
+                )
+            }
+        },
+        ApplyOperationOutcome::UnsupportedOperation(action) => match action {
+            OperationAction::Symlink(op) => {
+                format!(
+                    "{} {} -> {}",
+                    colorize("unsupported: symlink", ANSI_RED, use_color),
+                    op.target.display(),
+                    op.source.display()
+                )
+            }
+            OperationAction::Copy(op) => {
+                format!(
+                    "{} {} to {}",
+                    colorize("unsupported: copy", ANSI_RED, use_color),
+                    op.source.display(),
+                    op.target.display()
+                )
+            }
+        },
+    }
+}
+
+#[cfg(test)]
+fn should_use_color() -> bool {
+    false
+}
+
+#[cfg(not(test))]
+fn should_use_color() -> bool {
+    std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none()
+}
+
+fn colorize(text: &str, color: &str, use_color: bool) -> String {
+    if use_color {
+        format!("{color}{text}{ANSI_RESET}")
+    } else {
+        text.to_string()
     }
 }
 
@@ -480,10 +536,10 @@ mod tests {
         ApplyOperationOutcome, ConflictPolicy, CopyInspection, CopyInspectionState, FileOperation,
         OperationAction, OperationInspectionOutcome, OperationPlan, ProgramError, ProgramOutput,
         SymlinkInspection, SymlinkInspectionState, default_config_path_from_env,
-        default_config_path_from_inputs, render_apply_outcome_line, render_apply_output,
-        render_copy_inspection_line, render_default_inspection_output,
-        render_operation_inspection_line, render_symlink_inspection_line, run_apply_from_env,
-        run_apply_with_config_path, run_info_from_env, run_with_config_path,
+        default_config_path_from_inputs, render_apply_outcome_line_with_color, render_apply_output,
+        render_copy_inspection_line_with_color, render_default_inspection_output,
+        render_operation_inspection_line_with_color, render_symlink_inspection_line_with_color,
+        run_apply_from_env, run_apply_with_config_path, run_info_from_env, run_with_config_path,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -491,11 +547,14 @@ mod tests {
 
     #[test]
     fn render_a_missing_symlink_status_line() {
-        let line = render_symlink_inspection_line(&SymlinkInspection {
-            source: PathBuf::from("/repo/.gitconfig"),
-            target: PathBuf::from("/home/.gitconfig"),
-            state: SymlinkInspectionState::Missing,
-        });
+        let line = render_symlink_inspection_line_with_color(
+            &SymlinkInspection {
+                source: PathBuf::from("/repo/.gitconfig"),
+                target: PathBuf::from("/home/.gitconfig"),
+                state: SymlinkInspectionState::Missing,
+            },
+            false,
+        );
 
         assert_eq!(
             line,
@@ -505,23 +564,32 @@ mod tests {
 
     #[test]
     fn render_all_non_missing_symlink_status_lines() {
-        let ok_line = render_symlink_inspection_line(&SymlinkInspection {
-            source: PathBuf::from("/repo/.zshrc"),
-            target: PathBuf::from("/home/.zshrc"),
-            state: SymlinkInspectionState::Ok,
-        });
-        let not_a_symlink_line = render_symlink_inspection_line(&SymlinkInspection {
-            source: PathBuf::from("/repo/.zprofile"),
-            target: PathBuf::from("/home/.zprofile"),
-            state: SymlinkInspectionState::NotASymlink,
-        });
-        let points_elsewhere_line = render_symlink_inspection_line(&SymlinkInspection {
-            source: PathBuf::from("/repo/.gitconfig"),
-            target: PathBuf::from("/home/.gitconfig"),
-            state: SymlinkInspectionState::PointsElsewhere {
-                current_target: PathBuf::from("/old/.gitconfig"),
+        let ok_line = render_symlink_inspection_line_with_color(
+            &SymlinkInspection {
+                source: PathBuf::from("/repo/.zshrc"),
+                target: PathBuf::from("/home/.zshrc"),
+                state: SymlinkInspectionState::Ok,
             },
-        });
+            false,
+        );
+        let not_a_symlink_line = render_symlink_inspection_line_with_color(
+            &SymlinkInspection {
+                source: PathBuf::from("/repo/.zprofile"),
+                target: PathBuf::from("/home/.zprofile"),
+                state: SymlinkInspectionState::NotASymlink,
+            },
+            false,
+        );
+        let points_elsewhere_line = render_symlink_inspection_line_with_color(
+            &SymlinkInspection {
+                source: PathBuf::from("/repo/.gitconfig"),
+                target: PathBuf::from("/home/.gitconfig"),
+                state: SymlinkInspectionState::PointsElsewhere {
+                    current_target: PathBuf::from("/old/.gitconfig"),
+                },
+            },
+            false,
+        );
 
         assert_eq!(ok_line, "/home/.zshrc -> /repo/.zshrc   ok");
         assert_eq!(
@@ -536,26 +604,38 @@ mod tests {
 
     #[test]
     fn render_all_copy_status_lines() {
-        let ok_line = render_copy_inspection_line(&CopyInspection {
-            source: PathBuf::from("/repo/.zshrc"),
-            target: PathBuf::from("/home/.zshrc"),
-            state: CopyInspectionState::Ok,
-        });
-        let missing_line = render_copy_inspection_line(&CopyInspection {
-            source: PathBuf::from("/repo/.gitconfig"),
-            target: PathBuf::from("/home/.gitconfig"),
-            state: CopyInspectionState::Missing,
-        });
-        let not_a_file_line = render_copy_inspection_line(&CopyInspection {
-            source: PathBuf::from("/repo/.bashrc"),
-            target: PathBuf::from("/home/.bashrc"),
-            state: CopyInspectionState::NotAFile,
-        });
-        let differs_line = render_copy_inspection_line(&CopyInspection {
-            source: PathBuf::from("/repo/.vimrc"),
-            target: PathBuf::from("/home/.vimrc"),
-            state: CopyInspectionState::Differs,
-        });
+        let ok_line = render_copy_inspection_line_with_color(
+            &CopyInspection {
+                source: PathBuf::from("/repo/.zshrc"),
+                target: PathBuf::from("/home/.zshrc"),
+                state: CopyInspectionState::Ok,
+            },
+            false,
+        );
+        let missing_line = render_copy_inspection_line_with_color(
+            &CopyInspection {
+                source: PathBuf::from("/repo/.gitconfig"),
+                target: PathBuf::from("/home/.gitconfig"),
+                state: CopyInspectionState::Missing,
+            },
+            false,
+        );
+        let not_a_file_line = render_copy_inspection_line_with_color(
+            &CopyInspection {
+                source: PathBuf::from("/repo/.bashrc"),
+                target: PathBuf::from("/home/.bashrc"),
+                state: CopyInspectionState::NotAFile,
+            },
+            false,
+        );
+        let differs_line = render_copy_inspection_line_with_color(
+            &CopyInspection {
+                source: PathBuf::from("/repo/.vimrc"),
+                target: PathBuf::from("/home/.vimrc"),
+                state: CopyInspectionState::Differs,
+            },
+            false,
+        );
 
         assert_eq!(ok_line, "/home/.zshrc <- /repo/.zshrc   ok");
         assert_eq!(
@@ -574,19 +654,22 @@ mod tests {
 
     #[test]
     fn render_operation_status_line_for_each_operation_kind() {
-        let symlink_line = render_operation_inspection_line(&OperationInspectionOutcome::Symlink(
-            SymlinkInspection {
+        let symlink_line = render_operation_inspection_line_with_color(
+            &OperationInspectionOutcome::Symlink(SymlinkInspection {
                 source: PathBuf::from("/repo/.zshrc"),
                 target: PathBuf::from("/home/.zshrc"),
                 state: SymlinkInspectionState::Missing,
-            },
-        ));
-        let copy_line =
-            render_operation_inspection_line(&OperationInspectionOutcome::Copy(CopyInspection {
+            }),
+            false,
+        );
+        let copy_line = render_operation_inspection_line_with_color(
+            &OperationInspectionOutcome::Copy(CopyInspection {
                 source: PathBuf::from("/repo/.gitconfig"),
                 target: PathBuf::from("/home/.gitconfig"),
                 state: CopyInspectionState::Missing,
-            }));
+            }),
+            false,
+        );
 
         assert_eq!(
             symlink_line,
@@ -867,12 +950,14 @@ mod tests {
             conflict_policy: ConflictPolicy::Skip,
         };
 
-        let symlink_line = render_apply_outcome_line(&ApplyOperationOutcome::Applied(
-            OperationAction::Symlink(symlink_op.clone()),
-        ));
-        let copy_line = render_apply_outcome_line(&ApplyOperationOutcome::Applied(
-            OperationAction::Copy(copy_op.clone()),
-        ));
+        let symlink_line = render_apply_outcome_line_with_color(
+            &ApplyOperationOutcome::Applied(OperationAction::Symlink(symlink_op.clone())),
+            false,
+        );
+        let copy_line = render_apply_outcome_line_with_color(
+            &ApplyOperationOutcome::Applied(OperationAction::Copy(copy_op.clone())),
+            false,
+        );
 
         assert_eq!(symlink_line, "created symlink /home/.zshrc -> /repo/.zshrc");
         assert_eq!(copy_line, "copied /repo/config.txt to /home/config.txt");
@@ -893,13 +978,16 @@ mod tests {
             conflict_policy: ConflictPolicy::Skip,
         };
 
-        let symlink_line =
-            render_apply_outcome_line(&ApplyOperationOutcome::SkippedExistingTarget(
-                OperationAction::Symlink(symlink_op.clone()),
-            ));
-        let copy_line = render_apply_outcome_line(&ApplyOperationOutcome::SkippedExistingTarget(
-            OperationAction::Copy(copy_op.clone()),
-        ));
+        let symlink_line = render_apply_outcome_line_with_color(
+            &ApplyOperationOutcome::SkippedExistingTarget(OperationAction::Symlink(
+                symlink_op.clone(),
+            )),
+            false,
+        );
+        let copy_line = render_apply_outcome_line_with_color(
+            &ApplyOperationOutcome::SkippedExistingTarget(OperationAction::Copy(copy_op.clone())),
+            false,
+        );
 
         assert_eq!(
             symlink_line,
@@ -926,12 +1014,16 @@ mod tests {
             conflict_policy: ConflictPolicy::Skip,
         };
 
-        let symlink_line = render_apply_outcome_line(&ApplyOperationOutcome::UnsupportedOperation(
-            OperationAction::Symlink(symlink_op.clone()),
-        ));
-        let copy_line = render_apply_outcome_line(&ApplyOperationOutcome::UnsupportedOperation(
-            OperationAction::Copy(copy_op.clone()),
-        ));
+        let symlink_line = render_apply_outcome_line_with_color(
+            &ApplyOperationOutcome::UnsupportedOperation(OperationAction::Symlink(
+                symlink_op.clone(),
+            )),
+            false,
+        );
+        let copy_line = render_apply_outcome_line_with_color(
+            &ApplyOperationOutcome::UnsupportedOperation(OperationAction::Copy(copy_op.clone())),
+            false,
+        );
 
         assert_eq!(
             symlink_line,
@@ -1088,5 +1180,66 @@ mod tests {
             ProgramError::UnsupportedConfiguration.to_string(),
             "default inspection currently supports symlink operations only"
         );
+    }
+
+    #[test]
+    fn render_colorized_primary_status_states() {
+        let symlink_ok = render_symlink_inspection_line_with_color(
+            &SymlinkInspection {
+                source: PathBuf::from("/repo/.zshrc"),
+                target: PathBuf::from("/home/.zshrc"),
+                state: SymlinkInspectionState::Ok,
+            },
+            true,
+        );
+        let symlink_missing = render_symlink_inspection_line_with_color(
+            &SymlinkInspection {
+                source: PathBuf::from("/repo/.gitconfig"),
+                target: PathBuf::from("/home/.gitconfig"),
+                state: SymlinkInspectionState::Missing,
+            },
+            true,
+        );
+        let symlink_mismatch = render_symlink_inspection_line_with_color(
+            &SymlinkInspection {
+                source: PathBuf::from("/repo/.profile"),
+                target: PathBuf::from("/home/.profile"),
+                state: SymlinkInspectionState::NotASymlink,
+            },
+            true,
+        );
+
+        assert!(symlink_ok.contains("\x1b[32mok\x1b[0m"));
+        assert!(symlink_missing.contains("\x1b[33mnot yet set up\x1b[0m"));
+        assert!(symlink_mismatch.contains("\x1b[31mnot a symlink\x1b[0m"));
+    }
+
+    #[test]
+    fn render_colorized_apply_outcome_prefixes() {
+        let operation = FileOperation {
+            source: PathBuf::from("/repo/.gitconfig"),
+            target: PathBuf::from("/home/.gitconfig"),
+            mkdir: false,
+            conflict_policy: ConflictPolicy::Skip,
+        };
+
+        let applied = render_apply_outcome_line_with_color(
+            &ApplyOperationOutcome::Applied(OperationAction::Symlink(operation.clone())),
+            true,
+        );
+        let skipped = render_apply_outcome_line_with_color(
+            &ApplyOperationOutcome::SkippedExistingTarget(OperationAction::Symlink(
+                operation.clone(),
+            )),
+            true,
+        );
+        let unsupported = render_apply_outcome_line_with_color(
+            &ApplyOperationOutcome::UnsupportedOperation(OperationAction::Symlink(operation)),
+            true,
+        );
+
+        assert!(applied.starts_with("\x1b[32mcreated symlink\x1b[0m"));
+        assert!(skipped.starts_with("\x1b[33mskipped symlink\x1b[0m"));
+        assert!(unsupported.starts_with("\x1b[31munsupported: symlink\x1b[0m"));
     }
 }

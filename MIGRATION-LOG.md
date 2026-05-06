@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-06: Add colorized status rendering coverage - Render primary
+  inspection/apply status states with ANSI colors when output is a terminal and
+  `NO_COLOR` is unset, while keeping deterministic plain rendering in
+  non-terminal contexts and tests.
 - 2026-05-06: Add explicit CLI command parsing for info and apply - Add clap
   dependency with derive macro support, introduce `info` and `apply`
   subcommands, implement command dispatch in main.rs, add render_apply_output to
