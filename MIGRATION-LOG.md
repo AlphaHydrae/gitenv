@@ -11,6 +11,12 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-06: Inject system dependencies from the CLI composition root - Add a
+  top-down system-calls dependency path from `run_cli` through config-path
+  resolution, terminal-color decisions, and operation-plan HOME resolution;
+  replace compile-time test color gating with deterministic injected behavior;
+  and expand unit tests to cover deterministic env/terminal scenarios and
+  dispatch wrappers.
 - 2026-05-06: Add colorized status rendering coverage - Render primary
   inspection/apply status states with ANSI colors when output is a terminal and
   `NO_COLOR` is unset, while keeping deterministic plain rendering in

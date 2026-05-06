@@ -1,2 +1,4 @@
 --ignore-dir=coverage
+--ignore-dir=rust/target
+--ignore-dir=tmp
 --ignore-dir=vendor

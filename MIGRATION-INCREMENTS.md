@@ -51,5 +51,7 @@ Why this increment exists:
 Review target:
 
 - Introduce a `logging` module and CLI/API log-level controls.
+- Keep system-call dependency injection routed from `run_cli` as composition
+  root while adding logging behavior.
 - Update README examples/tests so Phase 3 exit criteria are directly
   verifiable.

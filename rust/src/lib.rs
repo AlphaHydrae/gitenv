@@ -1,6 +1,7 @@
 mod actions;
 mod cli;
 mod config;
+mod fs_adapter;
 mod intent;
 mod operation;
 mod status;
@@ -30,8 +31,8 @@ pub use status::{
     inspect_symlink_operation_status,
 };
 
+use std::ffi::OsString;
 use std::fmt;
-#[cfg(not(test))]
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
@@ -124,6 +125,27 @@ const DEFAULT_CONFIG_HOME_SUFFIX: &str = ".config";
 const DEFAULT_CONFIG_DIRECTORY_NAME: &str = "gitenv";
 const DEFAULT_CONFIG_FILE_NAME: &str = "config.yml";
 
+#[derive(Clone, Copy)]
+struct SystemCalls<'a> {
+    get_env_var_os: &'a dyn Fn(&str) -> Option<OsString>,
+    stdout_is_terminal: &'a dyn Fn() -> bool,
+}
+
+fn std_env_var_os(name: &str) -> Option<OsString> {
+    std::env::var_os(name)
+}
+
+fn std_stdout_is_terminal() -> bool {
+    std::io::stdout().is_terminal()
+}
+
+fn real_system_calls() -> SystemCalls<'static> {
+    SystemCalls {
+        get_env_var_os: &std_env_var_os,
+        stdout_is_terminal: &std_stdout_is_terminal,
+    }
+}
+
 /// Parse CLI arguments and dispatch to the appropriate library function.
 ///
 /// This is the main entry point for the binary.
@@ -143,59 +165,77 @@ where
     cli::dispatch(Cli::parse_from(args))
 }
 
-fn run_with_config_path(config_path: &Path) -> Result<ProgramOutput, ProgramError> {
+fn run_with_config_path_with_system(
+    config_path: &Path,
+    system: SystemCalls<'_>,
+) -> Result<ProgramOutput, ProgramError> {
     let config = load_config(config_path)?;
     let intent_plan = derive_intent_plan(&config)?;
-    let operation_plan = derive_operation_plan(&intent_plan)?;
+    let get_home_directory = || fs_adapter::resolve_home_directory(system.get_env_var_os);
+    let operation_plan = operation::derive_operation_plan_with_injectables(
+        &intent_plan,
+        &get_home_directory,
+        &fs_adapter::list_directory_entries,
+    )?;
 
     Ok(ProgramOutput {
-        message: render_default_inspection_output(&operation_plan)?,
+        message: render_default_inspection_output_with_system(&operation_plan, system)?,
     })
 }
 
 /// Run the info command (status inspection for all operations).
 pub fn run_info() -> Result<ProgramOutput, ProgramError> {
-    run_info_from_env(default_config_path)
+    let system = real_system_calls();
+    run_info_from_env_with_system(|| default_config_path_with_system(system), system)
 }
 
-/// Like `run_info` but accepts an injectable config-path resolver for tests.
-pub(crate) fn run_info_from_env(
+fn run_info_from_env_with_system(
     get_config_path: impl FnOnce() -> Result<PathBuf, ProgramError>,
+    system: SystemCalls<'_>,
 ) -> Result<ProgramOutput, ProgramError> {
     let config_path = get_config_path()?;
-    run_with_config_path(&config_path)
+    run_with_config_path_with_system(&config_path, system)
 }
 
 /// Run the apply command (execute all operations).
 pub fn run_apply() -> Result<ProgramOutput, ProgramError> {
-    run_apply_from_env(default_config_path)
+    let system = real_system_calls();
+    run_apply_from_env_with_system(|| default_config_path_with_system(system), system)
 }
 
-/// Like `run_apply` but accepts an injectable config-path resolver for tests.
-pub(crate) fn run_apply_from_env(
+fn run_apply_from_env_with_system(
     get_config_path: impl FnOnce() -> Result<PathBuf, ProgramError>,
+    system: SystemCalls<'_>,
 ) -> Result<ProgramOutput, ProgramError> {
     let config_path = get_config_path()?;
-    run_apply_with_config_path(&config_path)
+    run_apply_with_config_path_with_system(&config_path, system)
 }
 
-fn run_apply_with_config_path(config_path: &Path) -> Result<ProgramOutput, ProgramError> {
+fn run_apply_with_config_path_with_system(
+    config_path: &Path,
+    system: SystemCalls<'_>,
+) -> Result<ProgramOutput, ProgramError> {
     let config = load_config(config_path)?;
     let intent_plan = derive_intent_plan(&config)?;
-    let operation_plan = derive_operation_plan(&intent_plan)?;
+    let get_home_directory = || fs_adapter::resolve_home_directory(system.get_env_var_os);
+    let operation_plan = operation::derive_operation_plan_with_injectables(
+        &intent_plan,
+        &get_home_directory,
+        &fs_adapter::list_directory_entries,
+    )?;
 
     let apply_report = apply_operation_plan(&operation_plan)?;
-    let output_message = render_apply_output(&apply_report)?;
+    let output_message = render_apply_output_with_system(&apply_report, system)?;
 
     Ok(ProgramOutput {
         message: output_message,
     })
 }
 
-fn default_config_path() -> Result<PathBuf, ProgramError> {
-    let gitenv_config = std::env::var_os("GITENV_CONFIG").map(PathBuf::from);
-    let home_directory = std::env::var_os("HOME").map(PathBuf::from);
-    let xdg_config_home = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
+fn default_config_path_with_system(system: SystemCalls<'_>) -> Result<PathBuf, ProgramError> {
+    let gitenv_config = (system.get_env_var_os)("GITENV_CONFIG").map(PathBuf::from);
+    let home_directory = (system.get_env_var_os)("HOME").map(PathBuf::from);
+    let xdg_config_home = (system.get_env_var_os)("XDG_CONFIG_HOME").map(PathBuf::from);
 
     default_config_path_from_inputs(gitenv_config, home_directory, xdg_config_home)
 }
@@ -230,10 +270,11 @@ fn default_config_path_from_env(
         .join(DEFAULT_CONFIG_FILE_NAME)
 }
 
-fn render_default_inspection_output(
+fn render_default_inspection_output_with_system(
     operation_plan: &OperationPlan,
+    system: SystemCalls<'_>,
 ) -> Result<String, ProgramError> {
-    let use_color = should_use_color();
+    let use_color = should_use_color(system);
     let inspection_report = inspect_operation_plan_status(operation_plan)?;
     let lines = inspection_report
         .outcomes
@@ -301,8 +342,11 @@ fn render_copy_inspection_line_with_color(inspection: &CopyInspection, use_color
     )
 }
 
-fn render_apply_output(apply_report: &ApplyOperationReport) -> Result<String, ProgramError> {
-    let use_color = should_use_color();
+fn render_apply_output_with_system(
+    apply_report: &ApplyOperationReport,
+    system: SystemCalls<'_>,
+) -> Result<String, ProgramError> {
+    let use_color = should_use_color(system);
     let lines = apply_report
         .outcomes
         .iter()
@@ -376,14 +420,8 @@ fn render_apply_outcome_line_with_color(
     }
 }
 
-#[cfg(test)]
-fn should_use_color() -> bool {
-    false
-}
-
-#[cfg(not(test))]
-fn should_use_color() -> bool {
-    std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none()
+fn should_use_color(system: SystemCalls<'_>) -> bool {
+    (system.stdout_is_terminal)() && (system.get_env_var_os)("NO_COLOR").is_none()
 }
 
 fn colorize(text: &str, color: &str, use_color: bool) -> String {
@@ -535,12 +573,16 @@ mod tests {
     use super::{
         ApplyOperationOutcome, ConflictPolicy, CopyInspection, CopyInspectionState, FileOperation,
         OperationAction, OperationInspectionOutcome, OperationPlan, ProgramError, ProgramOutput,
-        SymlinkInspection, SymlinkInspectionState, default_config_path_from_env,
-        default_config_path_from_inputs, render_apply_outcome_line_with_color, render_apply_output,
-        render_copy_inspection_line_with_color, render_default_inspection_output,
-        render_operation_inspection_line_with_color, render_symlink_inspection_line_with_color,
-        run_apply_from_env, run_apply_with_config_path, run_info_from_env, run_with_config_path,
+        SymlinkInspection, SymlinkInspectionState, SystemCalls, default_config_path_from_env,
+        default_config_path_from_inputs, render_apply_outcome_line_with_color,
+        render_apply_output_with_system, render_copy_inspection_line_with_color,
+        render_default_inspection_output_with_system, render_operation_inspection_line_with_color,
+        render_symlink_inspection_line_with_color, run_apply_from_env_with_system,
+        run_apply_with_config_path_with_system, run_info_from_env_with_system,
+        run_with_config_path_with_system,
     };
+    use std::collections::BTreeMap;
+    use std::ffi::OsString;
     use std::fs;
     use std::path::{Path, PathBuf};
     use tempfile::TempDir;
@@ -683,8 +725,16 @@ mod tests {
 
     #[test]
     fn render_no_operation_message_when_nothing_is_planned() {
-        let output = render_default_inspection_output(&OperationPlan { actions: vec![] })
-            .expect("empty operation plans should render a stable status message");
+        let get_env_var_os = |_: &str| None::<OsString>;
+        let stdout_is_terminal = || false;
+        let output = render_default_inspection_output_with_system(
+            &OperationPlan { actions: vec![] },
+            SystemCalls {
+                get_env_var_os: &get_env_var_os,
+                stdout_is_terminal: &stdout_is_terminal,
+            },
+        )
+        .expect("empty operation plans should render a stable status message");
 
         assert_eq!(
             output,
@@ -711,8 +761,16 @@ mod tests {
             })],
         };
 
-        let output = render_default_inspection_output(&operation_plan)
-            .expect("copy operations should render deterministic inspection output");
+        let get_env_var_os = |_: &str| None::<OsString>;
+        let stdout_is_terminal = || false;
+        let output = render_default_inspection_output_with_system(
+            &operation_plan,
+            SystemCalls {
+                get_env_var_os: &get_env_var_os,
+                stdout_is_terminal: &stdout_is_terminal,
+            },
+        )
+        .expect("copy operations should render deterministic inspection output");
 
         assert_eq!(
             output,
@@ -795,8 +853,18 @@ mod tests {
         let config_path = home.path().join("config.yml");
         fs::write(&config_path, config).expect("config file should be written");
 
-        let output = run_with_config_path(&config_path)
-            .expect("explicit config path should produce inspection output");
+        let env_values =
+            BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
+        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
+        let stdout_is_terminal = || false;
+        let output = run_with_config_path_with_system(
+            &config_path,
+            SystemCalls {
+                get_env_var_os: &get_env_var_os,
+                stdout_is_terminal: &stdout_is_terminal,
+            },
+        )
+        .expect("explicit config path should produce inspection output");
 
         let expected = format!(
             "{} -> {}   not yet set up",
@@ -810,8 +878,16 @@ mod tests {
     fn show_setup_guidance_when_file_is_missing() {
         let missing_path = PathBuf::from("/tmp/custom-gitenv.yml");
 
-        let error = run_with_config_path(&missing_path)
-            .expect_err("missing explicit config file should return a read error");
+        let get_env_var_os = |_: &str| None::<OsString>;
+        let stdout_is_terminal = || false;
+        let error = run_with_config_path_with_system(
+            &missing_path,
+            SystemCalls {
+                get_env_var_os: &get_env_var_os,
+                stdout_is_terminal: &stdout_is_terminal,
+            },
+        )
+        .expect_err("missing explicit config file should return a read error");
 
         let rendered = error.to_string();
         assert!(rendered.contains("cannot read config at /tmp/custom-gitenv.yml ("));
@@ -842,8 +918,18 @@ mod tests {
         let config_path = home.path().join("config.yml");
         fs::write(&config_path, config).expect("config file should be written");
 
-        let output = run_apply_with_config_path(&config_path)
-            .expect("explicit config path should produce apply output");
+        let env_values =
+            BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
+        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
+        let stdout_is_terminal = || false;
+        let output = run_apply_with_config_path_with_system(
+            &config_path,
+            SystemCalls {
+                get_env_var_os: &get_env_var_os,
+                stdout_is_terminal: &stdout_is_terminal,
+            },
+        )
+        .expect("explicit config path should produce apply output");
 
         let expected = format!(
             "created symlink {} -> {}",
@@ -851,6 +937,53 @@ mod tests {
             repository.path().join(".").join(".gitconfig").display()
         );
         assert_eq!(output.message, expected);
+    }
+
+    #[test]
+    fn show_home_missing_errors_for_explicit_config_info_and_apply() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::write(repository.path().join(".gitconfig"), "[user]\n")
+            .expect("source file should be written");
+
+        let config = format!(
+            concat!(
+                "version: 1\n",
+                "repository: \"{}\"\n",
+                "sources:\n",
+                "  - from: \".\"\n",
+                "    to: \"{}\"\n",
+                "    configs:\n",
+                "      - file: .gitconfig\n"
+            ),
+            repository.path().display(),
+            home.path().display()
+        );
+        let config_path = home.path().join("config.yml");
+        fs::write(&config_path, config).expect("config file should be written");
+
+        let get_env_var_os = |_: &str| None::<OsString>;
+        let stdout_is_terminal = || false;
+
+        let info_error = run_with_config_path_with_system(
+            &config_path,
+            SystemCalls {
+                get_env_var_os: &get_env_var_os,
+                stdout_is_terminal: &stdout_is_terminal,
+            },
+        )
+        .expect_err("missing HOME should fail explicit-config info planning");
+        assert_eq!(info_error, ProgramError::HomeDirectoryUnavailable);
+
+        let apply_error = run_apply_with_config_path_with_system(
+            &config_path,
+            SystemCalls {
+                get_env_var_os: &get_env_var_os,
+                stdout_is_terminal: &stdout_is_terminal,
+            },
+        )
+        .expect_err("missing HOME should fail explicit-config apply planning");
+        assert_eq!(apply_error, ProgramError::HomeDirectoryUnavailable);
     }
 
     #[test]
@@ -878,8 +1011,18 @@ mod tests {
         let config_path = home.path().join("gitenv.yml");
         fs::write(&config_path, config).expect("config file should be written");
 
-        let output = run_info_from_env(|| Ok(config_path))
-            .expect("run_info_from_env should succeed with injected config path");
+        let env_values =
+            BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
+        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
+        let stdout_is_terminal = || false;
+        let output = run_info_from_env_with_system(
+            || Ok(config_path),
+            SystemCalls {
+                get_env_var_os: &get_env_var_os,
+                stdout_is_terminal: &stdout_is_terminal,
+            },
+        )
+        .expect("run_info_from_env should succeed with injected config path");
 
         let expected = format!(
             "{} -> {}   not yet set up",
@@ -914,8 +1057,18 @@ mod tests {
         let config_path = home.path().join("gitenv.yml");
         fs::write(&config_path, config).expect("config file should be written");
 
-        let output = run_apply_from_env(|| Ok(config_path))
-            .expect("run_apply_from_env should succeed with injected config path");
+        let env_values =
+            BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
+        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
+        let stdout_is_terminal = || false;
+        let output = run_apply_from_env_with_system(
+            || Ok(config_path),
+            SystemCalls {
+                get_env_var_os: &get_env_var_os,
+                stdout_is_terminal: &stdout_is_terminal,
+            },
+        )
+        .expect("run_apply_from_env should succeed with injected config path");
 
         let expected = format!(
             "created symlink {} -> {}",
@@ -929,8 +1082,16 @@ mod tests {
     fn show_no_operations_to_apply_message_when_outcomes_are_empty() {
         let report = super::ApplyOperationReport { outcomes: vec![] };
 
-        let output = render_apply_output(&report)
-            .expect("empty apply report should render a stable message");
+        let get_env_var_os = |_: &str| None::<OsString>;
+        let stdout_is_terminal = || false;
+        let output = render_apply_output_with_system(
+            &report,
+            SystemCalls {
+                get_env_var_os: &get_env_var_os,
+                stdout_is_terminal: &stdout_is_terminal,
+            },
+        )
+        .expect("empty apply report should render a stable message");
 
         assert_eq!(output, "No operations to apply.");
     }
