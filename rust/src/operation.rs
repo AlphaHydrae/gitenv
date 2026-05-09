@@ -1,6 +1,6 @@
 use crate::{
     ActionMode, ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction,
-    ProgramError, ResolvedOptions, fs_adapter, logging,
+    ProgramError, ResolvedOptions, fs_adapter, logging, path_resolution,
 };
 use log::Level;
 use std::path::{Path, PathBuf};
@@ -103,7 +103,7 @@ pub fn derive_operation_plan_with_injectables(
     Ok(OperationPlan { actions })
 }
 fn resolve_repository_root(repository: &str, home_directory: &Path) -> PathBuf {
-    resolve_home_prefixed_or_literal_path(repository, home_directory)
+    path_resolution::expand_home_prefixed_or_literal_path(repository, home_directory)
 }
 
 fn resolve_source_root(
@@ -113,7 +113,7 @@ fn resolve_source_root(
 ) -> PathBuf {
     let path = Path::new(source_from);
     if path.is_absolute() || source_from == "~" || source_from.starts_with("~/") {
-        resolve_home_prefixed_or_literal_path(source_from, home_directory)
+        path_resolution::expand_home_prefixed_or_literal_path(source_from, home_directory)
     } else {
         repository_root.join(path)
     }
@@ -122,19 +122,9 @@ fn resolve_source_root(
 fn resolve_target_directory(target_directory: &str, home_directory: &Path) -> PathBuf {
     let path = Path::new(target_directory);
     if path.is_absolute() || target_directory == "~" || target_directory.starts_with("~/") {
-        resolve_home_prefixed_or_literal_path(target_directory, home_directory)
+        path_resolution::expand_home_prefixed_or_literal_path(target_directory, home_directory)
     } else {
         home_directory.join(path)
-    }
-}
-
-fn resolve_home_prefixed_or_literal_path(path: &str, home_directory: &Path) -> PathBuf {
-    if path == "~" {
-        home_directory.to_path_buf()
-    } else if let Some(suffix) = path.strip_prefix("~/") {
-        home_directory.join(suffix)
-    } else {
-        PathBuf::from(path)
     }
 }
 

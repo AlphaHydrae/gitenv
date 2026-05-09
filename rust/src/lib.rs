@@ -7,6 +7,7 @@ mod fs_adapter;
 mod intent;
 mod logging;
 mod operation;
+mod path_resolution;
 mod status;
 
 pub use cli::{Cli, Command, LogLevel};
@@ -112,8 +113,8 @@ fn run_info(
     runtime_config: RuntimeConfig,
 ) -> Result<ProgramOutput, ProgramError> {
     let loaded_config = load_config()?;
-    let intent_plan = derive_intent_plan(&loaded_config)?;
     let home_directory = fs_adapter::resolve_home_directory(system.get_env_var_os)?;
+    let intent_plan = derive_intent_plan(&loaded_config, &home_directory)?;
     let operation_plan = operation::derive_operation_plan_with_injectables(
         &intent_plan,
         &home_directory,
@@ -135,8 +136,8 @@ fn run_apply(
     runtime_config: RuntimeConfig,
 ) -> Result<ProgramOutput, ProgramError> {
     let loaded_config = load_config()?;
-    let intent_plan = derive_intent_plan(&loaded_config)?;
     let home_directory = fs_adapter::resolve_home_directory(system.get_env_var_os)?;
+    let intent_plan = derive_intent_plan(&loaded_config, &home_directory)?;
     let operation_plan = operation::derive_operation_plan_with_injectables(
         &intent_plan,
         &home_directory,
@@ -162,22 +163,12 @@ fn load_default_config_with_system(system: SystemCalls<'_>) -> Result<LoadedConf
 
 fn default_config_path_with_system(system: SystemCalls<'_>) -> Result<PathBuf, ProgramError> {
     let gitenv_config = (system.get_env_var_os)("GITENV_CONFIG").map(PathBuf::from);
-    let home_directory = (system.get_env_var_os)("HOME").map(PathBuf::from);
     let xdg_config_home = (system.get_env_var_os)("XDG_CONFIG_HOME").map(PathBuf::from);
-
-    default_config_path_from_inputs(gitenv_config, home_directory, xdg_config_home)
-}
-
-fn default_config_path_from_inputs(
-    gitenv_config: Option<PathBuf>,
-    home_directory: Option<PathBuf>,
-    xdg_config_home: Option<PathBuf>,
-) -> Result<PathBuf, ProgramError> {
     if let Some(custom_path) = gitenv_config {
         return Ok(custom_path);
     }
 
-    let home_directory = home_directory.ok_or(ProgramError::HomeDirectoryUnavailable)?;
+    let home_directory = fs_adapter::resolve_home_directory(system.get_env_var_os)?;
 
     Ok(default_config_path_from_env(
         &home_directory,
@@ -203,9 +194,10 @@ mod tests {
     use super::{
         ActionMode, ColorMode, Config, ConfigItem, Defaults, FileConfig, LoadedConfig,
         ProgramError, RuntimeConfig, Source, SourceRoot, SystemCalls, default_config_path_from_env,
-        default_config_path_from_inputs, load_config, load_default_config_with_system, run_apply,
+        default_config_path_with_system, load_config, load_default_config_with_system, run_apply,
         run_info,
     };
+    use crate::SelectConfig;
     use std::collections::BTreeMap;
     use std::ffi::OsString;
     use std::fs;
@@ -279,23 +271,111 @@ mod tests {
     }
 
     #[test]
-    fn resolve_config_path_from_gitenv_config_override() {
-        let path = default_config_path_from_inputs(
-            Some(PathBuf::from("/tmp/custom/config.yml")),
-            Some(PathBuf::from("/home/alex")),
-            Some(PathBuf::from("/tmp/runtime-config")),
-        )
-        .expect("GITENV_CONFIG override should be used");
+    fn use_gitenv_config_override_in_system_default_path_resolution() {
+        let env_values = BTreeMap::from([(
+            "GITENV_CONFIG".to_string(),
+            OsString::from("/tmp/custom-config.yml"),
+        )]);
+        let get_env_var_os = |name: &str| env_values.get(name).cloned();
 
-        assert_eq!(path, PathBuf::from("/tmp/custom/config.yml"));
+        let path = default_config_path_with_system(SystemCalls {
+            get_env_var_os: &get_env_var_os,
+        })
+        .expect("GITENV_CONFIG should short-circuit default path resolution");
+
+        assert_eq!(path, PathBuf::from("/tmp/custom-config.yml"));
     }
 
     #[test]
-    fn cannot_resolve_default_config_path_without_home_or_override() {
-        let error = default_config_path_from_inputs(None, None, None)
-            .expect_err("HOME is required when GITENV_CONFIG is absent");
+    fn propagate_source_directory_read_error_from_info_planning() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        let destination = home.path().join("target");
 
-        assert_eq!(error, ProgramError::HomeDirectoryUnavailable);
+        let config = Config {
+            version: 1,
+            repository: repository.path().display().to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path("missing-dir".to_string()),
+                to: Some(destination.display().to_string()),
+                guard: None,
+                configs: vec![ConfigItem::Select(SelectConfig {
+                    dotfiles: false,
+                    exclude: vec![],
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        let env_values =
+            BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
+        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
+
+        let error = run_info(
+            || Ok(loaded_config_for_test(config)),
+            SystemCalls {
+                get_env_var_os: &get_env_var_os,
+            },
+            RuntimeConfig::new(ColorMode::Auto, false, false),
+        )
+        .expect_err("missing selector source directory should fail info planning");
+
+        assert!(matches!(
+            error,
+            ProgramError::SourceDirectoryReadFailed { .. }
+        ));
+    }
+
+    #[test]
+    fn propagate_source_directory_read_error_from_apply_planning() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        let destination = home.path().join("target");
+
+        let config = Config {
+            version: 1,
+            repository: repository.path().display().to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path("missing-dir".to_string()),
+                to: Some(destination.display().to_string()),
+                guard: None,
+                configs: vec![ConfigItem::Select(SelectConfig {
+                    dotfiles: false,
+                    exclude: vec![],
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        let env_values =
+            BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
+        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
+
+        let error = run_apply(
+            || Ok(loaded_config_for_test(config)),
+            SystemCalls {
+                get_env_var_os: &get_env_var_os,
+            },
+            RuntimeConfig::new(ColorMode::Auto, false, false),
+        )
+        .expect_err("missing selector source directory should fail apply planning");
+
+        assert!(matches!(
+            error,
+            ProgramError::SourceDirectoryReadFailed { .. }
+        ));
     }
 
     #[test]
@@ -462,7 +542,8 @@ mod tests {
             }],
         };
 
-        let get_env_var_os = |_: &str| None::<OsString>;
+        let env_values = BTreeMap::from([("HOME".to_string(), OsString::from("/tmp/home"))]);
+        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
         let error = run_info(
             || Ok(loaded_config_for_test(config)),
             SystemCalls {
@@ -498,7 +579,8 @@ mod tests {
             }],
         };
 
-        let get_env_var_os = |_: &str| None::<OsString>;
+        let env_values = BTreeMap::from([("HOME".to_string(), OsString::from("/tmp/home"))]);
+        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
         let error = run_apply(
             || Ok(loaded_config_for_test(config)),
             SystemCalls {

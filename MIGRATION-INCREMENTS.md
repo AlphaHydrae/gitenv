@@ -41,19 +41,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 47: Expand include paths that start with `~`
+<!-- No increments currently planned. -->
 
-Why this increment exists:
-
-- Relative include paths are now resolved against the declaring config file,
-  but include paths with `~` are still treated as literal strings.
-- Users typically expect `~` to resolve to the current home directory in
-  config path handling.
-
-Review target:
-
-- Expand include paths beginning with `~` using HOME resolution in a
-  deterministic, testable boundary (without shell-dependent behavior).
-- Preserve current behavior for absolute and relative include paths.
-- Add unit and integration tests that cover successful expansion and missing
-  home-directory error handling for include resolution.
+<!-- Increment 47 (expand ~ in guards and includes) is complete. -->
