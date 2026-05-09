@@ -11,6 +11,9 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-09: Resolve include paths relative to declaring config files - Resolve
+  relative include paths against each declaring config file's directory, keep
+  absolute and `~` include paths unchanged.
 - 2026-05-09: Display home-based paths with tilde in CLI output - Render
   source/target paths under HOME with `~`, including `points to ...`
   diagnostics.

@@ -41,27 +41,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 42: Resolve include paths relative to the including file
-
-Why this increment exists:
-
-- The README documents that relative include paths are resolved relative to the
-  file that declares them, which is the expected behavior for a composable
-  config system.
-- Currently `plan_sources_recursively` in `intent.rs` builds
-  `PathBuf::from(path)` directly from the raw string, with no reference to the
-  including file's directory. This means relative paths are resolved against the
-  process working directory, not the declaring file, which will surprise users.
-
-Review target:
-
-- Pass the including file's path through `plan_sources_recursively` so that
-  relative `Include::Path` values are joined against the including file's parent
-  directory.
-- Absolute paths and paths starting with `~` continue to be used as-is.
-- Add unit and integration tests asserting that a relative include path is
-  resolved relative to the declaring file, not the working directory.
-
 ### Increment 43: Reject empty sources and empty source configs
 
 Why this increment exists:
@@ -125,3 +104,20 @@ Review target:
 - Extend selected integration tests in `actions_apply.rs` to read and assert
   the complete state of the temporary test directory after each operation.
 - Ensure no regressions; no new behavior changes.
+
+### Increment 47: Expand include paths that start with `~`
+
+Why this increment exists:
+
+- Relative include paths are now resolved against the declaring config file,
+  but include paths with `~` are still treated as literal strings.
+- Users typically expect `~` to resolve to the current home directory in
+  config path handling.
+
+Review target:
+
+- Expand include paths beginning with `~` using HOME resolution in a
+  deterministic, testable boundary (without shell-dependent behavior).
+- Preserve current behavior for absolute and relative include paths.
+- Add unit and integration tests that cover successful expansion and missing
+  home-directory error handling for include resolution.

@@ -1,5 +1,7 @@
 use crate::ProgramError;
-use crate::config::{ActionMode, Config, ConfigItem, Defaults, Guard, Include, SourceRoot};
+use crate::config::{
+    ActionMode, Config, ConfigItem, Defaults, Guard, Include, LoadedConfig, SourceRoot,
+};
 use crate::load_config;
 use crate::logging;
 use log::Level;
@@ -82,9 +84,9 @@ pub struct IntentSelectAction {
 /// real filesystem access.
 ///
 /// This is the primary entry point for production use.
-pub fn derive_intent_plan(config: &Config) -> Result<IntentPlan, ProgramError> {
+pub fn derive_intent_plan(loaded_config: &LoadedConfig) -> Result<IntentPlan, ProgramError> {
     let environment = std::env::vars().collect::<BTreeMap<_, _>>();
-    derive_intent_plan_with_env(config, &environment)
+    derive_intent_plan_with_env(loaded_config, &environment)
 }
 
 /// Like `derive_intent_plan` but accepts an explicit environment map.
@@ -92,10 +94,10 @@ pub fn derive_intent_plan(config: &Config) -> Result<IntentPlan, ProgramError> {
 /// Useful in tests that need to control environment variables without mutating
 /// the real process environment.
 pub fn derive_intent_plan_with_env(
-    config: &Config,
+    loaded_config: &LoadedConfig,
     environment: &BTreeMap<String, String>,
 ) -> Result<IntentPlan, ProgramError> {
-    derive_intent_plan_with_env_and_fs(config, environment, &|path| {
+    derive_intent_plan_with_env_and_fs(loaded_config, environment, &|path| {
         logging::system(Level::Trace, "metadata", format!("path={path}"));
         std::fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false)
     })
@@ -107,29 +109,25 @@ pub fn derive_intent_plan_with_env(
 /// Delegates to `derive_intent_plan_with_injectables` with the real
 /// file-reader so include resolution works against actual config files.
 pub fn derive_intent_plan_with_env_and_fs(
-    config: &Config,
+    loaded_config: &LoadedConfig,
     environment: &BTreeMap<String, String>,
     is_directory: &impl Fn(&str) -> bool,
 ) -> Result<IntentPlan, ProgramError> {
-    derive_intent_plan_with_injectables(config, None, environment, is_directory, &load_config)
+    derive_intent_plan_with_injectables(loaded_config, environment, is_directory, &load_config)
 }
 
 /// Fully injectable planning function used by tests to exercise include
 /// resolution without writing real config files.
 ///
-/// `config_path` is the canonical path of the root config file, used to seed
-/// the cycle-detection stack. Pass `None` when there is no file on disk (e.g.
-/// configs built in tests via `parse_config`).
-///
 /// `read_config_file` is called once per include path. Tests supply a closure
 /// that returns pre-parsed configs from an in-memory map.
 pub fn derive_intent_plan_with_injectables(
-    config: &Config,
-    config_path: Option<&Path>,
+    loaded_config: &LoadedConfig,
     environment: &BTreeMap<String, String>,
     is_directory: &impl Fn(&str) -> bool,
-    read_config_file: &impl Fn(&Path) -> Result<Config, ProgramError>,
+    read_config_file: &impl Fn(&Path) -> Result<LoadedConfig, ProgramError>,
 ) -> Result<IntentPlan, ProgramError> {
+    let config: &Config = loaded_config;
     logging::intent(
         Level::Debug,
         "intent_plan_start",
@@ -146,13 +144,12 @@ pub fn derive_intent_plan_with_injectables(
     let mut missing_files: BTreeSet<PathBuf> = BTreeSet::new();
     // in_flight tracks the ancestor chain for cycle detection; seed with the
     // root config path so a self-referencing include is caught.
-    let mut in_flight: Vec<PathBuf> = config_path
-        .map(|p| vec![p.to_path_buf()])
-        .unwrap_or_default();
+    let mut in_flight: Vec<PathBuf> = vec![loaded_config.path.clone()];
     let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
 
     let sources = plan_sources_recursively(
         config,
+        loaded_config.path.as_path(),
         environment,
         is_directory,
         read_config_file,
@@ -206,9 +203,10 @@ pub fn derive_intent_plan_with_injectables(
 #[allow(clippy::too_many_arguments)]
 fn plan_sources_recursively(
     config: &Config,
+    current_config_path: &Path,
     environment: &BTreeMap<String, String>,
     is_directory: &impl Fn(&str) -> bool,
-    read_config_file: &impl Fn(&Path) -> Result<Config, ProgramError>,
+    read_config_file: &impl Fn(&Path) -> Result<LoadedConfig, ProgramError>,
     in_flight: &mut Vec<PathBuf>,
     seen: &mut BTreeSet<PathBuf>,
     missing_env: &mut BTreeSet<String>,
@@ -306,7 +304,10 @@ fn plan_sources_recursively(
     let mut included_sources = Vec::new();
     for include in &config.includes {
         let (include_path, optional) = match include {
-            Include::Path { path, optional } => (Some(PathBuf::from(path)), *optional),
+            Include::Path { path, optional } => (
+                Some(resolve_include_path(path, current_config_path)),
+                *optional,
+            ),
             Include::Environment { env, optional } => match environment.get(env) {
                 Some(value) => (Some(PathBuf::from(value)), *optional),
                 None if *optional => (None, true),
@@ -334,7 +335,7 @@ fn plan_sources_recursively(
         }
 
         // Attempt to load the included config file.
-        let included_config = match read_config_file(&include_path) {
+        let loaded_included_config = match read_config_file(&include_path) {
             Ok(c) => c,
             // Optional includes are silently skipped when the file is missing.
             Err(ProgramError::ReadConfiguration { .. }) if optional => {
@@ -360,7 +361,8 @@ fn plan_sources_recursively(
         in_flight.push(include_path.clone());
 
         let sub_sources = plan_sources_recursively(
-            &included_config,
+            &loaded_included_config,
+            loaded_included_config.path.as_path(),
             environment,
             is_directory,
             read_config_file,
@@ -380,6 +382,18 @@ fn plan_sources_recursively(
 
     own_sources.extend(included_sources);
     Ok(own_sources)
+}
+
+fn resolve_include_path(path: &str, current_config_path: &Path) -> PathBuf {
+    let include_path = PathBuf::from(path);
+    if include_path.is_absolute() || path.starts_with('~') {
+        return include_path;
+    }
+
+    current_config_path
+        .parent()
+        .map(|parent| parent.join(include_path))
+        .unwrap_or_else(|| PathBuf::from(path))
 }
 
 /// Maps the resolved `overwrite` and `backup_on_overwrite` boolean flags to the
@@ -439,8 +453,8 @@ mod tests {
         derive_intent_plan_with_env_and_fs, derive_intent_plan_with_injectables,
     };
     use crate::{
-        ActionMode, Config, ConfigItem, Defaults, FileConfig, Guard, Include, ProgramError,
-        SelectConfig, Source, SourceRoot,
+        ActionMode, Config, ConfigItem, Defaults, FileConfig, Guard, Include, LoadedConfig,
+        ProgramError, SelectConfig, Source, SourceRoot,
     };
     use std::collections::BTreeMap;
     use std::path::{Path, PathBuf};
@@ -502,6 +516,24 @@ mod tests {
         }
     }
 
+    fn loaded_config_for_test(config: Config, path: &Path) -> LoadedConfig {
+        LoadedConfig {
+            path: path.to_path_buf(),
+            config,
+        }
+    }
+
+    fn root_loaded_config(config: &Config) -> LoadedConfig {
+        loaded_config_for_test(config.clone(), Path::new("/intent-tests/root.yml"))
+    }
+
+    fn loaded_config_for_path(config: &Config, path: Option<&Path>) -> LoadedConfig {
+        loaded_config_for_test(
+            config.clone(),
+            path.unwrap_or_else(|| Path::new("/intent-tests/root.yml")),
+        )
+    }
+
     // ---------------------------------------------------------------------------
     // Intent plan derivation
     // ---------------------------------------------------------------------------
@@ -514,7 +546,7 @@ mod tests {
         )]);
         let environment = BTreeMap::new();
 
-        let plan = derive_intent_plan_with_env(&config, &environment)
+        let plan = derive_intent_plan_with_env(&root_loaded_config(&config), &environment)
             .expect("config should produce an intent plan");
 
         assert_eq!(
@@ -575,7 +607,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env(&config, &BTreeMap::new())
+        let plan = derive_intent_plan_with_env(&root_loaded_config(&config), &BTreeMap::new())
             .expect("config should produce an intent plan");
 
         let expected = IntentPlan {
@@ -649,7 +681,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan(&config)
+        let plan = derive_intent_plan(&root_loaded_config(&config))
             .expect("planning should succeed when the current directory exists");
 
         assert_eq!(
@@ -697,7 +729,7 @@ mod tests {
             "~/projects/private-env".to_string(),
         )]);
 
-        let plan = derive_intent_plan_with_env(&config, &environment)
+        let plan = derive_intent_plan_with_env(&root_loaded_config(&config), &environment)
             .expect("planning should resolve the environment-backed source");
 
         let expected = IntentPlan {
@@ -745,7 +777,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env(&config, &BTreeMap::new())
+        let plan = derive_intent_plan_with_env(&root_loaded_config(&config), &BTreeMap::new())
             .expect("planning should keep explicit path source roots as-is");
 
         assert_eq!(
@@ -786,7 +818,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env(&config, &BTreeMap::new())
+        let plan = derive_intent_plan_with_env(&root_loaded_config(&config), &BTreeMap::new())
             .expect("planning should collapse overwrite-disabled defaults to skip");
 
         let expected = IntentPlan {
@@ -854,7 +886,7 @@ mod tests {
             ],
         };
 
-        let error = derive_intent_plan_with_env(&config, &BTreeMap::new())
+        let error = derive_intent_plan_with_env(&root_loaded_config(&config), &BTreeMap::new())
             .expect_err("planning should fail when environment variables are missing");
 
         assert_eq!(
@@ -891,7 +923,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env(&config, &BTreeMap::new())
+        let plan = derive_intent_plan_with_env(&root_loaded_config(&config), &BTreeMap::new())
             .expect("planning should succeed when an optional environment-backed source is unset");
 
         assert_eq!(plan, expected_plan(vec![]));
@@ -930,8 +962,12 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env_and_fs(&config, &BTreeMap::new(), &|_| false)
-            .expect("planning should succeed with a source-level to");
+        let plan = derive_intent_plan_with_env_and_fs(
+            &root_loaded_config(&config),
+            &BTreeMap::new(),
+            &|_| false,
+        )
+        .expect("planning should succeed with a source-level to");
 
         assert_eq!(
             plan,
@@ -978,9 +1014,11 @@ mod tests {
             "~/Library/Application Support/Code/User".to_string(),
         ]);
 
-        let plan = derive_intent_plan_with_env_and_fs(&config, &BTreeMap::new(), &|path| {
-            known_dirs.contains(path)
-        })
+        let plan = derive_intent_plan_with_env_and_fs(
+            &root_loaded_config(&config),
+            &BTreeMap::new(),
+            &|path| known_dirs.contains(path),
+        )
         .expect("planning should succeed when the to_exists guard is satisfied");
 
         assert_eq!(
@@ -1024,8 +1062,12 @@ mod tests {
             }],
         };
         // Destination directory is absent.
-        let plan = derive_intent_plan_with_env_and_fs(&config, &BTreeMap::new(), &|_| false)
-            .expect("planning should succeed when the to_exists guard is not satisfied");
+        let plan = derive_intent_plan_with_env_and_fs(
+            &root_loaded_config(&config),
+            &BTreeMap::new(),
+            &|_| false,
+        )
+        .expect("planning should succeed when the to_exists guard is not satisfied");
 
         assert_eq!(plan, expected_plan(vec![]));
     }
@@ -1054,9 +1096,11 @@ mod tests {
         };
         let known_dirs = std::collections::BTreeSet::from(["/Applications".to_string()]);
 
-        let plan = derive_intent_plan_with_env_and_fs(&config, &BTreeMap::new(), &|path| {
-            known_dirs.contains(path)
-        })
+        let plan = derive_intent_plan_with_env_and_fs(
+            &root_loaded_config(&config),
+            &BTreeMap::new(),
+            &|path| known_dirs.contains(path),
+        )
         .expect("planning should succeed when the directory_exists guard is satisfied");
 
         assert_eq!(
@@ -1091,8 +1135,12 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env_and_fs(&config, &BTreeMap::new(), &|_| false)
-            .expect("planning should succeed when the directory_exists guard is not satisfied");
+        let plan = derive_intent_plan_with_env_and_fs(
+            &root_loaded_config(&config),
+            &BTreeMap::new(),
+            &|_| false,
+        )
+        .expect("planning should succeed when the directory_exists guard is not satisfied");
 
         assert_eq!(plan, expected_plan(vec![]));
     }
@@ -1130,7 +1178,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env(&config, &BTreeMap::new())
+        let plan = derive_intent_plan_with_env(&root_loaded_config(&config), &BTreeMap::new())
             .expect("planning should produce overwrite-with-backup conflict policy");
 
         assert_eq!(
@@ -1192,13 +1240,12 @@ mod tests {
         };
 
         let plan = derive_intent_plan_with_injectables(
-            &root,
-            None,
+            &loaded_config_for_path(&root, None),
             &BTreeMap::new(),
             &|_| false,
             &|path: &Path| {
                 assert_eq!(path, Path::new("/inc/a.yml"));
-                Ok(included.clone())
+                Ok(loaded_config_for_test(included.clone(), path))
             },
         )
         .expect("planning should succeed with a valid include");
@@ -1213,6 +1260,112 @@ mod tests {
                 IntentSource {
                     from: "inc".to_string(),
                     actions: vec![expected_file_action(".tmux.conf")],
+                },
+            ])
+        );
+    }
+
+    #[test]
+    fn resolve_relative_include_paths_from_the_declaring_config_file() {
+        let included = make_config(vec![make_source(
+            SourceRoot::Path("inc".to_string()),
+            vec![make_file_config_item(".tmux.conf")],
+        )]);
+        let root_path = Path::new("/configs/root.yml");
+        let root = Config {
+            includes: vec![Include::Path {
+                path: "inc/a.yml".to_string(),
+                optional: false,
+            }],
+            ..make_config(vec![make_source(
+                SourceRoot::Path("root_src".to_string()),
+                vec![make_file_config_item(".zshrc")],
+            )])
+        };
+
+        let plan = derive_intent_plan_with_injectables(
+            &loaded_config_for_path(&root, Some(root_path)),
+            &BTreeMap::new(),
+            &|_| false,
+            &|path: &Path| {
+                assert_eq!(path, Path::new("/configs/inc/a.yml"));
+                Ok(loaded_config_for_test(included.clone(), path))
+            },
+        )
+        .expect("planning should resolve a relative include from the declaring file path");
+
+        assert_eq!(
+            plan,
+            expected_plan(vec![
+                IntentSource {
+                    from: "root_src".to_string(),
+                    actions: vec![expected_file_action(".zshrc")],
+                },
+                IntentSource {
+                    from: "inc".to_string(),
+                    actions: vec![expected_file_action(".tmux.conf")],
+                },
+            ])
+        );
+    }
+
+    #[test]
+    fn resolve_nested_relative_include_paths_from_each_declaring_file() {
+        let root_path = Path::new("/configs/root.yml");
+        let c = make_config(vec![make_source(
+            SourceRoot::Path("c_src".to_string()),
+            vec![make_file_config_item(".bashrc")],
+        )]);
+        let a = Config {
+            includes: vec![Include::Path {
+                path: "nested/c.yml".to_string(),
+                optional: false,
+            }],
+            ..make_config(vec![make_source(
+                SourceRoot::Path("a_src".to_string()),
+                vec![make_file_config_item(".aliases")],
+            )])
+        };
+        let root = Config {
+            includes: vec![Include::Path {
+                path: "inc/a.yml".to_string(),
+                optional: false,
+            }],
+            ..make_config(vec![make_source(
+                SourceRoot::Path("root_src".to_string()),
+                vec![make_file_config_item(".zshrc")],
+            )])
+        };
+
+        let plan = derive_intent_plan_with_injectables(
+            &loaded_config_for_path(&root, Some(root_path)),
+            &BTreeMap::new(),
+            &|_| false,
+            &|path: &Path| {
+                if path == Path::new("/configs/inc/a.yml") {
+                    Ok(loaded_config_for_test(a.clone(), path))
+                } else {
+                    assert_eq!(path, Path::new("/configs/inc/nested/c.yml"));
+                    Ok(loaded_config_for_test(c.clone(), path))
+                }
+            },
+        )
+        .expect("planning should resolve each nested relative include from its declaring file");
+
+        assert_eq!(
+            plan,
+            expected_plan(vec![
+                IntentSource {
+                    from: "root_src".to_string(),
+                    actions: vec![expected_file_action(".zshrc")],
+                },
+                IntentSource {
+                    from: "a_src".to_string(),
+                    actions: vec![expected_file_action(".aliases")],
+                },
+                IntentSource {
+                    from: "c_src".to_string(),
+                    actions: vec![expected_file_action(".bashrc")],
                 },
             ])
         );
@@ -1248,16 +1401,15 @@ mod tests {
         };
 
         let plan = derive_intent_plan_with_injectables(
-            &root,
-            None,
+            &loaded_config_for_path(&root, None),
             &BTreeMap::new(),
             &|_| false,
             &|path: &Path| {
                 if path == Path::new("/inc/a.yml") {
-                    Ok(a.clone())
+                    Ok(loaded_config_for_test(a.clone(), path))
                 } else {
                     assert_eq!(path, Path::new("/inc/c.yml"));
-                    Ok(c.clone())
+                    Ok(loaded_config_for_test(c.clone(), path))
                 }
             },
         )
@@ -1318,16 +1470,15 @@ mod tests {
         };
 
         let plan = derive_intent_plan_with_injectables(
-            &root,
-            None,
+            &loaded_config_for_path(&root, None),
             &BTreeMap::new(),
             &|_| false,
             &|path: &Path| {
                 if path == Path::new("/inc/a.yml") {
-                    Ok(a.clone())
+                    Ok(loaded_config_for_test(a.clone(), path))
                 } else {
                     assert_eq!(path, Path::new("/inc/shared.yml"));
-                    Ok(shared.clone())
+                    Ok(loaded_config_for_test(shared.clone(), path))
                 }
             },
         )
@@ -1366,8 +1517,7 @@ mod tests {
         };
 
         let plan = derive_intent_plan_with_injectables(
-            &root,
-            None,
+            &loaded_config_for_path(&root, None),
             &BTreeMap::new(),
             &|_| false,
             &|path: &Path| {
@@ -1408,8 +1558,7 @@ mod tests {
         };
 
         let error = derive_intent_plan_with_injectables(
-            &root,
-            None,
+            &loaded_config_for_path(&root, None),
             &BTreeMap::new(),
             &|_| false,
             &|path: &Path| {
@@ -1467,16 +1616,15 @@ mod tests {
         };
 
         let error = derive_intent_plan_with_injectables(
-            &root,
-            None,
+            &loaded_config_for_path(&root, None),
             &BTreeMap::new(),
             &|_| false,
             &|path: &Path| {
                 if path == Path::new("/inc/a.yml") {
-                    Ok(a.clone())
+                    Ok(loaded_config_for_test(a.clone(), path))
                 } else {
                     assert_eq!(path, Path::new("/inc/b.yml"));
-                    Ok(b.clone())
+                    Ok(loaded_config_for_test(b.clone(), path))
                 }
             },
         )
@@ -1509,8 +1657,7 @@ mod tests {
         };
 
         let error = derive_intent_plan_with_injectables(
-            &root,
-            Some(root_path),
+            &loaded_config_for_path(&root, Some(root_path)),
             &BTreeMap::new(),
             &|_| false,
             &crate::load_config,
@@ -1550,13 +1697,12 @@ mod tests {
         )]);
 
         let plan = derive_intent_plan_with_injectables(
-            &root,
-            None,
+            &loaded_config_for_path(&root, None),
             &environment,
             &|_| false,
             &|path: &Path| {
                 assert_eq!(path, Path::new("/private/.gitenv.yml"));
-                Ok(included.clone())
+                Ok(loaded_config_for_test(included.clone(), path))
             },
         )
         .expect("planning should resolve an environment-backed include path");
@@ -1589,9 +1735,10 @@ mod tests {
             )])
         };
 
-        let plan = derive_intent_plan_with_env(&root, &BTreeMap::new()).expect(
-            "planning should succeed when an optional env-backed include variable is unset",
-        );
+        let plan = derive_intent_plan_with_env(&root_loaded_config(&root), &BTreeMap::new())
+            .expect(
+                "planning should succeed when an optional env-backed include variable is unset",
+            );
 
         assert_eq!(
             plan,
@@ -1615,9 +1762,10 @@ mod tests {
             )])
         };
 
-        let error = derive_intent_plan_with_env(&root, &BTreeMap::new()).expect_err(
-            "planning should fail when a required env-backed include variable is unset",
-        );
+        let error = derive_intent_plan_with_env(&root_loaded_config(&root), &BTreeMap::new())
+            .expect_err(
+                "planning should fail when a required env-backed include variable is unset",
+            );
 
         assert_eq!(
             error,
@@ -1698,13 +1846,12 @@ mod tests {
         };
 
         let plan = derive_intent_plan_with_injectables(
-            &root,
-            None,
+            &loaded_config_for_path(&root, None),
             &BTreeMap::new(),
             &|_| false,
             &|path: &Path| {
                 assert_eq!(path, Path::new("/inc/a.yml"));
-                Ok(included.clone())
+                Ok(loaded_config_for_test(included.clone(), path))
             },
         )
         .expect("planning should succeed and isolate defaults per included config");
@@ -1760,13 +1907,17 @@ mod tests {
             )])
         };
 
-        let error =
-            derive_intent_plan_with_injectables(&root, None, &BTreeMap::new(), &|_| false, &|_| {
+        let error = derive_intent_plan_with_injectables(
+            &loaded_config_for_path(&root, None),
+            &BTreeMap::new(),
+            &|_| false,
+            &|_| {
                 Err(ProgramError::InvalidConfiguration {
                     message: "unknown field `oops`".to_string(),
                 })
-            })
-            .expect_err("a parse error from an included config should propagate immediately");
+            },
+        )
+        .expect_err("a parse error from an included config should propagate immediately");
 
         assert_eq!(
             error,
@@ -1789,15 +1940,19 @@ mod tests {
             )])
         };
 
-        let error =
-            derive_intent_plan_with_injectables(&root, None, &BTreeMap::new(), &|_| false, &|_| {
+        let error = derive_intent_plan_with_injectables(
+            &loaded_config_for_path(&root, None),
+            &BTreeMap::new(),
+            &|_| false,
+            &|_| {
                 Err(ProgramError::InvalidConfiguration {
                     message: "unknown field `oops`".to_string(),
                 })
-            })
-            .expect_err(
-                "planning should propagate structural include errors even when include is optional",
-            );
+            },
+        )
+        .expect_err(
+            "planning should propagate structural include errors even when include is optional",
+        );
 
         assert_eq!(
             error,
@@ -1841,7 +1996,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env(&config, &BTreeMap::new())
+        let plan = derive_intent_plan_with_env(&root_loaded_config(&config), &BTreeMap::new())
             .expect("planning should apply item-level mode override");
 
         assert_eq!(
@@ -1886,8 +2041,12 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env_and_fs(&config, &BTreeMap::new(), &|_| false)
-            .expect("planning should apply item-level to override");
+        let plan = derive_intent_plan_with_env_and_fs(
+            &root_loaded_config(&config),
+            &BTreeMap::new(),
+            &|_| false,
+        )
+        .expect("planning should apply item-level to override");
 
         assert_eq!(
             plan,
@@ -1937,7 +2096,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env(&config, &BTreeMap::new())
+        let plan = derive_intent_plan_with_env(&root_loaded_config(&config), &BTreeMap::new())
             .expect("planning should apply item-level overwrite override");
 
         assert_eq!(
@@ -1988,7 +2147,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env(&config, &BTreeMap::new())
+        let plan = derive_intent_plan_with_env(&root_loaded_config(&config), &BTreeMap::new())
             .expect("planning should apply select item overrides");
 
         assert_eq!(
@@ -2034,7 +2193,7 @@ mod tests {
             }],
         };
 
-        let error = derive_intent_plan_with_env(&config, &BTreeMap::new())
+        let error = derive_intent_plan_with_env(&root_loaded_config(&config), &BTreeMap::new())
             .expect_err("planning should reject explicit overwrite: false with backup_on_overwrite: true at item level");
 
         assert!(matches!(
@@ -2067,7 +2226,8 @@ mod tests {
             }],
         };
 
-        let error = derive_intent_plan_with_env(&config, &BTreeMap::new()).expect_err(
+        let error =
+            derive_intent_plan_with_env(&root_loaded_config(&config), &BTreeMap::new()).expect_err(
             "planning should reject explicit overwrite: false with backup_on_overwrite: true at select item level",
         );
 
@@ -2111,9 +2271,10 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env(&config, &BTreeMap::new()).expect(
-            "planning should succeed when backup default is inherited and overwrite is false",
-        );
+        let plan = derive_intent_plan_with_env(&root_loaded_config(&config), &BTreeMap::new())
+            .expect(
+                "planning should succeed when backup default is inherited and overwrite is false",
+            );
 
         assert_eq!(
             plan,

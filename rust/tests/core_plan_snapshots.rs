@@ -1,6 +1,6 @@
 use gitenv::{
     ActionMode, ConflictPolicy, FileOperation, IntentAction, IntentFileAction, IntentPlan,
-    IntentSelectAction, IntentSource, OperationAction, OperationPlan, ProgramError,
+    IntentSelectAction, IntentSource, LoadedConfig, OperationAction, OperationPlan, ProgramError,
     ResolvedOptions, derive_intent_plan_with_injectables, derive_operation_plan_with_injectables,
     parse_config,
 };
@@ -13,17 +13,23 @@ fn derive_representative_plans(
 ) -> Result<(IntentPlan, OperationPlan), ProgramError> {
     let root = parse_config(root_yaml)?;
     let include = parse_config(include_yaml)?;
+    let loaded_root = LoadedConfig {
+        path: PathBuf::from("/root.yml"),
+        config: root,
+    };
     let environment = BTreeMap::from([("DOTS".to_string(), "/repo/dots".to_string())]);
     let known_directories = BTreeSet::from(["~/shell".to_string(), "/feature/on".to_string()]);
 
     let intent_plan = derive_intent_plan_with_injectables(
-        &root,
-        Some(Path::new("/root.yml")),
+        &loaded_root,
         &environment,
         &|path| known_directories.contains(path),
         &|path: &Path| {
             if path == Path::new("/inc/common.yml") {
-                Ok(include.clone())
+                Ok(LoadedConfig {
+                    path: path.to_path_buf(),
+                    config: include.clone(),
+                })
             } else {
                 Err(ProgramError::ReadConfiguration {
                     path: path.to_path_buf(),

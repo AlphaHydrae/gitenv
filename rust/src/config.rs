@@ -1,7 +1,29 @@
 use crate::{ProgramError, logging};
 use log::Level;
 use serde::{Deserialize, Deserializer};
-use std::path::Path;
+use std::ops::{Deref, DerefMut};
+use std::path::{Path, PathBuf};
+
+/// Configuration loaded from a file path together with its parsed content.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadedConfig {
+    pub path: PathBuf,
+    pub config: Config,
+}
+
+impl Deref for LoadedConfig {
+    type Target = Config;
+
+    fn deref(&self) -> &Self::Target {
+        &self.config
+    }
+}
+
+impl DerefMut for LoadedConfig {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.config
+    }
+}
 
 /// Parsed top-level configuration model.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -323,7 +345,7 @@ pub fn parse_config(yaml: &str) -> Result<Config, ProgramError> {
 }
 
 /// Reads a config file from disk and parses its YAML content.
-pub fn load_config(path: &Path) -> Result<Config, ProgramError> {
+pub fn load_config(path: &Path) -> Result<LoadedConfig, ProgramError> {
     logging::config(
         Level::Debug,
         "load_config_start",
@@ -348,16 +370,22 @@ pub fn load_config(path: &Path) -> Result<Config, ProgramError> {
         format!("path={} yaml_bytes={}", path.display(), yaml.len()),
     );
 
-    parse_config(&yaml)
+    let config = parse_config(&yaml)?;
+
+    Ok(LoadedConfig {
+        path: path.to_path_buf(),
+        config,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        ActionMode, Config, ConfigItem, Defaults, FileConfig, Guard, Include, SelectConfig, Source,
-        SourceRoot, load_config, parse_config,
+        ActionMode, Config, ConfigItem, Defaults, FileConfig, Guard, Include, LoadedConfig,
+        SelectConfig, Source, SourceRoot, load_config, parse_config,
     };
     use crate::ProgramError;
+    use std::path::PathBuf;
     use tempfile::NamedTempFile;
 
     fn expected_single_file_source_config(
@@ -439,17 +467,34 @@ sources:
         let mut temp_file = NamedTempFile::new().expect("temporary config file should be created");
         std::io::Write::write_all(&mut temp_file, yaml.as_bytes())
             .expect("temp config should be written");
-        let config = load_config(temp_file.path()).expect("config should load from disk");
+        let loaded = load_config(temp_file.path()).expect("config should load from disk");
+        let expected = expected_single_file_source_config(
+            SourceRoot::Path(".".to_string()),
+            None,
+            None,
+            ".zshrc",
+        );
 
-        assert_eq!(
-            config,
-            expected_single_file_source_config(
+        assert_eq!(loaded.path, temp_file.path());
+        assert_eq!(&*loaded, &expected);
+    }
+
+    #[test]
+    fn allow_mutating_loaded_config_fields_without_nested_config_field_access() {
+        let mut loaded = LoadedConfig {
+            path: PathBuf::from("/tmp/gitenv-config.yml"),
+            config: expected_single_file_source_config(
                 SourceRoot::Path(".".to_string()),
                 None,
                 None,
-                ".zshrc"
-            )
-        );
+                ".zshrc",
+            ),
+        };
+
+        loaded.repository = "~/projects/updated".to_string();
+
+        assert_eq!(loaded.repository, "~/projects/updated");
+        assert_eq!(loaded.path, PathBuf::from("/tmp/gitenv-config.yml"));
     }
 
     #[test]

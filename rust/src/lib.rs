@@ -17,8 +17,8 @@ pub use actions::{
     apply_operation_plan_with_injectables,
 };
 pub use config::{
-    ActionMode, Config, ConfigItem, Defaults, FileConfig, Guard, Include, SelectConfig, Source,
-    SourceRoot, load_config, parse_config,
+    ActionMode, Config, ConfigItem, Defaults, FileConfig, Guard, Include, LoadedConfig,
+    SelectConfig, Source, SourceRoot, load_config, parse_config,
 };
 pub use intent::{
     ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction, IntentSource,
@@ -181,12 +181,12 @@ pub fn run_cli() -> Result<ProgramOutput, ProgramError> {
 }
 
 fn run_info(
-    load_config: impl FnOnce() -> Result<Config, ProgramError>,
+    load_config: impl FnOnce() -> Result<LoadedConfig, ProgramError>,
     system: SystemCalls<'_>,
     runtime_config: RuntimeConfig,
 ) -> Result<ProgramOutput, ProgramError> {
-    let config = load_config()?;
-    let intent_plan = derive_intent_plan(&config)?;
+    let loaded_config = load_config()?;
+    let intent_plan = derive_intent_plan(&loaded_config)?;
     let home_directory = fs_adapter::resolve_home_directory(system.get_env_var_os)?;
     let operation_plan = operation::derive_operation_plan_with_injectables(
         &intent_plan,
@@ -204,12 +204,12 @@ fn run_info(
 }
 
 fn run_apply(
-    load_config: impl FnOnce() -> Result<Config, ProgramError>,
+    load_config: impl FnOnce() -> Result<LoadedConfig, ProgramError>,
     system: SystemCalls<'_>,
     runtime_config: RuntimeConfig,
 ) -> Result<ProgramOutput, ProgramError> {
-    let config = load_config()?;
-    let intent_plan = derive_intent_plan(&config)?;
+    let loaded_config = load_config()?;
+    let intent_plan = derive_intent_plan(&loaded_config)?;
     let home_directory = fs_adapter::resolve_home_directory(system.get_env_var_os)?;
     let operation_plan = operation::derive_operation_plan_with_injectables(
         &intent_plan,
@@ -229,7 +229,7 @@ fn run_apply(
     })
 }
 
-fn load_default_config_with_system(system: SystemCalls<'_>) -> Result<Config, ProgramError> {
+fn load_default_config_with_system(system: SystemCalls<'_>) -> Result<LoadedConfig, ProgramError> {
     let config_path = default_config_path_with_system(system)?;
     load_config(&config_path)
 }
@@ -411,8 +411,8 @@ impl std::error::Error for ProgramError {}
 #[cfg(test)]
 mod tests {
     use super::{
-        ActionMode, ColorMode, Config, ConfigItem, Defaults, FileConfig, ProgramError,
-        RuntimeConfig, Source, SourceRoot, SystemCalls, default_config_path_from_env,
+        ActionMode, ColorMode, Config, ConfigItem, Defaults, FileConfig, LoadedConfig,
+        ProgramError, RuntimeConfig, Source, SourceRoot, SystemCalls, default_config_path_from_env,
         default_config_path_from_inputs, load_config, load_default_config_with_system, run_apply,
         run_info,
     };
@@ -451,6 +451,13 @@ mod tests {
             overwrite: None,
             backup_on_overwrite: None,
         })
+    }
+
+    fn loaded_config_for_test(config: Config) -> LoadedConfig {
+        LoadedConfig {
+            path: PathBuf::from("/tmp/gitenv-test-config.yml"),
+            config,
+        }
     }
 
     #[test]
@@ -544,6 +551,76 @@ mod tests {
     }
 
     #[test]
+    fn show_default_inspection_output_when_config_path_is_provided_for_relative_include() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::write(repository.path().join("root.conf"), "root\n")
+            .expect("root source file should be written");
+        fs::write(repository.path().join("shared.conf"), "shared\n")
+            .expect("shared source file should be written");
+
+        let config_directory = home.path().join("configs");
+        let root_config_path = config_directory.join("root.yml");
+        let shared_config_path = config_directory.join("includes").join("shared.yml");
+        let root_config = format!(
+            concat!(
+                "version: 1\n",
+                "repository: \"{}\"\n",
+                "includes:\n",
+                "  - includes/shared.yml\n",
+                "sources:\n",
+                "  - from: \".\"\n",
+                "    configs:\n",
+                "      - file: root.conf\n",
+                "        as: .root.conf\n"
+            ),
+            repository.path().display()
+        );
+        let shared_config = format!(
+            concat!(
+                "version: 1\n",
+                "repository: \"{}\"\n",
+                "sources:\n",
+                "  - from: \".\"\n",
+                "    configs:\n",
+                "      - file: shared.conf\n",
+                "        as: .shared.conf\n"
+            ),
+            repository.path().display()
+        );
+        fs::create_dir_all(
+            shared_config_path
+                .parent()
+                .expect("shared config should have a parent directory"),
+        )
+        .expect("shared config directory should be created");
+        fs::write(&root_config_path, root_config).expect("root config should be written");
+        fs::write(&shared_config_path, shared_config).expect("shared config should be written");
+
+        let env_values =
+            BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
+        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
+        let output = run_info(
+            || load_config(&root_config_path),
+            SystemCalls {
+                get_env_var_os: &get_env_var_os,
+            },
+            RuntimeConfig::new(ColorMode::Auto, false, false),
+        )
+        .expect("run_info should resolve relative include paths from the provided config path");
+
+        let expected = format!(
+            concat!(
+                "~/.root.conf -> {}   not yet set up\n",
+                "~/.shared.conf -> {}   not yet set up"
+            ),
+            repository.path().join(".").join("root.conf").display(),
+            repository.path().join(".").join("shared.conf").display(),
+        );
+        assert_eq!(output.message, expected);
+    }
+
+    #[test]
     fn propagate_copy_source_read_failures_from_default_inspection() {
         let home = TempDir::new().expect("temporary home directory should be created");
         let repository = TempDir::new().expect("temporary repository should be created");
@@ -562,7 +639,7 @@ mod tests {
         let get_env_var_os = move |name: &str| env_values.get(name).cloned();
 
         let error = run_info(
-            || Ok(config),
+            || Ok(loaded_config_for_test(config)),
             SystemCalls {
                 get_env_var_os: &get_env_var_os,
             },
@@ -597,7 +674,7 @@ mod tests {
 
         let get_env_var_os = |_: &str| None::<OsString>;
         let error = run_info(
-            || Ok(config),
+            || Ok(loaded_config_for_test(config)),
             SystemCalls {
                 get_env_var_os: &get_env_var_os,
             },
@@ -633,7 +710,7 @@ mod tests {
 
         let get_env_var_os = |_: &str| None::<OsString>;
         let error = run_apply(
-            || Ok(config),
+            || Ok(loaded_config_for_test(config)),
             SystemCalls {
                 get_env_var_os: &get_env_var_os,
             },
@@ -712,6 +789,76 @@ mod tests {
     }
 
     #[test]
+    fn show_apply_output_when_config_path_is_provided_for_relative_include() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::write(repository.path().join("root.conf"), "root\n")
+            .expect("root source file should be written");
+        fs::write(repository.path().join("shared.conf"), "shared\n")
+            .expect("shared source file should be written");
+
+        let config_directory = home.path().join("configs");
+        let root_config_path = config_directory.join("root.yml");
+        let shared_config_path = config_directory.join("includes").join("shared.yml");
+        let root_config = format!(
+            concat!(
+                "version: 1\n",
+                "repository: \"{}\"\n",
+                "includes:\n",
+                "  - includes/shared.yml\n",
+                "sources:\n",
+                "  - from: \".\"\n",
+                "    configs:\n",
+                "      - file: root.conf\n",
+                "        as: .root.conf\n"
+            ),
+            repository.path().display()
+        );
+        let shared_config = format!(
+            concat!(
+                "version: 1\n",
+                "repository: \"{}\"\n",
+                "sources:\n",
+                "  - from: \".\"\n",
+                "    configs:\n",
+                "      - file: shared.conf\n",
+                "        as: .shared.conf\n"
+            ),
+            repository.path().display()
+        );
+        fs::create_dir_all(
+            shared_config_path
+                .parent()
+                .expect("shared config should have a parent directory"),
+        )
+        .expect("shared config directory should be created");
+        fs::write(&root_config_path, root_config).expect("root config should be written");
+        fs::write(&shared_config_path, shared_config).expect("shared config should be written");
+
+        let env_values =
+            BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
+        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
+        let output = run_apply(
+            || load_config(&root_config_path),
+            SystemCalls {
+                get_env_var_os: &get_env_var_os,
+            },
+            RuntimeConfig::new(ColorMode::Auto, false, false),
+        )
+        .expect("run_apply should resolve relative include paths from the provided config path");
+
+        let expected = format!(
+            concat!(
+                "created symlink ~/.root.conf -> {}\n",
+                "created symlink ~/.shared.conf -> {}"
+            ),
+            repository.path().join(".").join("root.conf").display(),
+            repository.path().join(".").join("shared.conf").display(),
+        );
+        assert_eq!(output.message, expected);
+    }
+
+    #[test]
     fn propagate_copy_failures_from_apply_execution() {
         let home = TempDir::new().expect("temporary home directory should be created");
         let repository = TempDir::new().expect("temporary repository should be created");
@@ -727,7 +874,7 @@ mod tests {
             BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
         let get_env_var_os = move |name: &str| env_values.get(name).cloned();
         let error = run_apply(
-            || Ok(config),
+            || Ok(loaded_config_for_test(config)),
             SystemCalls {
                 get_env_var_os: &get_env_var_os,
             },
@@ -767,7 +914,7 @@ mod tests {
         let get_env_var_os = |_: &str| None::<OsString>;
 
         let info_error = run_info(
-            || Ok(info_config),
+            || Ok(loaded_config_for_test(info_config)),
             SystemCalls {
                 get_env_var_os: &get_env_var_os,
             },
@@ -777,7 +924,7 @@ mod tests {
         assert_eq!(info_error, ProgramError::HomeDirectoryUnavailable);
 
         let apply_error = run_apply(
-            || Ok(apply_config),
+            || Ok(loaded_config_for_test(apply_config)),
             SystemCalls {
                 get_env_var_os: &get_env_var_os,
             },
@@ -895,6 +1042,49 @@ mod tests {
         .expect_err("default config loading should fail without HOME and override");
 
         assert_eq!(error, ProgramError::HomeDirectoryUnavailable);
+    }
+
+    #[test]
+    fn load_default_config_when_home_is_available() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        let config_path = home
+            .path()
+            .join(".config")
+            .join("gitenv")
+            .join("config.yml");
+
+        fs::create_dir_all(
+            config_path
+                .parent()
+                .expect("default config path should have a parent"),
+        )
+        .expect("default config directory should be created");
+        fs::write(
+            &config_path,
+            format!(
+                concat!(
+                    "version: 1\n",
+                    "repository: \"{}\"\n",
+                    "sources:\n",
+                    "  - from: \".\"\n",
+                    "    configs:\n",
+                    "      - file: .zshrc\n"
+                ),
+                repository.path().display()
+            ),
+        )
+        .expect("default config file should be written");
+
+        let env_values =
+            BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
+        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
+        let config = load_default_config_with_system(SystemCalls {
+            get_env_var_os: &get_env_var_os,
+        })
+        .expect("default config loading should succeed with HOME");
+
+        assert_eq!(config.repository, repository.path().display().to_string());
     }
 
     #[test]

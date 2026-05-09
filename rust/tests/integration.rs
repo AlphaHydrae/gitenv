@@ -35,7 +35,7 @@ fn replace_home_prefix_with_tilde(output: String, home: &Path) -> String {
 
 #[cfg(unix)]
 #[test]
-fn show_the_default_info_output_for_a_mixed_primary_workflow_scenario() {
+fn test_info_command() {
     let home = TempDir::new().expect("temporary home directory should be created");
     let repository = TempDir::new().expect("temporary repository should be created");
 
@@ -364,7 +364,7 @@ fn show_the_default_info_output_for_a_mixed_primary_workflow_scenario() {
 
 #[cfg(unix)]
 #[test]
-fn show_the_apply_output_for_a_mixed_primary_workflow_scenario() {
+fn test_apply_command() {
     let home = TempDir::new().expect("temporary home directory should be created");
     let repository = TempDir::new().expect("temporary repository should be created");
     let env_source = TempDir::new().expect("temporary env source directory should be created");
@@ -696,4 +696,69 @@ fn show_the_apply_output_for_a_mixed_primary_workflow_scenario() {
         !ignored_target.exists(),
         "excluded select entries should not create targets"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn show_info_output_when_config_uses_relative_include_paths() {
+    let home = TempDir::new().expect("temporary home directory should be created");
+    let repository = TempDir::new().expect("temporary repository should be created");
+
+    write_file(&repository.path().join("root.conf"), "root\n");
+    write_file(&repository.path().join("shared.conf"), "shared\n");
+
+    let root_config = format!(
+        concat!(
+            "version: 1\n",
+            "repository: \"{}\"\n",
+            "includes:\n",
+            "  - includes/shared.yml\n",
+            "sources:\n",
+            "  - from: \".\"\n",
+            "    configs:\n",
+            "      - file: root.conf\n",
+            "        as: .root.conf\n"
+        ),
+        repository.path().display()
+    );
+    let shared_config = format!(
+        concat!(
+            "version: 1\n",
+            "repository: \"{}\"\n",
+            "sources:\n",
+            "  - from: \".\"\n",
+            "    configs:\n",
+            "      - file: shared.conf\n",
+            "        as: .shared.conf\n"
+        ),
+        repository.path().display()
+    );
+
+    let config_directory = home.path().join(".config").join("gitenv");
+    write_file(&config_directory.join("config.yml"), &root_config);
+    write_file(
+        &config_directory.join("includes").join("shared.yml"),
+        &shared_config,
+    );
+
+    let unrelated_working_directory = TempDir::new().expect("temporary working directory");
+    let output = gitenv_command_for_home(&home)
+        .current_dir(unrelated_working_directory.path())
+        .output()
+        .expect("binary should run");
+
+    let expected_stdout = replace_home_prefix_with_tilde(
+        format!(
+            concat!("{} -> {}   not yet set up\n", "{} -> {}   not yet set up\n"),
+            home.path().join(".root.conf").display(),
+            repository.path().join(".").join("root.conf").display(),
+            home.path().join(".shared.conf").display(),
+            repository.path().join(".").join("shared.conf").display(),
+        ),
+        home.path(),
+    );
+
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), expected_stdout);
+    assert!(output.stderr.is_empty());
 }
