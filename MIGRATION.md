@@ -291,12 +291,16 @@ Current status:
       fails.
 - [x] Primary inspection/apply status states are colorized for terminal output
       and remain plain in non-terminal contexts.
-- [ ] Configurable logging controls for CLI and library APIs are still pending.
+- [x] Configurable logging controls are available in CLI (`--log-level`) and
+  library (`init_logging`).
+- [x] Temporary Rust-port usage examples live in `rust/README.md`.
+- [ ] Home-based CLI path rendering still uses absolute paths; `~` display
+      parity is tracked as a follow-up increment.
 
 Exit criteria:
 
-- [ ] End-to-end CLI tests cover primary workflows.
-- [ ] README examples run as documented.
+- [x] End-to-end CLI tests cover primary workflows.
+- [ ] Rust-port README examples run as documented.
 
 ### Phase 4: Hardening and release readiness
 

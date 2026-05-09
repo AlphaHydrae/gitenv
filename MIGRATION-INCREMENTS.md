@@ -41,20 +41,43 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 28: Update README and finalize Phase 3 exit criteria
+### Increment 33: Resolve include paths relative to the including file
 
 Why this increment exists:
 
-- The README still documents the Ruby CLI; Phase 3 requires README examples
-  that match the Rust CLI.
-- Phase 3 exit criteria ("end-to-end CLI tests cover primary workflows" and
-  "README examples run as documented") must be directly verifiable.
+- The README documents that relative include paths are resolved relative to the
+  file that declares them, which is the expected behavior for a composable
+  config system.
+- Currently `plan_sources_recursively` in `intent.rs` builds
+  `PathBuf::from(path)` directly from the raw string, with no reference to the
+  including file's directory. This means relative paths are resolved against the
+  process working directory, not the declaring file, which will surprise users.
 
 Review target:
 
-- Update README to document the Rust CLI commands with accurate examples.
-- Add or expand end-to-end CLI tests so both Phase 3 exit criteria are met.
-- Mark Phase 3 exit criteria as complete in MIGRATION.md.
+- Pass the including file's path through `plan_sources_recursively` so that
+  relative `Include::Path` values are joined against the including file's parent
+  directory.
+- Absolute paths and paths starting with `~` continue to be used as-is.
+- Add unit and integration tests asserting that a relative include path is
+  resolved relative to the declaring file, not the working directory.
+
+### Increment 34: Display home-based paths with `~`
+
+Why this increment exists:
+
+- The Rust CLI currently renders home-based paths as absolute paths.
+- The temporary Rust README now uses `~` in output examples for readability and
+  parity with the original documentation style.
+- Phase 3 documentation parity is not complete until CLI output matches that
+  home-relative display form.
+
+Review target:
+
+- Render target and source paths under the current home directory with a `~`
+  prefix in CLI output.
+- Ensure `points to ...` diagnostics also shorten home-based paths.
+- Add unit and integration coverage for the home-relative display behavior.
 
 ### Increment 29: Normalize error names
 

@@ -11,6 +11,11 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-09: Expand primary CLI end-to-end workflow coverage - Move the broad
+  end-to-end workflow scenarios into `integration.rs`, keep `cli_output.rs`
+  focused on minimal subprocess-boundary checks, broaden the info/apply
+  scenarios to cover mixed symlink/copy/select states and conflicts, and add a
+  temporary Rust-port README with section-by-section configuration guidance.
 - 2026-05-09: Unify ANSI color policy - Introduce shared color-policy handling
   with `COLOR=auto|yes|no`, add a `--color` CLI override with precedence over
   environment values.
