@@ -41,23 +41,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 43: Reject empty sources and empty source configs
-
-Why this increment exists:
-
-- A configuration with `sources: []` or a source entry with `configs: []` is
-  currently tolerated, but it is not meaningful user intent.
-- Rejecting these shapes will make configuration errors clearer and reduce the
-  need to reason about no-op configuration structures.
-
-Review target:
-
-- Decide whether the validation belongs in parsing, normalization, or intent
-  derivation.
-- Reject configs with no sources.
-- Reject any source entry that declares no configs.
-- Add targeted tests for both invalid shapes and the resulting error messages.
-
 ### Increment 44: Skip copy when target content already matches
 
 Why this increment exists:

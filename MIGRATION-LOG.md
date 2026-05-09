@@ -11,6 +11,8 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-09: Reject configs with no sources or no per-source config items
+  during parsing.
 - 2026-05-09: Resolve include paths relative to declaring config files - Resolve
   relative include paths against each declaring config file's directory, keep
   absolute and `~` include paths unchanged.

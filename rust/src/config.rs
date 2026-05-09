@@ -1,6 +1,7 @@
 use crate::{ProgramError, logging};
 use log::Level;
 use serde::{Deserialize, Deserializer};
+use std::borrow::Cow;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 
@@ -320,6 +321,7 @@ pub fn parse_config(yaml: &str) -> Result<Config, ProgramError> {
 
     match serde_yaml::from_str::<Config>(yaml) {
         Ok(config) => {
+            validate_config(&config)?;
             logging::config(
                 Level::Info,
                 "parse_config_success",
@@ -341,6 +343,35 @@ pub fn parse_config(yaml: &str) -> Result<Config, ProgramError> {
                 message: format!("config YAML parse failed ({error})"),
             })
         }
+    }
+}
+
+fn validate_config(config: &Config) -> Result<(), ProgramError> {
+    if config.sources.is_empty() {
+        return Err(ProgramError::InvalidConfiguration {
+            message: "config must declare at least one source".to_string(),
+        });
+    }
+
+    for source in &config.sources {
+        if source.configs.is_empty() {
+            return Err(ProgramError::InvalidConfiguration {
+                message: format!(
+                    "source `{}` must declare at least one config item",
+                    source_root_label(&source.from)
+                ),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn source_root_label(source_root: &SourceRoot) -> Cow<'_, str> {
+    match source_root {
+        SourceRoot::Path(path) => Cow::Borrowed(path),
+        SourceRoot::ExplicitPath { path } => Cow::Borrowed(path),
+        SourceRoot::Environment { env, .. } => Cow::Owned(format!("${env}")),
     }
 }
 
@@ -757,6 +788,87 @@ sources:
             ProgramError::InvalidConfiguration { message }
                 if message.contains("missing field `repository`")
         ));
+    }
+
+    #[test]
+    fn reject_a_config_without_sources() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources: []
+"#;
+
+        let error = parse_config(yaml).expect_err("config should fail without sources");
+
+        assert_eq!(
+            error,
+            ProgramError::InvalidConfiguration {
+                message: "config must declare at least one source".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn reject_a_source_without_configs() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs: []
+"#;
+
+        let error = parse_config(yaml).expect_err("source should fail without config items");
+
+        assert_eq!(
+            error,
+            ProgramError::InvalidConfiguration {
+                message: "source `.` must declare at least one config item".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn reject_an_explicit_path_source_without_configs() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from:
+      path: /tmp/private
+    configs: []
+"#;
+
+        let error = parse_config(yaml).expect_err("source should fail without config items");
+
+        assert_eq!(
+            error,
+            ProgramError::InvalidConfiguration {
+                message: "source `/tmp/private` must declare at least one config item".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn reject_an_environment_backed_source_without_configs() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from:
+      env: PRIVATE_ENV_DIR
+    configs: []
+"#;
+
+        let error = parse_config(yaml).expect_err("source should fail without config items");
+
+        assert_eq!(
+            error,
+            ProgramError::InvalidConfiguration {
+                message: "source `$PRIVATE_ENV_DIR` must declare at least one config item"
+                    .to_string(),
+            }
+        );
     }
 
     #[test]
