@@ -1,4 +1,5 @@
-use crate::ProgramError;
+use crate::{ProgramError, logging};
+use log::Level;
 use serde::{Deserialize, Deserializer};
 use std::path::Path;
 
@@ -289,17 +290,63 @@ pub struct SelectConfig {
 
 /// Parses YAML text into the strongly typed configuration model.
 pub fn parse_config(yaml: &str) -> Result<Config, ProgramError> {
-    serde_yaml::from_str(yaml).map_err(|error| ProgramError::InvalidConfiguration {
-        message: format!("config YAML parse failed ({error})"),
-    })
+    logging::config(
+        Level::Debug,
+        "parse_config_start",
+        format!("yaml_bytes={}", yaml.len()),
+    );
+
+    match serde_yaml::from_str::<Config>(yaml) {
+        Ok(config) => {
+            logging::config(
+                Level::Info,
+                "parse_config_success",
+                format!(
+                    "sources={} includes={}",
+                    config.sources.len(),
+                    config.includes.len()
+                ),
+            );
+            Ok(config)
+        }
+        Err(error) => {
+            logging::config(
+                Level::Warn,
+                "parse_config_failed",
+                format!("message={error}"),
+            );
+            Err(ProgramError::InvalidConfiguration {
+                message: format!("config YAML parse failed ({error})"),
+            })
+        }
+    }
 }
 
 /// Reads a config file from disk and parses its YAML content.
 pub fn load_config(path: &Path) -> Result<Config, ProgramError> {
-    let yaml = std::fs::read_to_string(path).map_err(|error| ProgramError::ReadConfiguration {
-        path: path.to_path_buf(),
-        message: error.to_string(),
+    logging::config(
+        Level::Debug,
+        "load_config_start",
+        format!("path={}", path.display()),
+    );
+
+    let yaml = std::fs::read_to_string(path).map_err(|error| {
+        logging::config(
+            Level::Warn,
+            "load_config_failed",
+            format!("path={} message={error}", path.display()),
+        );
+        ProgramError::ReadConfiguration {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        }
     })?;
+
+    logging::config(
+        Level::Debug,
+        "load_config_success",
+        format!("path={} yaml_bytes={}", path.display(), yaml.len()),
+    );
 
     parse_config(&yaml)
 }

@@ -11,6 +11,11 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-09: Introduce structured logging across domain modules - Add the
+  shared Rust logging module and `log` dependency, emit structured domain
+  events from config loading/parsing, intent planning, operation expansion,
+  status inspection, and apply execution, while keeping logging transport and
+  level controls at the composition-root boundary.
 - 2026-05-08: Move CLI rendering out of lib.rs into cli.rs - Move status/apply
   rendering helpers, ANSI color logic, and terminal-color probing into the CLI
   module; keep `lib.rs` focused on orchestration; migrate rendering tests to

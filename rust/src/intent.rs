@@ -1,6 +1,8 @@
 use crate::ProgramError;
 use crate::config::{ActionMode, Config, ConfigItem, Defaults, Guard, Include, SourceRoot};
 use crate::load_config;
+use crate::logging;
+use log::Level;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -94,6 +96,7 @@ pub fn derive_intent_plan_with_env(
     environment: &BTreeMap<String, String>,
 ) -> Result<IntentPlan, ProgramError> {
     derive_intent_plan_with_env_and_fs(config, environment, &|path| {
+        logging::system(Level::Trace, "metadata", format!("path={path}"));
         std::fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false)
     })
 }
@@ -127,6 +130,18 @@ pub fn derive_intent_plan_with_injectables(
     is_directory: &impl Fn(&str) -> bool,
     read_config_file: &impl Fn(&Path) -> Result<Config, ProgramError>,
 ) -> Result<IntentPlan, ProgramError> {
+    logging::intent(
+        Level::Debug,
+        "intent_plan_start",
+        format!(
+            "repository={} sources={} includes={} env_vars={}",
+            config.repository,
+            config.sources.len(),
+            config.includes.len(),
+            environment.len()
+        ),
+    );
+
     let mut missing_env: BTreeSet<String> = BTreeSet::new();
     let mut missing_files: BTreeSet<PathBuf> = BTreeSet::new();
     // in_flight tracks the ancestor chain for cycle detection; seed with the
@@ -158,6 +173,16 @@ pub fn derive_intent_plan_with_injectables(
             paths: missing_files.into_iter().collect(),
         });
     }
+
+    let action_count = sources
+        .iter()
+        .map(|source| source.actions.len())
+        .sum::<usize>();
+    logging::intent(
+        Level::Info,
+        "intent_plan_success",
+        format!("sources={} actions={}", sources.len(), action_count),
+    );
 
     Ok(IntentPlan {
         repository: config.repository.clone(),

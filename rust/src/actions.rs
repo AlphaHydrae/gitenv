@@ -1,4 +1,5 @@
-use crate::{FileOperation, OperationAction, OperationPlan, ProgramError};
+use crate::{FileOperation, OperationAction, OperationPlan, ProgramError, logging};
+use log::Level;
 use std::path::Path;
 
 const BACKUP_SUFFIX: &str = ".orig";
@@ -35,27 +36,58 @@ pub fn apply_operation_plan_with_injectables(
     target_exists: &impl Fn(&Path) -> Result<bool, ProgramError>,
     create_symlink: &impl Fn(&Path, &Path) -> Result<(), ProgramError>,
 ) -> Result<ApplyOperationReport, ProgramError> {
+    logging::actions(
+        Level::Info,
+        "apply_operation_plan_start",
+        format!("actions={}", operation_plan.actions.len()),
+    );
+
     let mut outcomes = Vec::new();
 
     for action in &operation_plan.actions {
-        match action {
+        let outcome = match action {
             OperationAction::Symlink(operation) => {
-                outcomes.push(apply_symlink_operation(
-                    operation,
-                    target_exists,
-                    create_symlink,
-                )?);
+                apply_symlink_operation(operation, target_exists, create_symlink)?
             }
-            OperationAction::Copy(operation) => {
-                outcomes.push(apply_copy_operation(operation, target_exists)?);
-            }
-        }
+            OperationAction::Copy(operation) => apply_copy_operation(operation, target_exists)?,
+        };
+
+        logging::actions(
+            Level::Debug,
+            "apply_action_processed",
+            format!("kind={}", action_kind_from_outcome(&outcome)),
+        );
+
+        outcomes.push(outcome);
     }
+
+    logging::actions(
+        Level::Info,
+        "apply_operation_plan_success",
+        format!("outcomes={}", outcomes.len()),
+    );
 
     Ok(ApplyOperationReport { outcomes })
 }
 
+fn action_kind_from_outcome(outcome: &ApplyOperationOutcome) -> &'static str {
+    match outcome {
+        ApplyOperationOutcome::Applied(OperationAction::Symlink(_))
+        | ApplyOperationOutcome::SkippedExistingTarget(OperationAction::Symlink(_))
+        | ApplyOperationOutcome::UnsupportedOperation(OperationAction::Symlink(_)) => "symlink",
+        ApplyOperationOutcome::Applied(OperationAction::Copy(_))
+        | ApplyOperationOutcome::SkippedExistingTarget(OperationAction::Copy(_))
+        | ApplyOperationOutcome::UnsupportedOperation(OperationAction::Copy(_)) => "copy",
+    }
+}
+
 fn target_exists(path: &Path) -> Result<bool, ProgramError> {
+    logging::system(
+        Level::Trace,
+        "symlink_metadata",
+        format!("path={}", path.display()),
+    );
+
     match std::fs::symlink_metadata(path) {
         Ok(_) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -150,6 +182,12 @@ fn apply_copy_operation(
 }
 
 fn copy_source_to_target(source: &Path, target: &Path) -> Result<(), ProgramError> {
+    logging::system(
+        Level::Trace,
+        "copy",
+        format!("source={} target={}", source.display(), target.display()),
+    );
+
     std::fs::copy(source, target)
         .map(|_| ())
         .map_err(|error| ProgramError::CopyFile {
@@ -164,6 +202,12 @@ fn ensure_parent_directory_exists(target: &Path) -> Result<(), ProgramError> {
         return Ok(());
     };
 
+    logging::system(
+        Level::Trace,
+        "create_dir_all",
+        format!("path={}", parent.display()),
+    );
+
     std::fs::create_dir_all(parent).map_err(|error| ProgramError::CreateTargetDirectory {
         path: parent.to_path_buf(),
         message: error.to_string(),
@@ -171,17 +215,35 @@ fn ensure_parent_directory_exists(target: &Path) -> Result<(), ProgramError> {
 }
 
 fn remove_target_path(path: &Path) -> Result<(), ProgramError> {
+    logging::system(
+        Level::Trace,
+        "symlink_metadata",
+        format!("path={}", path.display()),
+    );
+
     let metadata = std::fs::symlink_metadata(path).map_err(|error| ProgramError::RemoveTarget {
         path: path.to_path_buf(),
         message: error.to_string(),
     })?;
 
     if metadata.file_type().is_dir() {
+        logging::system(
+            Level::Trace,
+            "remove_dir",
+            format!("path={}", path.display()),
+        );
+
         std::fs::remove_dir(path).map_err(|error| ProgramError::RemoveTarget {
             path: path.to_path_buf(),
             message: error.to_string(),
         })
     } else {
+        logging::system(
+            Level::Trace,
+            "remove_file",
+            format!("path={}", path.display()),
+        );
+
         std::fs::remove_file(path).map_err(|error| ProgramError::RemoveTarget {
             path: path.to_path_buf(),
             message: error.to_string(),
@@ -190,6 +252,16 @@ fn remove_target_path(path: &Path) -> Result<(), ProgramError> {
 }
 
 fn move_target_to_backup(target: &Path, backup_path: &Path) -> Result<(), ProgramError> {
+    logging::system(
+        Level::Trace,
+        "rename",
+        format!(
+            "source={} target={}",
+            target.display(),
+            backup_path.display()
+        ),
+    );
+
     std::fs::rename(target, backup_path).map_err(|error| ProgramError::BackupTarget {
         path: target.to_path_buf(),
         backup_path: backup_path.to_path_buf(),
@@ -205,6 +277,12 @@ fn backup_path_for_target(path: &Path) -> std::path::PathBuf {
 
 #[cfg(unix)]
 fn create_symlink_on_filesystem(source: &Path, target: &Path) -> Result<(), ProgramError> {
+    logging::system(
+        Level::Trace,
+        "symlink",
+        format!("source={} target={}", source.display(), target.display()),
+    );
+
     std::os::unix::fs::symlink(source, target).map_err(|error| ProgramError::CreateSymlink {
         source: source.to_path_buf(),
         target: target.to_path_buf(),

@@ -162,6 +162,7 @@ name = "gitenv"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "log",
  "serde",
  "serde_yaml",
  "tempfile",

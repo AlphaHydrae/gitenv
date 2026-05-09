@@ -1,4 +1,5 @@
-use crate::ProgramError;
+use crate::{ProgramError, logging};
+use log::Level;
 use std::ffi::OsString;
 use std::path::Path;
 use std::path::PathBuf;
@@ -19,6 +20,8 @@ fn read_source_directory_error(path: &Path, error: impl ToString) -> ProgramErro
 }
 
 pub(crate) fn list_directory_entries(path: &Path) -> Result<Vec<String>, ProgramError> {
+    logging::system(Level::Trace, "read_dir", format!("path={}", path.display()));
+
     let read_dir =
         std::fs::read_dir(path).map_err(|error| read_source_directory_error(path, error))?;
 

@@ -3,6 +3,7 @@ mod cli;
 mod config;
 mod fs_adapter;
 mod intent;
+mod logging;
 mod operation;
 mod status;
 

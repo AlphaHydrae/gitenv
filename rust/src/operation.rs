@@ -1,7 +1,8 @@
 use crate::{
     ActionMode, ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction,
-    ProgramError, ResolvedOptions, fs_adapter,
+    ProgramError, ResolvedOptions, fs_adapter, logging,
 };
+use log::Level;
 use std::path::{Path, PathBuf};
 
 /// Concrete, execution-shaped planning output.
@@ -50,6 +51,16 @@ pub fn derive_operation_plan_with_injectables(
     get_home_directory: &impl Fn() -> Result<PathBuf, ProgramError>,
     list_directory: &impl Fn(&Path) -> Result<Vec<String>, ProgramError>,
 ) -> Result<OperationPlan, ProgramError> {
+    logging::operation(
+        Level::Debug,
+        "operation_plan_start",
+        format!(
+            "repository={} sources={}",
+            intent_plan.repository,
+            intent_plan.sources.len()
+        ),
+    );
+
     let home_directory = get_home_directory()?;
     let repository_root = resolve_repository_root(&intent_plan.repository, &home_directory);
     let mut actions = Vec::new();
@@ -78,10 +89,17 @@ pub fn derive_operation_plan_with_injectables(
         }
     }
 
+    logging::operation(
+        Level::Info,
+        "operation_plan_success",
+        format!("actions={}", actions.len()),
+    );
+
     Ok(OperationPlan { actions })
 }
 
 fn current_home_directory() -> Result<PathBuf, ProgramError> {
+    logging::system(Level::Trace, "resolve_home_directory", "source=environment");
     fs_adapter::resolve_home_directory(&|name| std::env::var_os(name))
 }
 
@@ -142,10 +160,25 @@ fn expand_select_action(
     list_directory: &impl Fn(&Path) -> Result<Vec<String>, ProgramError>,
 ) -> Result<Vec<OperationAction>, ProgramError> {
     let entries = list_directory(source_root)?;
-
-    Ok(entries
+    let total_entries = entries.len();
+    let selected_entries = entries
         .into_iter()
         .filter(|entry| should_include_selection_entry(entry, select_action))
+        .collect::<Vec<_>>();
+
+    logging::operation(
+        Level::Debug,
+        "expand_select_action",
+        format!(
+            "source_root={} entries={} selected={}",
+            source_root.display(),
+            total_entries,
+            selected_entries.len()
+        ),
+    );
+
+    Ok(selected_entries
+        .into_iter()
         .map(|entry| {
             operation_action(
                 source_root,

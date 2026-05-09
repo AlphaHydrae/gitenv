@@ -1,4 +1,5 @@
-use crate::{FileOperation, OperationAction, OperationPlan, ProgramError};
+use crate::{FileOperation, OperationAction, OperationPlan, ProgramError, logging};
+use log::Level;
 use std::hash::Hasher;
 use std::io::Read;
 use std::path::PathBuf;
@@ -69,6 +70,12 @@ pub enum CopyInspectionState {
 pub fn inspect_operation_plan_status(
     operation_plan: &OperationPlan,
 ) -> Result<OperationInspectionReport, ProgramError> {
+    logging::status(
+        Level::Debug,
+        "inspect_operation_plan_status_start",
+        format!("actions={}", operation_plan.actions.len()),
+    );
+
     let mut outcomes = Vec::new();
 
     for action in &operation_plan.actions {
@@ -82,6 +89,12 @@ pub fn inspect_operation_plan_status(
         };
         outcomes.push(outcome);
     }
+
+    logging::status(
+        Level::Info,
+        "inspect_operation_plan_status_success",
+        format!("outcomes={}", outcomes.len()),
+    );
 
     Ok(OperationInspectionReport { outcomes })
 }
@@ -126,6 +139,12 @@ fn inspect_symlink_operation_status_with_injectables(
         TargetKind::NotASymlink => SymlinkInspectionState::NotASymlink,
     };
 
+    logging::status(
+        Level::Debug,
+        "inspect_symlink_operation_status",
+        format!("state={state:?}"),
+    );
+
     Ok(SymlinkInspection {
         source: operation.source.clone(),
         target: operation.target.clone(),
@@ -153,6 +172,12 @@ fn inspect_copy_operation_status_with_injectables(
         }
     };
 
+    logging::status(
+        Level::Debug,
+        "inspect_copy_operation_status",
+        format!("state={state:?}"),
+    );
+
     Ok(CopyInspection {
         source: operation.source.clone(),
         target: operation.target.clone(),
@@ -161,6 +186,12 @@ fn inspect_copy_operation_status_with_injectables(
 }
 
 fn target_kind_from_filesystem(path: &std::path::Path) -> Result<TargetKind, ProgramError> {
+    logging::system(
+        Level::Trace,
+        "symlink_metadata",
+        format!("path={}", path.display()),
+    );
+
     match std::fs::symlink_metadata(path) {
         Ok(metadata) => {
             if metadata.file_type().is_symlink() {
@@ -178,6 +209,12 @@ fn target_kind_from_filesystem(path: &std::path::Path) -> Result<TargetKind, Pro
 }
 
 fn read_symlink_target_from_filesystem(path: &std::path::Path) -> Result<PathBuf, ProgramError> {
+    logging::system(
+        Level::Trace,
+        "read_link",
+        format!("path={}", path.display()),
+    );
+
     std::fs::read_link(path).map_err(|error| ProgramError::ReadSymlinkTarget {
         path: path.to_path_buf(),
         message: error.to_string(),
@@ -187,6 +224,12 @@ fn read_symlink_target_from_filesystem(path: &std::path::Path) -> Result<PathBuf
 fn copy_target_kind_from_filesystem(
     path: &std::path::Path,
 ) -> Result<CopyTargetKind, ProgramError> {
+    logging::system(
+        Level::Trace,
+        "symlink_metadata",
+        format!("path={}", path.display()),
+    );
+
     match std::fs::symlink_metadata(path) {
         Ok(metadata) => {
             if metadata.file_type().is_file() {
@@ -204,6 +247,12 @@ fn copy_target_kind_from_filesystem(
 }
 
 fn hash_file_contents_from_filesystem(path: &std::path::Path) -> Result<u64, ProgramError> {
+    logging::system(
+        Level::Trace,
+        "hash_file_start",
+        format!("path={}", path.display()),
+    );
+
     let file = std::fs::File::open(path).map_err(|error| ProgramError::InspectPathMetadata {
         path: path.to_path_buf(),
         message: error.to_string(),
@@ -227,7 +276,15 @@ fn hash_file_contents_from_filesystem(path: &std::path::Path) -> Result<u64, Pro
         hasher.write(&buffer[..read]);
     }
 
-    Ok(hasher.finish())
+    let digest = hasher.finish();
+
+    logging::system(
+        Level::Trace,
+        "hash_file_success",
+        format!("path={} digest={digest:#018x}", path.display()),
+    );
+
+    Ok(digest)
 }
 
 #[cfg(test)]

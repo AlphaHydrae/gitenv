@@ -41,22 +41,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 26: Introduce structured logging
-
-Why this increment exists:
-
-- Configurable logging is a documented architecture requirement (ARCHITECTURE.md
-  "Logging model" section).
-- Adding the logging foundation as a standalone increment keeps it reviewable
-  before log-level controls are wired into the CLI and library API.
-
-Review target:
-
-- Add the `log` crate dependency and create a `logging` module.
-- Emit structured log events at appropriate levels from domain modules
-  (`config`, `intent`, `operation`, `actions`, `status`).
-- No user-facing CLI changes yet; logging output requires the next increment.
-
 ### Increment 27: Wire log-level controls into CLI and library API
 
 Why this increment exists:
