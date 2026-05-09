@@ -1,5 +1,6 @@
 mod actions;
 mod cli;
+mod color;
 mod config;
 mod fs_adapter;
 mod intent;
@@ -7,7 +8,9 @@ mod logging;
 mod operation;
 mod status;
 
-pub use cli::{Cli, Command, dispatch};
+pub use cli::{Cli, Command, LogLevel};
+pub use color::{ColorMode, RuntimeConfig};
+pub use logging::init as init_logging;
 
 pub use actions::{
     ApplyOperationOutcome, ApplyOperationReport, apply_operation_plan,
@@ -123,7 +126,6 @@ const DEFAULT_CONFIG_FILE_NAME: &str = "config.yml";
 #[derive(Clone, Copy)]
 struct SystemCalls<'a> {
     get_env_var_os: &'a dyn Fn(&str) -> Option<OsString>,
-    stdout_is_terminal: &'a dyn Fn() -> bool,
 }
 
 fn std_env_var_os(name: &str) -> Option<OsString> {
@@ -133,7 +135,6 @@ fn std_env_var_os(name: &str) -> Option<OsString> {
 fn real_system_calls() -> SystemCalls<'static> {
     SystemCalls {
         get_env_var_os: &std_env_var_os,
-        stdout_is_terminal: &cli::stdout_is_terminal,
     }
 }
 
@@ -141,30 +142,48 @@ fn real_system_calls() -> SystemCalls<'static> {
 ///
 /// This is the main entry point for the binary.
 pub fn run_cli() -> Result<ProgramOutput, ProgramError> {
-    run_cli_with_args(std::env::args_os())
-}
-
-/// Parse injected CLI arguments and dispatch to the appropriate library function.
-///
-/// This keeps command-line parsing testable without mutating process args.
-pub fn run_cli_with_args<I, T>(args: I) -> Result<ProgramOutput, ProgramError>
-where
-    I: IntoIterator<Item = T>,
-    T: Into<std::ffi::OsString> + Clone,
-{
     use clap::Parser;
-    cli::dispatch(Cli::parse_from(args))
-}
+    use std::io::IsTerminal;
 
-/// Run the info command (status inspection for all operations).
-pub fn run_info() -> Result<ProgramOutput, ProgramError> {
+    let args = std::env::args_os();
+    let cli = Cli::parse_from(args);
+
+    let runtime_config = RuntimeConfig::new(
+        cli.color,
+        std::io::stdout().is_terminal(),
+        std::io::stderr().is_terminal(),
+    );
+
+    logging::init(
+        cli.log_level.clone().into(),
+        runtime_config.use_color_for_stderr,
+    );
+
     let system = real_system_calls();
-    run_info_with_config_with_system(|| load_default_config_with_system(system), system)
+
+    cli::dispatch_with(
+        cli,
+        || {
+            run_info(
+                || load_default_config_with_system(system),
+                system,
+                runtime_config,
+            )
+        },
+        || {
+            run_apply(
+                || load_default_config_with_system(system),
+                system,
+                runtime_config,
+            )
+        },
+    )
 }
 
-fn run_info_with_config_with_system(
+fn run_info(
     load_config: impl FnOnce() -> Result<Config, ProgramError>,
     system: SystemCalls<'_>,
+    runtime_config: RuntimeConfig,
 ) -> Result<ProgramOutput, ProgramError> {
     let config = load_config()?;
     let intent_plan = derive_intent_plan(&config)?;
@@ -178,21 +197,15 @@ fn run_info_with_config_with_system(
     Ok(ProgramOutput {
         message: cli::render_default_inspection_output(
             &operation_plan,
-            system.get_env_var_os,
-            system.stdout_is_terminal,
+            runtime_config.use_color_for_stdout,
         )?,
     })
 }
 
-/// Run the apply command (execute all operations).
-pub fn run_apply() -> Result<ProgramOutput, ProgramError> {
-    let system = real_system_calls();
-    run_apply_with_config_with_system(|| load_default_config_with_system(system), system)
-}
-
-fn run_apply_with_config_with_system(
+fn run_apply(
     load_config: impl FnOnce() -> Result<Config, ProgramError>,
     system: SystemCalls<'_>,
+    runtime_config: RuntimeConfig,
 ) -> Result<ProgramOutput, ProgramError> {
     let config = load_config()?;
     let intent_plan = derive_intent_plan(&config)?;
@@ -204,11 +217,8 @@ fn run_apply_with_config_with_system(
     )?;
 
     let apply_report = apply_operation_plan(&operation_plan)?;
-    let output_message = cli::render_apply_output(
-        &apply_report,
-        system.get_env_var_os,
-        system.stdout_is_terminal,
-    );
+    let output_message =
+        cli::render_apply_output(&apply_report, runtime_config.use_color_for_stdout);
 
     Ok(ProgramOutput {
         message: output_message,
@@ -397,10 +407,10 @@ impl std::error::Error for ProgramError {}
 #[cfg(test)]
 mod tests {
     use super::{
-        ActionMode, Config, ConfigItem, Defaults, FileConfig, ProgramError, Source, SourceRoot,
-        SystemCalls, default_config_path_from_env, default_config_path_from_inputs, load_config,
-        load_default_config_with_system, run_apply_with_config_with_system,
-        run_info_with_config_with_system,
+        ActionMode, ColorMode, Config, ConfigItem, Defaults, FileConfig, ProgramError,
+        RuntimeConfig, Source, SourceRoot, SystemCalls, default_config_path_from_env,
+        default_config_path_from_inputs, load_config, load_default_config_with_system, run_apply,
+        run_info,
     };
     use std::collections::BTreeMap;
     use std::ffi::OsString;
@@ -513,13 +523,12 @@ mod tests {
         let env_values =
             BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
         let get_env_var_os = move |name: &str| env_values.get(name).cloned();
-        let stdout_is_terminal = || false;
-        let output = run_info_with_config_with_system(
+        let output = run_info(
             || load_config(&config_path),
             SystemCalls {
                 get_env_var_os: &get_env_var_os,
-                stdout_is_terminal: &stdout_is_terminal,
             },
+            RuntimeConfig::new(ColorMode::Auto, false, false),
         )
         .expect("explicit config path should produce inspection output");
 
@@ -548,14 +557,13 @@ mod tests {
         let env_values =
             BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
         let get_env_var_os = move |name: &str| env_values.get(name).cloned();
-        let stdout_is_terminal = || false;
 
-        let error = run_info_with_config_with_system(
+        let error = run_info(
             || Ok(config),
             SystemCalls {
                 get_env_var_os: &get_env_var_os,
-                stdout_is_terminal: &stdout_is_terminal,
             },
+            RuntimeConfig::new(ColorMode::Auto, false, false),
         )
         .expect_err("missing copy source should propagate an inspection error");
 
@@ -585,13 +593,12 @@ mod tests {
         };
 
         let get_env_var_os = |_: &str| None::<OsString>;
-        let stdout_is_terminal = || false;
-        let error = run_info_with_config_with_system(
+        let error = run_info(
             || Ok(config),
             SystemCalls {
                 get_env_var_os: &get_env_var_os,
-                stdout_is_terminal: &stdout_is_terminal,
             },
+            RuntimeConfig::new(ColorMode::Auto, false, false),
         )
         .expect_err("missing source environment variable should fail info planning");
 
@@ -622,13 +629,12 @@ mod tests {
         };
 
         let get_env_var_os = |_: &str| None::<OsString>;
-        let stdout_is_terminal = || false;
-        let error = run_apply_with_config_with_system(
+        let error = run_apply(
             || Ok(config),
             SystemCalls {
                 get_env_var_os: &get_env_var_os,
-                stdout_is_terminal: &stdout_is_terminal,
             },
+            RuntimeConfig::new(ColorMode::Auto, false, false),
         )
         .expect_err("missing source environment variable should fail apply planning");
 
@@ -645,13 +651,12 @@ mod tests {
         let missing_path = PathBuf::from("/tmp/custom-gitenv.yml");
 
         let get_env_var_os = |_: &str| None::<OsString>;
-        let stdout_is_terminal = || false;
-        let error = run_info_with_config_with_system(
+        let error = run_info(
             || load_config(&missing_path),
             SystemCalls {
                 get_env_var_os: &get_env_var_os,
-                stdout_is_terminal: &stdout_is_terminal,
             },
+            RuntimeConfig::new(ColorMode::Auto, false, false),
         )
         .expect_err("missing explicit config file should return a read error");
 
@@ -687,13 +692,12 @@ mod tests {
         let env_values =
             BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
         let get_env_var_os = move |name: &str| env_values.get(name).cloned();
-        let stdout_is_terminal = || false;
-        let output = run_apply_with_config_with_system(
+        let output = run_apply(
             || load_config(&config_path),
             SystemCalls {
                 get_env_var_os: &get_env_var_os,
-                stdout_is_terminal: &stdout_is_terminal,
             },
+            RuntimeConfig::new(ColorMode::Auto, false, false),
         )
         .expect("explicit config path should produce apply output");
 
@@ -720,13 +724,12 @@ mod tests {
         let env_values =
             BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
         let get_env_var_os = move |name: &str| env_values.get(name).cloned();
-        let stdout_is_terminal = || false;
-        let error = run_apply_with_config_with_system(
+        let error = run_apply(
             || Ok(config),
             SystemCalls {
                 get_env_var_os: &get_env_var_os,
-                stdout_is_terminal: &stdout_is_terminal,
             },
+            RuntimeConfig::new(ColorMode::Auto, false, false),
         )
         .expect_err("missing copy source should fail apply execution");
 
@@ -760,24 +763,23 @@ mod tests {
         );
 
         let get_env_var_os = |_: &str| None::<OsString>;
-        let stdout_is_terminal = || false;
 
-        let info_error = run_info_with_config_with_system(
+        let info_error = run_info(
             || Ok(info_config),
             SystemCalls {
                 get_env_var_os: &get_env_var_os,
-                stdout_is_terminal: &stdout_is_terminal,
             },
+            RuntimeConfig::new(ColorMode::Auto, false, false),
         )
         .expect_err("missing HOME should fail explicit-config info planning");
         assert_eq!(info_error, ProgramError::HomeDirectoryUnavailable);
 
-        let apply_error = run_apply_with_config_with_system(
+        let apply_error = run_apply(
             || Ok(apply_config),
             SystemCalls {
                 get_env_var_os: &get_env_var_os,
-                stdout_is_terminal: &stdout_is_terminal,
             },
+            RuntimeConfig::new(ColorMode::Auto, false, false),
         )
         .expect_err("missing HOME should fail explicit-config apply planning");
         assert_eq!(apply_error, ProgramError::HomeDirectoryUnavailable);
@@ -809,13 +811,12 @@ mod tests {
         let env_values =
             BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
         let get_env_var_os = move |name: &str| env_values.get(name).cloned();
-        let stdout_is_terminal = || false;
-        let output = run_info_with_config_with_system(
+        let output = run_info(
             || load_config(&config_path),
             SystemCalls {
                 get_env_var_os: &get_env_var_os,
-                stdout_is_terminal: &stdout_is_terminal,
             },
+            RuntimeConfig::new(ColorMode::Auto, false, false),
         )
         .expect("run_info_from_env should succeed with injected config path");
 
@@ -853,13 +854,12 @@ mod tests {
         let env_values =
             BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
         let get_env_var_os = move |name: &str| env_values.get(name).cloned();
-        let stdout_is_terminal = || false;
-        let output = run_apply_with_config_with_system(
+        let output = run_apply(
             || load_config(&config_path),
             SystemCalls {
                 get_env_var_os: &get_env_var_os,
-                stdout_is_terminal: &stdout_is_terminal,
             },
+            RuntimeConfig::new(ColorMode::Auto, false, false),
         )
         .expect("run_apply_from_env should succeed with injected config path");
 
@@ -874,13 +874,12 @@ mod tests {
     #[test]
     fn propagate_config_loader_errors_from_apply_wrapper() {
         let get_env_var_os = |_: &str| None::<OsString>;
-        let stdout_is_terminal = || false;
-        let output = run_apply_with_config_with_system(
+        let output = run_apply(
             || Err(ProgramError::HomeDirectoryUnavailable),
             SystemCalls {
                 get_env_var_os: &get_env_var_os,
-                stdout_is_terminal: &stdout_is_terminal,
             },
+            RuntimeConfig::new(ColorMode::Auto, false, false),
         )
         .expect_err("apply wrapper should propagate path resolution errors");
 
@@ -890,10 +889,8 @@ mod tests {
     #[test]
     fn cannot_load_default_config_without_home_or_override() {
         let get_env_var_os = |_: &str| None::<OsString>;
-        let stdout_is_terminal = || false;
         let error = load_default_config_with_system(SystemCalls {
             get_env_var_os: &get_env_var_os,
-            stdout_is_terminal: &stdout_is_terminal,
         })
         .expect_err("default config loading should fail without HOME and override");
 

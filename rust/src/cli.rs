@@ -1,17 +1,48 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::{
-    ApplyOperationOutcome, ApplyOperationReport, CopyInspection, CopyInspectionState,
+    ApplyOperationOutcome, ApplyOperationReport, ColorMode, CopyInspection, CopyInspectionState,
     OperationAction, OperationInspectionOutcome, OperationPlan, ProgramError, ProgramOutput,
     SymlinkInspection, SymlinkInspectionState, inspect_operation_plan_status,
 };
-use std::ffi::OsString;
-use std::io::IsTerminal;
 
 const ANSI_RESET: &str = "\x1b[0m";
 const ANSI_GREEN: &str = "\x1b[32m";
 const ANSI_YELLOW: &str = "\x1b[33m";
 const ANSI_RED: &str = "\x1b[31m";
+
+/// Diagnostic log level for the `--log-level` flag.
+///
+/// Maps directly to `log::LevelFilter`. `off` suppresses all log output;
+/// `trace` enables the most verbose output.
+#[derive(ValueEnum, Clone, Debug, PartialEq, Eq)]
+pub enum LogLevel {
+    /// Suppress all log output.
+    Off,
+    /// Log only errors.
+    Error,
+    /// Log errors and warnings (default).
+    Warn,
+    /// Log errors, warnings, and informational messages.
+    Info,
+    /// Log errors, warnings, info, and debug messages.
+    Debug,
+    /// Log everything, including trace-level messages.
+    Trace,
+}
+
+impl From<LogLevel> for log::LevelFilter {
+    fn from(level: LogLevel) -> Self {
+        match level {
+            LogLevel::Off => log::LevelFilter::Off,
+            LogLevel::Error => log::LevelFilter::Error,
+            LogLevel::Warn => log::LevelFilter::Warn,
+            LogLevel::Info => log::LevelFilter::Info,
+            LogLevel::Debug => log::LevelFilter::Debug,
+            LogLevel::Trace => log::LevelFilter::Trace,
+        }
+    }
+}
 
 /// Manage environment configuration files from a repository.
 #[derive(Parser, Debug)]
@@ -20,6 +51,14 @@ const ANSI_RED: &str = "\x1b[31m";
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
+    /// Set the diagnostic log level. Log messages are written to stderr.
+    #[arg(long, default_value = "warn", value_enum)]
+    pub log_level: LogLevel,
+    /// Control ANSI color output (`auto`, `yes`, `no`).
+    ///
+    /// CLI flag takes precedence over the `COLOR` environment variable.
+    #[arg(long, env = "COLOR", default_value = "auto", value_enum)]
+    pub color: ColorMode,
 }
 
 #[derive(Subcommand, Debug)]
@@ -30,18 +69,10 @@ pub enum Command {
     Apply,
 }
 
-/// Dispatch a parsed CLI command to the appropriate library function.
-///
-/// Maps the selected subcommand to the appropriate library call. When no
-/// subcommand is provided, the default behavior is `info`.
-pub fn dispatch(cli: Cli) -> Result<ProgramOutput, ProgramError> {
-    dispatch_with(cli, crate::run_info, crate::run_apply)
-}
-
 /// Like `dispatch` but accepts injectable handlers for deterministic unit tests.
 ///
 /// Each handler is called at most once, depending on which command is selected.
-pub(crate) fn dispatch_with(
+pub fn dispatch_with(
     cli: Cli,
     run_info: impl FnOnce() -> Result<ProgramOutput, ProgramError>,
     run_apply: impl FnOnce() -> Result<ProgramOutput, ProgramError>,
@@ -52,16 +83,10 @@ pub(crate) fn dispatch_with(
     }
 }
 
-pub(crate) fn stdout_is_terminal() -> bool {
-    std::io::stdout().is_terminal()
-}
-
 pub(crate) fn render_default_inspection_output(
     operation_plan: &OperationPlan,
-    get_env_var_os: &dyn Fn(&str) -> Option<OsString>,
-    stdout_is_terminal: &dyn Fn() -> bool,
+    use_color: bool,
 ) -> Result<String, ProgramError> {
-    let use_color = should_use_color(get_env_var_os, stdout_is_terminal);
     let inspection_report = inspect_operation_plan_status(operation_plan)?;
     let lines = inspection_report
         .outcomes
@@ -76,12 +101,7 @@ pub(crate) fn render_default_inspection_output(
     }
 }
 
-pub(crate) fn render_apply_output(
-    apply_report: &ApplyOperationReport,
-    get_env_var_os: &dyn Fn(&str) -> Option<OsString>,
-    stdout_is_terminal: &dyn Fn() -> bool,
-) -> String {
-    let use_color = should_use_color(get_env_var_os, stdout_is_terminal);
+pub(crate) fn render_apply_output(apply_report: &ApplyOperationReport, use_color: bool) -> String {
     let lines = apply_report
         .outcomes
         .iter()
@@ -208,13 +228,6 @@ fn render_apply_outcome_line_with_color(
     }
 }
 
-fn should_use_color(
-    get_env_var_os: &dyn Fn(&str) -> Option<OsString>,
-    stdout_is_terminal: &dyn Fn() -> bool,
-) -> bool {
-    stdout_is_terminal() && get_env_var_os("NO_COLOR").is_none()
-}
-
 fn colorize(text: &str, color: &str, use_color: bool) -> String {
     if use_color {
         format!("{color}{text}{ANSI_RESET}")
@@ -225,12 +238,9 @@ fn colorize(text: &str, color: &str, use_color: bool) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        Cli, dispatch_with, render_apply_output, render_default_inspection_output,
-        stdout_is_terminal,
-    };
+    use super::{Cli, dispatch_with, render_apply_output, render_default_inspection_output};
     use crate::{
-        ApplyOperationOutcome, ApplyOperationReport, ConflictPolicy, FileOperation,
+        ApplyOperationOutcome, ApplyOperationReport, ColorMode, ConflictPolicy, FileOperation,
         OperationAction, OperationPlan, ProgramError, ProgramOutput,
     };
     use clap::Parser;
@@ -322,8 +332,7 @@ mod tests {
                     conflict_policy: ConflictPolicy::Skip,
                 })],
             },
-            &|_: &str| None,
-            &|| false,
+            false,
         )
         .expect("status rendering should succeed for a valid operation plan");
 
@@ -352,8 +361,7 @@ mod tests {
                     }),
                 ],
             },
-            &|_: &str| None,
-            &|| false,
+            false,
         )
         .expect("status rendering should support symlink and copy outcomes");
 
@@ -421,8 +429,7 @@ mod tests {
                     }),
                 ],
             },
-            &|_: &str| None,
-            &|| false,
+            false,
         )
         .expect("status rendering should cover all state branches");
 
@@ -439,12 +446,8 @@ mod tests {
 
     #[test]
     fn render_no_operation_message_when_nothing_is_planned() {
-        let output = render_default_inspection_output(
-            &OperationPlan { actions: vec![] },
-            &|_: &str| None,
-            &|| false,
-        )
-        .expect("empty operation plans should render a stable status message");
+        let output = render_default_inspection_output(&OperationPlan { actions: vec![] }, false)
+            .expect("empty operation plans should render a stable status message");
 
         assert_eq!(output, "No operations to inspect.");
     }
@@ -453,7 +456,7 @@ mod tests {
     fn show_no_operations_to_apply_message_when_outcomes_are_empty() {
         let report = ApplyOperationReport { outcomes: vec![] };
 
-        let output = render_apply_output(&report, &|_: &str| None, &|| false);
+        let output = render_apply_output(&report, false);
 
         assert_eq!(output, "No operations to apply.");
     }
@@ -480,8 +483,7 @@ mod tests {
                     ApplyOperationOutcome::Applied(OperationAction::Copy(copy_op)),
                 ],
             },
-            &|_: &str| None,
-            &|| false,
+            false,
         );
 
         assert_eq!(
@@ -517,8 +519,7 @@ mod tests {
                     ApplyOperationOutcome::SkippedExistingTarget(OperationAction::Copy(copy_op)),
                 ],
             },
-            &|_: &str| None,
-            &|| false,
+            false,
         );
 
         assert_eq!(
@@ -554,8 +555,7 @@ mod tests {
                     ApplyOperationOutcome::UnsupportedOperation(OperationAction::Copy(copy_op)),
                 ],
             },
-            &|_: &str| None,
-            &|| false,
+            false,
         );
 
         assert_eq!(
@@ -606,8 +606,7 @@ mod tests {
                     }),
                 ],
             },
-            &|_: &str| None,
-            &|| true,
+            true,
         )
         .expect("colorized status rendering should succeed");
 
@@ -637,8 +636,7 @@ mod tests {
                     )),
                 ],
             },
-            &|_: &str| None,
-            &|| true,
+            true,
         );
 
         assert!(output.contains("\x1b[32mcreated symlink\x1b[0m"));
@@ -647,7 +645,7 @@ mod tests {
     }
 
     #[test]
-    fn disable_colors_when_no_color_is_set() {
+    fn disable_colors_when_use_color_is_false() {
         let output = render_apply_output(
             &ApplyOperationReport {
                 outcomes: vec![ApplyOperationOutcome::Applied(OperationAction::Symlink(
@@ -659,8 +657,7 @@ mod tests {
                     },
                 ))],
             },
-            &|name: &str| (name == "NO_COLOR").then_some("1".into()),
-            &|| true,
+            false,
         );
 
         assert_eq!(
@@ -669,10 +666,79 @@ mod tests {
         );
     }
 
-    #[test]
-    fn match_stdout_is_terminal_with_std_probe() {
-        use std::io::IsTerminal;
+    // ── --log-level flag ──────────────────────────────────────────────────────
 
-        assert_eq!(stdout_is_terminal(), std::io::stdout().is_terminal());
+    #[test]
+    fn default_log_level_is_warn() {
+        let cli = Cli::parse_from(["gitenv"]);
+        assert_eq!(cli.log_level, super::LogLevel::Warn);
+    }
+
+    #[test]
+    fn default_color_mode_is_auto() {
+        let cli = Cli::parse_from(["gitenv"]);
+        assert_eq!(cli.color, ColorMode::Auto);
+    }
+
+    #[test]
+    fn parse_color_flag_for_each_accepted_value() {
+        let cases = [
+            ("auto", ColorMode::Auto),
+            ("yes", ColorMode::Yes),
+            ("no", ColorMode::No),
+        ];
+
+        for (raw, expected) in cases {
+            let cli = Cli::parse_from(["gitenv", "--color", raw]);
+            assert_eq!(
+                cli.color, expected,
+                "--color {raw} should parse to {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_log_level_flag_for_each_accepted_value() {
+        use super::LogLevel;
+
+        let cases = [
+            ("off", LogLevel::Off),
+            ("error", LogLevel::Error),
+            ("warn", LogLevel::Warn),
+            ("info", LogLevel::Info),
+            ("debug", LogLevel::Debug),
+            ("trace", LogLevel::Trace),
+        ];
+
+        for (raw, expected) in cases {
+            let cli = Cli::parse_from(["gitenv", "--log-level", raw]);
+            assert_eq!(
+                cli.log_level, expected,
+                "--log-level {raw} should parse to {expected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn log_level_converts_to_level_filter() {
+        use super::LogLevel;
+        use log::LevelFilter;
+
+        let cases = [
+            (LogLevel::Off, LevelFilter::Off),
+            (LogLevel::Error, LevelFilter::Error),
+            (LogLevel::Warn, LevelFilter::Warn),
+            (LogLevel::Info, LevelFilter::Info),
+            (LogLevel::Debug, LevelFilter::Debug),
+            (LogLevel::Trace, LevelFilter::Trace),
+        ];
+
+        for (level, expected_filter) in cases {
+            let filter: LevelFilter = level.clone().into();
+            assert_eq!(
+                filter, expected_filter,
+                "{level:?} should convert to {expected_filter:?}"
+            );
+        }
     }
 }

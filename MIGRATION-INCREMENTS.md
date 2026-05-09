@@ -41,20 +41,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 27: Wire log-level controls into CLI and library API
-
-Why this increment exists:
-
-- The logging foundation from Increment 26 needs to be surfaced to users.
-- Phase 3 requires log-level controls in both the CLI and the library API.
-
-Review target:
-
-- Add a `--log-level` (or `--verbose`) flag to the CLI via clap.
-- Expose a log-level parameter in the library API (`run_info`, `run_apply`).
-- Initialize the log subscriber from the composition root (`run_cli`).
-- Add tests for level filtering behavior.
-
 ### Increment 28: Update README and finalize Phase 3 exit criteria
 
 Why this increment exists:

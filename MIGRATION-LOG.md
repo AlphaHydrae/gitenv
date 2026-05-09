@@ -11,6 +11,13 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-09: Unify ANSI color policy - Introduce shared color-policy handling
+  with `COLOR=auto|yes|no`, add a `--color` CLI override with precedence over
+  environment values.
+- 2026-05-09: Wire --log-level flag into CLI and library - Add a `--log-level`
+  flag to the CLI (default: `warn`), implement a minimal dependency-free log
+  subscriber in `logging.rs`. Expose `LogLevel` and `init_logging` in the public
+  library API.
 - 2026-05-09: Introduce structured logging across domain modules - Add the
   shared Rust logging module and `log` dependency, emit structured domain
   events from config loading/parsing, intent planning, operation expansion,

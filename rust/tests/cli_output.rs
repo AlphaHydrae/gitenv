@@ -119,3 +119,97 @@ fn fail_the_default_inspection_when_the_config_file_is_missing() {
     assert!(stderr.contains("gitenv: cannot read config at"));
     assert!(stderr.contains("Config file locations"));
 }
+
+// Log level flags
+
+#[test]
+fn emit_debug_log_lines_to_stderr_when_log_level_is_debug() {
+    let home = TempDir::new().expect("temporary home directory should be created");
+    let repository = TempDir::new().expect("temporary repository should be created");
+    fs::write(repository.path().join(".gitconfig"), "[user]\n")
+        .expect("source file should be written");
+
+    let config = format!(
+        concat!(
+            "version: 1\n",
+            "repository: \"{}\"\n",
+            "sources:\n",
+            "  - from: \".\"\n",
+            "    configs:\n",
+            "      - file: .gitconfig\n"
+        ),
+        repository.path().display()
+    );
+    let config_path = home
+        .path()
+        .join(".config")
+        .join("gitenv")
+        .join("config.yml");
+    fs::create_dir_all(
+        config_path
+            .parent()
+            .expect("config directory should have a parent"),
+    )
+    .expect("config directory should be created");
+    fs::write(config_path, config).expect("config file should be written");
+
+    let output = gitenv_command_for_home(&home)
+        .args(["--log-level", "debug"])
+        .output()
+        .expect("binary should run");
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // Debug-level output should include structured log lines from domain modules.
+    assert!(
+        !stderr.is_empty(),
+        "stderr should contain debug log lines when --log-level debug is set"
+    );
+    assert!(
+        stderr.contains("[DEBUG]") || stderr.contains("[INFO]") || stderr.contains("[TRACE]"),
+        "stderr should contain bracketed log level labels; got: {stderr}"
+    );
+}
+
+#[test]
+fn produce_no_log_output_on_stderr_at_default_log_level() {
+    let home = TempDir::new().expect("temporary home directory should be created");
+    let repository = TempDir::new().expect("temporary repository should be created");
+    fs::write(repository.path().join(".gitconfig"), "[user]\n")
+        .expect("source file should be written");
+
+    let config = format!(
+        concat!(
+            "version: 1\n",
+            "repository: \"{}\"\n",
+            "sources:\n",
+            "  - from: \".\"\n",
+            "    configs:\n",
+            "      - file: .gitconfig\n"
+        ),
+        repository.path().display()
+    );
+    let config_path = home
+        .path()
+        .join(".config")
+        .join("gitenv")
+        .join("config.yml");
+    fs::create_dir_all(
+        config_path
+            .parent()
+            .expect("config directory should have a parent"),
+    )
+    .expect("config directory should be created");
+    fs::write(config_path, config).expect("config file should be written");
+
+    // Default log level is warn; normal operations emit no warnings.
+    let output = gitenv_command_for_home(&home)
+        .output()
+        .expect("binary should run");
+
+    assert!(output.status.success());
+    assert!(
+        output.stderr.is_empty(),
+        "stderr should be empty at default log level (warn)"
+    );
+}
