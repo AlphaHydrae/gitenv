@@ -187,10 +187,10 @@ fn run_info(
 ) -> Result<ProgramOutput, ProgramError> {
     let config = load_config()?;
     let intent_plan = derive_intent_plan(&config)?;
-    let get_home_directory = || fs_adapter::resolve_home_directory(system.get_env_var_os);
+    let home_directory = fs_adapter::resolve_home_directory(system.get_env_var_os)?;
     let operation_plan = operation::derive_operation_plan_with_injectables(
         &intent_plan,
-        &get_home_directory,
+        &home_directory,
         &fs_adapter::list_directory_entries,
     )?;
 
@@ -209,10 +209,10 @@ fn run_apply(
 ) -> Result<ProgramOutput, ProgramError> {
     let config = load_config()?;
     let intent_plan = derive_intent_plan(&config)?;
-    let get_home_directory = || fs_adapter::resolve_home_directory(system.get_env_var_os);
+    let home_directory = fs_adapter::resolve_home_directory(system.get_env_var_os)?;
     let operation_plan = operation::derive_operation_plan_with_injectables(
         &intent_plan,
-        &get_home_directory,
+        &home_directory,
         &fs_adapter::list_directory_entries,
     )?;
 

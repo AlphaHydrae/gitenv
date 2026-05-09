@@ -33,10 +33,8 @@ fn derive_representative_plans(
         },
     )?;
 
-    let operation_plan = derive_operation_plan_with_injectables(
-        &intent_plan,
-        &|| Ok(PathBuf::from("/home/tester")),
-        &|path| {
+    let operation_plan =
+        derive_operation_plan_with_injectables(&intent_plan, Path::new("/home/tester"), &|path| {
             if path == Path::new("/repo/dots") {
                 Ok(vec![
                     ".gitignore".to_string(),
@@ -47,8 +45,7 @@ fn derive_representative_plans(
             } else {
                 Ok(Vec::new())
             }
-        },
-    )?;
+        })?;
 
     Ok((intent_plan, operation_plan))
 }
