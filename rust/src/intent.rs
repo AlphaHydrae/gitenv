@@ -424,28 +424,35 @@ mod tests {
     // Helper constructors
     // ---------------------------------------------------------------------------
 
-    /// Returns a minimal config with one file source rooted at `from`.
-    fn single_source_config(from: &str, file: &str) -> Config {
+    fn make_config(sources: Vec<Source>) -> Config {
         Config {
             version: 1,
             repository: "~/projects/env".to_string(),
             defaults: Defaults::default(),
-            sources: vec![Source {
-                from: SourceRoot::Path(from.to_string()),
-                to: None,
-                guard: None,
-                configs: vec![ConfigItem::File(FileConfig {
-                    file: file.to_string(),
-                    as_name: None,
-                    mode: None,
-                    to: None,
-                    mkdir: None,
-                    overwrite: None,
-                    backup_on_overwrite: None,
-                })],
-            }],
+            sources,
             includes: vec![],
         }
+    }
+
+    fn make_source(from: SourceRoot, configs: Vec<ConfigItem>) -> Source {
+        Source {
+            from,
+            to: None,
+            guard: None,
+            configs,
+        }
+    }
+
+    fn make_file_config_item(file: &str) -> ConfigItem {
+        ConfigItem::File(FileConfig {
+            file: file.to_string(),
+            as_name: None,
+            mode: None,
+            to: None,
+            mkdir: None,
+            overwrite: None,
+            backup_on_overwrite: None,
+        })
     }
 
     /// Minimal planned file action with symlink/skip defaults pointing to `~`.
@@ -476,7 +483,10 @@ mod tests {
 
     #[test]
     fn derive_a_minimal_intent_plan_with_the_intent_entrypoint() {
-        let config = single_source_config(".", ".zshrc");
+        let config = make_config(vec![make_source(
+            SourceRoot::Path(".".to_string()),
+            vec![make_file_config_item(".zshrc")],
+        )]);
         let environment = BTreeMap::new();
 
         let plan = derive_intent_plan_with_env(&config, &environment)
@@ -1128,7 +1138,10 @@ mod tests {
     fn include_declared_files_sources_after_own_sources() {
         // Root declares .zshrc; includes /inc/a.yml which declares .tmux.conf.
         // Expected order: root's source first, then the include's source.
-        let included = single_source_config("inc", ".tmux.conf");
+        let included = make_config(vec![make_source(
+            SourceRoot::Path("inc".to_string()),
+            vec![make_file_config_item(".tmux.conf")],
+        )]);
         let root = Config {
             version: 1,
             repository: "~/projects/env".to_string(),
@@ -1184,20 +1197,29 @@ mod tests {
     fn include_sources_from_nested_includes_depth_first() {
         // Root includes /inc/a.yml; /inc/a.yml itself includes /inc/c.yml.
         // Expected order: root → a → c (depth-first, includes-after at each level).
-        let c = single_source_config("c_src", ".bashrc");
+        let c = make_config(vec![make_source(
+            SourceRoot::Path("c_src".to_string()),
+            vec![make_file_config_item(".bashrc")],
+        )]);
         let a = Config {
             includes: vec![Include::Path {
                 path: "/inc/c.yml".to_string(),
                 optional: false,
             }],
-            ..single_source_config("a_src", ".aliases")
+            ..make_config(vec![make_source(
+                SourceRoot::Path("a_src".to_string()),
+                vec![make_file_config_item(".aliases")],
+            )])
         };
         let root = Config {
             includes: vec![Include::Path {
                 path: "/inc/a.yml".to_string(),
                 optional: false,
             }],
-            ..single_source_config("root_src", ".zshrc")
+            ..make_config(vec![make_source(
+                SourceRoot::Path("root_src".to_string()),
+                vec![make_file_config_item(".zshrc")],
+            )])
         };
 
         let plan = derive_intent_plan_with_injectables(
@@ -1239,13 +1261,19 @@ mod tests {
     fn skip_duplicate_includes_across_the_include_tree() {
         // Both root and /inc/a.yml include /inc/shared.yml.
         // /inc/shared.yml should only appear once in the plan.
-        let shared = single_source_config("shared_src", ".shared");
+        let shared = make_config(vec![make_source(
+            SourceRoot::Path("shared_src".to_string()),
+            vec![make_file_config_item(".shared")],
+        )]);
         let a = Config {
             includes: vec![Include::Path {
                 path: "/inc/shared.yml".to_string(),
                 optional: false,
             }],
-            ..single_source_config("a_src", ".aliases")
+            ..make_config(vec![make_source(
+                SourceRoot::Path("a_src".to_string()),
+                vec![make_file_config_item(".aliases")],
+            )])
         };
         let root = Config {
             includes: vec![
@@ -1258,7 +1286,10 @@ mod tests {
                     optional: false,
                 },
             ],
-            ..single_source_config("root_src", ".zshrc")
+            ..make_config(vec![make_source(
+                SourceRoot::Path("root_src".to_string()),
+                vec![make_file_config_item(".zshrc")],
+            )])
         };
 
         let plan = derive_intent_plan_with_injectables(
@@ -1303,7 +1334,10 @@ mod tests {
                 path: "/inc/missing.yml".to_string(),
                 optional: true,
             }],
-            ..single_source_config("root_src", ".zshrc")
+            ..make_config(vec![make_source(
+                SourceRoot::Path("root_src".to_string()),
+                vec![make_file_config_item(".zshrc")],
+            )])
         };
 
         let plan = derive_intent_plan_with_injectables(
@@ -1342,7 +1376,10 @@ mod tests {
                     optional: false,
                 },
             ],
-            ..single_source_config(".", ".zshrc")
+            ..make_config(vec![make_source(
+                SourceRoot::Path(".".to_string()),
+                vec![make_file_config_item(".zshrc")],
+            )])
         };
 
         let error = derive_intent_plan_with_injectables(
@@ -1378,21 +1415,30 @@ mod tests {
                 path: "/inc/a.yml".to_string(),
                 optional: false,
             }],
-            ..single_source_config("b_src", ".b")
+            ..make_config(vec![make_source(
+                SourceRoot::Path("b_src".to_string()),
+                vec![make_file_config_item(".b")],
+            )])
         };
         let a = Config {
             includes: vec![Include::Path {
                 path: "/inc/b.yml".to_string(),
                 optional: false,
             }],
-            ..single_source_config("a_src", ".a")
+            ..make_config(vec![make_source(
+                SourceRoot::Path("a_src".to_string()),
+                vec![make_file_config_item(".a")],
+            )])
         };
         let root = Config {
             includes: vec![Include::Path {
                 path: "/inc/a.yml".to_string(),
                 optional: false,
             }],
-            ..single_source_config("root_src", ".zshrc")
+            ..make_config(vec![make_source(
+                SourceRoot::Path("root_src".to_string()),
+                vec![make_file_config_item(".zshrc")],
+            )])
         };
 
         let error = derive_intent_plan_with_injectables(
@@ -1424,14 +1470,54 @@ mod tests {
     }
 
     #[test]
+    fn reject_a_self_referencing_include_when_root_config_path_is_seeded() {
+        let root_path = Path::new("/inc/root.yml");
+        let root = Config {
+            includes: vec![Include::Path {
+                path: root_path.display().to_string(),
+                optional: false,
+            }],
+            ..make_config(vec![make_source(
+                SourceRoot::Path("root_src".to_string()),
+                vec![make_file_config_item(".zshrc")],
+            )])
+        };
+
+        let error = derive_intent_plan_with_injectables(
+            &root,
+            Some(root_path),
+            &BTreeMap::new(),
+            &|_| false,
+            &crate::load_config,
+        )
+        .expect_err("planning should fail when the root config includes itself");
+
+        assert_eq!(
+            error,
+            ProgramError::IncludeCycle {
+                cycle: vec![
+                    PathBuf::from("/inc/root.yml"),
+                    PathBuf::from("/inc/root.yml")
+                ],
+            }
+        );
+    }
+
+    #[test]
     fn resolve_env_backed_include_paths_from_environment() {
-        let included = single_source_config("private_src", ".secrets");
+        let included = make_config(vec![make_source(
+            SourceRoot::Path("private_src".to_string()),
+            vec![make_file_config_item(".secrets")],
+        )]);
         let root = Config {
             includes: vec![Include::Environment {
                 env: "PRIVATE_CONFIG".to_string(),
                 optional: false,
             }],
-            ..single_source_config(".", ".zshrc")
+            ..make_config(vec![make_source(
+                SourceRoot::Path(".".to_string()),
+                vec![make_file_config_item(".zshrc")],
+            )])
         };
         let environment = BTreeMap::from([(
             "PRIVATE_CONFIG".to_string(),
@@ -1472,7 +1558,10 @@ mod tests {
                 env: "PRIVATE_CONFIG".to_string(),
                 optional: true,
             }],
-            ..single_source_config(".", ".zshrc")
+            ..make_config(vec![make_source(
+                SourceRoot::Path(".".to_string()),
+                vec![make_file_config_item(".zshrc")],
+            )])
         };
 
         let plan = derive_intent_plan_with_env(&root, &BTreeMap::new()).expect(
@@ -1495,7 +1584,10 @@ mod tests {
                 env: "PRIVATE_CONFIG".to_string(),
                 optional: false,
             }],
-            ..single_source_config(".", ".zshrc")
+            ..make_config(vec![make_source(
+                SourceRoot::Path(".".to_string()),
+                vec![make_file_config_item(".zshrc")],
+            )])
         };
 
         let error = derive_intent_plan_with_env(&root, &BTreeMap::new()).expect_err(
@@ -1637,7 +1729,10 @@ mod tests {
                 path: "/inc/bad.yml".to_string(),
                 optional: false,
             }],
-            ..single_source_config(".", ".zshrc")
+            ..make_config(vec![make_source(
+                SourceRoot::Path(".".to_string()),
+                vec![make_file_config_item(".zshrc")],
+            )])
         };
 
         let error =
@@ -1647,6 +1742,37 @@ mod tests {
                 })
             })
             .expect_err("a parse error from an included config should propagate immediately");
+
+        assert_eq!(
+            error,
+            ProgramError::InvalidConfiguration {
+                message: "unknown field `oops`".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn propagate_parse_errors_from_optional_includes() {
+        let root = Config {
+            includes: vec![Include::Path {
+                path: "/inc/optional-bad.yml".to_string(),
+                optional: true,
+            }],
+            ..make_config(vec![make_source(
+                SourceRoot::Path(".".to_string()),
+                vec![make_file_config_item(".zshrc")],
+            )])
+        };
+
+        let error =
+            derive_intent_plan_with_injectables(&root, None, &BTreeMap::new(), &|_| false, &|_| {
+                Err(ProgramError::InvalidConfiguration {
+                    message: "unknown field `oops`".to_string(),
+                })
+            })
+            .expect_err(
+                "planning should propagate structural include errors even when include is optional",
+            );
 
         assert_eq!(
             error,

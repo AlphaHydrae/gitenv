@@ -11,7 +11,7 @@
   ],
   "settings": {
     "chat.tools.terminal.autoApprove": {
-      "/^\\s*(?:bash +)?(?:\\.\\/)?\\.agent\\/scripts\\/(?:build|coverage|format|lint|lint-md|tests)\\.sh\\s*$/": {
+      "/^\\s*(?:bash +)?(?:\\.\\/)?\\.agent\\/scripts\\/(?:build|coverage|format|lint|lint-md|tests)\\.sh\\s*(?:2>&1\\s*)?(?:\\|\\s*tail\\s+-\\d+\\s*)?$/": {
         "approve": true,
         "matchCommandLine": true,
       },
