@@ -41,21 +41,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 46: Improve action tests to assert full directory state
-
-Why this increment exists:
-
-- "Improve action tests by reading the whole temporary test directory state"
-  is listed as a pending refactoring in MIGRATION.md.
-- Current integration tests in `actions_apply.rs` assert individual file
-  outcomes; asserting the full directory state catches unintended side effects.
-
-Review target:
-
-- Extend selected integration tests in `actions_apply.rs` to read and assert
-  the complete state of the temporary test directory after each operation.
-- Ensure no regressions; no new behavior changes.
-
 ### Increment 47: Expand include paths that start with `~`
 
 Why this increment exists:

@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-09: Assert full directory state in action and integration tests - Add
+  a reusable recursive directory snapshot helper for test fixtures, migrate
+  integration tests to use full snapshots for apply outcomes and no-change
+  checks.
 - 2026-05-09: Rename ProgramError variants to failure-oriented names - Replace
   ambiguous operation-style `ProgramError` variant names with concise
   problem-oriented names across config loading, selector expansion, status

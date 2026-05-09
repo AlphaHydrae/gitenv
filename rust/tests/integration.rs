@@ -3,8 +3,30 @@ use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
 
+mod support;
+use support::{DirectoryEntry, snapshot_directory_contents};
+
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
+
+fn directory(path: &str) -> DirectoryEntry {
+    DirectoryEntry::Directory { path: path.into() }
+}
+
+fn file(path: &str, contents: &str) -> DirectoryEntry {
+    DirectoryEntry::File {
+        path: path.into(),
+        contents: contents.to_string(),
+    }
+}
+
+#[cfg(unix)]
+fn symlink_entry(path: &str, target: &Path) -> DirectoryEntry {
+    DirectoryEntry::Symlink {
+        path: path.into(),
+        target: target.to_path_buf(),
+    }
+}
 
 fn gitenv_command_for_home(home: &TempDir) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_gitenv"));
@@ -256,6 +278,9 @@ fn test_info_command() {
     )
     .expect("selected profile target should be created");
 
+    let home_snapshot_before =
+        snapshot_directory_contents(home.path()).expect("home directory should be readable");
+
     let output = gitenv_command_for_home(&home)
         .output()
         .expect("binary should run");
@@ -360,6 +385,10 @@ fn test_info_command() {
     assert!(output.status.success());
     assert_eq!(String::from_utf8_lossy(&output.stdout), expected_stdout);
     assert!(output.stderr.is_empty());
+
+    let home_snapshot_after =
+        snapshot_directory_contents(home.path()).expect("home directory should be readable");
+    assert_eq!(home_snapshot_after, home_snapshot_before);
 }
 
 #[cfg(unix)]
@@ -526,13 +555,6 @@ fn test_apply_command() {
         .join("gitenv-apply")
         .join("profiles")
         .join(".profile");
-    let ignored_target = home
-        .path()
-        .join(".local")
-        .join("share")
-        .join("gitenv-apply")
-        .join("profiles")
-        .join(".ignored");
     let shared_config_target = home
         .path()
         .join(".local")
@@ -662,65 +684,72 @@ fn test_apply_command() {
     assert_eq!(String::from_utf8_lossy(&output.stdout), expected_stdout);
     assert!(output.stderr.is_empty());
 
+    let home_snapshot =
+        snapshot_directory_contents(home.path()).expect("home directory should be readable");
     assert_eq!(
-        fs::read_link(&create_link_target).expect("created link target should be a symlink"),
-        repository.path().join(".").join("create-link.conf")
-    );
-    assert_eq!(
-        fs::read_to_string(&create_copy_target).expect("created copy target should be readable"),
-        "created copy\n"
-    );
-    assert_eq!(
-        fs::read_link(&keep_link_target).expect("kept link target should remain a symlink"),
-        repository.path().join("keep-link.conf")
-    );
-    assert_eq!(
-        fs::read_to_string(&keep_copy_target).expect("kept copy target should remain readable"),
-        "keep copy\n"
-    );
-    assert_eq!(
-        fs::read_link(&overwrite_link_target).expect("overwritten link target should be a symlink"),
-        repository.path().join(".").join("overwrite-link.conf")
-    );
-    assert_eq!(
-        fs::read_to_string(&backup_copy_target).expect("backup copy target should be readable"),
-        "new copy contents\n"
-    );
-    assert_eq!(
-        fs::read_to_string(backup_copy_target.with_extension("conf.orig"))
-            .expect("backup copy file should be readable"),
-        "old copy contents\n"
-    );
-    assert_eq!(
-        fs::read_to_string(&match_copy_target).expect("matching copy target should be readable"),
-        "matching copy contents\n"
-    );
-    assert!(
-        !match_copy_target.with_extension("conf.orig").exists(),
-        "matching copy targets should not create backup files"
-    );
-    assert_eq!(
-        fs::read_link(&selected_aliases_target)
-            .expect("selected aliases target should be a symlink"),
-        repository.path().join("profiles").join(".aliases")
-    );
-    assert_eq!(
-        fs::read_link(&selected_profile_target)
-            .expect("selected profile target should remain a symlink"),
-        repository.path().join("profiles").join(".profile")
-    );
-    assert_eq!(
-        fs::read_to_string(&shared_config_target)
-            .expect("shared include target should be readable"),
-        "shared config content\n"
-    );
-    assert_eq!(
-        fs::read_link(&env_sourced_target).expect("env sourced target should be a symlink"),
-        env_source.path().join("env-sourced.conf")
-    );
-    assert!(
-        !ignored_target.exists(),
-        "excluded select entries should not create targets"
+        home_snapshot,
+        vec![
+            directory(".config"),
+            directory(".config/gitenv"),
+            file(".config/gitenv/config.yml", &config),
+            directory(".config/gitenv-apply"),
+            directory(".config/gitenv-apply/create"),
+            file(".config/gitenv-apply/create/copy.conf", "created copy\n"),
+            symlink_entry(
+                ".config/gitenv-apply/create/link.conf",
+                &repository.path().join(".").join("create-link.conf"),
+            ),
+            directory(".config/gitenv-apply/keep"),
+            file(".config/gitenv-apply/keep/copy.conf", "keep copy\n"),
+            symlink_entry(
+                ".config/gitenv-apply/keep/link.conf",
+                &repository.path().join("keep-link.conf"),
+            ),
+            directory(".config/gitenv-apply/replace"),
+            file(
+                ".config/gitenv-apply/replace/copy.conf",
+                "new copy contents\n"
+            ),
+            file(
+                ".config/gitenv-apply/replace/copy.conf.orig",
+                "old copy contents\n",
+            ),
+            symlink_entry(
+                ".config/gitenv-apply/replace/link.conf",
+                &repository.path().join(".").join("overwrite-link.conf"),
+            ),
+            file(
+                ".config/gitenv-apply/replace/link.conf.orig",
+                "replace me\n"
+            ),
+            file(
+                ".config/gitenv-apply/replace/match.conf",
+                "matching copy contents\n",
+            ),
+            directory(".local"),
+            directory(".local/share"),
+            directory(".local/share/gitenv-apply"),
+            directory(".local/share/gitenv-apply/profiles"),
+            symlink_entry(
+                ".local/share/gitenv-apply/profiles/.aliases",
+                &repository.path().join("profiles").join(".aliases"),
+            ),
+            symlink_entry(
+                ".local/share/gitenv-apply/profiles/.profile",
+                &repository.path().join("profiles").join(".profile"),
+            ),
+            directory(".local/share/gitenv-apply-env"),
+            symlink_entry(
+                ".local/share/gitenv-apply-env/env.conf",
+                &env_source.path().join("env-sourced.conf"),
+            ),
+            directory(".local/share/gitenv-apply-shared"),
+            directory(".local/share/gitenv-apply-shared/shared"),
+            file(
+                ".local/share/gitenv-apply-shared/shared/config.conf",
+                "shared config content\n",
+            ),
+        ]
     );
 }
 
@@ -767,6 +796,9 @@ fn show_info_output_when_config_uses_relative_include_paths() {
         &shared_config,
     );
 
+    let home_snapshot_before =
+        snapshot_directory_contents(home.path()).expect("home directory should be readable");
+
     let unrelated_working_directory = TempDir::new().expect("temporary working directory");
     let output = gitenv_command_for_home(&home)
         .current_dir(unrelated_working_directory.path())
@@ -787,4 +819,8 @@ fn show_info_output_when_config_uses_relative_include_paths() {
     assert!(output.status.success());
     assert_eq!(String::from_utf8_lossy(&output.stdout), expected_stdout);
     assert!(output.stderr.is_empty());
+
+    let home_snapshot_after =
+        snapshot_directory_contents(home.path()).expect("home directory should be readable");
+    assert_eq!(home_snapshot_after, home_snapshot_before);
 }

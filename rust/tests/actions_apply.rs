@@ -2,10 +2,40 @@ use gitenv::{
     ApplyOperationOutcome, ApplyOperationReport, ConflictPolicy, FileOperation, OperationAction,
     OperationPlan, ProgramError, apply_operation_plan,
 };
+mod support;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
+use std::path::{Path, PathBuf};
+use support::{DirectoryEntry, snapshot_directory_contents};
 use tempfile::TempDir;
+
+fn directory(path: &str) -> DirectoryEntry {
+    DirectoryEntry::Directory {
+        path: PathBuf::from(path),
+    }
+}
+
+fn file(path: &str, contents: &str) -> DirectoryEntry {
+    DirectoryEntry::File {
+        path: PathBuf::from(path),
+        contents: contents.to_string(),
+    }
+}
+
+#[cfg(unix)]
+fn symlink_entry(path: &str, target: &Path) -> DirectoryEntry {
+    DirectoryEntry::Symlink {
+        path: PathBuf::from(path),
+        target: target.to_path_buf(),
+    }
+}
+
+fn assert_temp_directory_state(temp: &TempDir, expected: Vec<DirectoryEntry>) {
+    let snapshot =
+        snapshot_directory_contents(temp.path()).expect("temporary directory state should be read");
+    assert_eq!(snapshot, expected);
+}
 
 fn symlink_operation(
     source: std::path::PathBuf,
@@ -75,9 +105,12 @@ fn create_symlink_when_target_is_missing() {
             ))],
         }
     );
-    assert_eq!(
-        fs::read_link(&target).expect("target symlink should be readable"),
-        source
+    assert_temp_directory_state(
+        &temp,
+        vec![
+            file("source.txt", "source\n"),
+            symlink_entry("target.txt", &source),
+        ],
     );
 }
 
@@ -117,9 +150,13 @@ fn skip_existing_symlink_target_when_conflict_policy_is_skip() {
             )],
         }
     );
-    assert_eq!(
-        fs::read_link(&target).expect("existing target symlink should remain readable"),
-        current
+    assert_temp_directory_state(
+        &temp,
+        vec![
+            file("current.txt", "current\n"),
+            file("source.txt", "source\n"),
+            symlink_entry("target.txt", &current),
+        ],
     );
 }
 
@@ -157,9 +194,13 @@ fn overwrite_existing_target_when_conflict_policy_is_overwrite() {
             ))],
         }
     );
-    assert_eq!(
-        fs::read_link(&target).expect("overwritten target symlink should be readable"),
-        source
+    assert_temp_directory_state(
+        &temp,
+        vec![
+            file("current.txt", "current\n"),
+            file("source.txt", "source\n"),
+            symlink_entry("target.txt", &source),
+        ],
     );
 }
 
@@ -170,7 +211,6 @@ fn backup_then_overwrite_existing_target_when_conflict_policy_is_overwrite_with_
     let source = temp.path().join("source.txt");
     let current = temp.path().join("current.txt");
     let target = temp.path().join("target.txt");
-    let backup = temp.path().join("target.txt.orig");
     fs::write(&source, "source\n").expect("source file should be written");
     fs::write(&current, "current\n").expect("current file should be written");
     symlink(&current, &target).expect("existing target symlink should be created");
@@ -198,13 +238,14 @@ fn backup_then_overwrite_existing_target_when_conflict_policy_is_overwrite_with_
             ))],
         }
     );
-    assert_eq!(
-        fs::read_link(&target).expect("overwritten target symlink should be readable"),
-        source
-    );
-    assert_eq!(
-        fs::read_link(&backup).expect("backup symlink should be readable"),
-        current
+    assert_temp_directory_state(
+        &temp,
+        vec![
+            file("current.txt", "current\n"),
+            file("source.txt", "source\n"),
+            symlink_entry("target.txt", &source),
+            symlink_entry("target.txt.orig", &current),
+        ],
     );
 }
 
@@ -234,9 +275,14 @@ fn reject_backup_overwrite_when_backup_path_already_exists() {
         .expect_err("backup conflicts should fail when backup path already exists");
 
     assert_eq!(error, ProgramError::BackupAlreadyExists { path: backup });
-    assert_eq!(
-        fs::read_link(&target).expect("existing target symlink should remain readable"),
-        current
+    assert_temp_directory_state(
+        &temp,
+        vec![
+            file("current.txt", "current\n"),
+            file("source.txt", "source\n"),
+            symlink_entry("target.txt", &current),
+            file("target.txt.orig", "backup\n"),
+        ],
     );
 }
 
@@ -271,9 +317,14 @@ fn create_missing_target_parent_directory_when_mkdir_is_enabled() {
             ))],
         }
     );
-    assert_eq!(
-        fs::read_link(&target).expect("target symlink should be readable"),
-        source
+    assert_temp_directory_state(
+        &temp,
+        vec![
+            directory("nested"),
+            directory("nested/config"),
+            symlink_entry("nested/config/target.txt", &source),
+            file("source.txt", "source\n"),
+        ],
     );
 }
 
@@ -301,6 +352,8 @@ fn fail_when_target_parent_directory_is_missing_and_mkdir_is_disabled() {
         ProgramError::SymlinkCreationFailed { .. } => {}
         other => panic!("expected create symlink failure, got {other:?}"),
     }
+
+    assert_temp_directory_state(&temp, vec![file("source.txt", "source\n")]);
 }
 
 #[test]
@@ -326,9 +379,12 @@ fn create_copy_when_target_is_missing() {
             ))],
         }
     );
-    assert_eq!(
-        fs::read_to_string(&target).expect("target file should be readable"),
-        "source\n"
+    assert_temp_directory_state(
+        &temp,
+        vec![
+            file("source.txt", "source\n"),
+            file("target.txt", "source\n"),
+        ],
     );
 }
 
@@ -360,9 +416,12 @@ fn skip_existing_copy_target_when_conflict_policy_is_skip() {
             )],
         }
     );
-    assert_eq!(
-        fs::read_to_string(&target).expect("existing target file should remain readable"),
-        "current\n"
+    assert_temp_directory_state(
+        &temp,
+        vec![
+            file("source.txt", "source\n"),
+            file("target.txt", "current\n"),
+        ],
     );
 }
 
@@ -397,9 +456,12 @@ fn overwrite_existing_copy_target_when_conflict_policy_is_overwrite() {
             ))],
         }
     );
-    assert_eq!(
-        fs::read_to_string(&target).expect("overwritten target file should be readable"),
-        "source\n"
+    assert_temp_directory_state(
+        &temp,
+        vec![
+            file("source.txt", "source\n"),
+            file("target.txt", "source\n"),
+        ],
     );
 }
 
@@ -408,7 +470,6 @@ fn backup_then_overwrite_existing_copy_target_when_conflict_policy_is_overwrite_
     let temp = TempDir::new().expect("temporary directory should be created");
     let source = temp.path().join("source.txt");
     let target = temp.path().join("target.txt");
-    let backup = temp.path().join("target.txt.orig");
     fs::write(&source, "source\n").expect("source file should be written");
     fs::write(&target, "current\n").expect("target file should be written");
 
@@ -435,13 +496,13 @@ fn backup_then_overwrite_existing_copy_target_when_conflict_policy_is_overwrite_
             ))],
         }
     );
-    assert_eq!(
-        fs::read_to_string(&target).expect("overwritten target file should be readable"),
-        "source\n"
-    );
-    assert_eq!(
-        fs::read_to_string(&backup).expect("backup file should be readable"),
-        "current\n"
+    assert_temp_directory_state(
+        &temp,
+        vec![
+            file("source.txt", "source\n"),
+            file("target.txt", "source\n"),
+            file("target.txt.orig", "current\n"),
+        ],
     );
 }
 
@@ -468,6 +529,8 @@ fn fail_when_copy_target_parent_directory_is_missing_and_mkdir_is_disabled() {
         ProgramError::FileCopyFailed { .. } => {}
         other => panic!("expected copy-file failure, got {other:?}"),
     }
+
+    assert_temp_directory_state(&temp, vec![file("source.txt", "source\n")]);
 }
 
 #[test]
@@ -500,9 +563,14 @@ fn create_missing_copy_target_parent_directory_when_mkdir_is_enabled() {
             ))],
         }
     );
-    assert_eq!(
-        fs::read_to_string(&target).expect("target file should be readable"),
-        "source\n"
+    assert_temp_directory_state(
+        &temp,
+        vec![
+            directory("nested"),
+            directory("nested/config"),
+            file("nested/config/target.txt", "source\n"),
+            file("source.txt", "source\n"),
+        ],
     );
 }
 
@@ -529,9 +597,13 @@ fn reject_backup_overwrite_for_copy_when_backup_path_already_exists() {
         .expect_err("copy backup conflicts should fail when backup path already exists");
 
     assert_eq!(error, ProgramError::BackupAlreadyExists { path: backup });
-    assert_eq!(
-        fs::read_to_string(&target).expect("existing target file should remain readable"),
-        "current\n"
+    assert_temp_directory_state(
+        &temp,
+        vec![
+            file("source.txt", "source\n"),
+            file("target.txt", "current\n"),
+            file("target.txt.orig", "backup\n"),
+        ],
     );
 }
 
@@ -578,12 +650,13 @@ fn preserve_operation_kind_in_apply_outcomes_for_symlink_and_copy_actions() {
             ],
         }
     );
-    assert_eq!(
-        fs::read_link(&symlink_target).expect("symlink target should be readable"),
-        symlink_source
-    );
-    assert_eq!(
-        fs::read_to_string(&copy_target).expect("copy target should be readable"),
-        "copy\n"
+    assert_temp_directory_state(
+        &temp,
+        vec![
+            file("source-copy.txt", "copy\n"),
+            file("source-link.txt", "link\n"),
+            file("target-copy.txt", "copy\n"),
+            symlink_entry("target-link.txt", &symlink_source),
+        ],
     );
 }
