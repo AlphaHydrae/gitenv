@@ -77,6 +77,14 @@ fn show_the_default_info_output_for_a_mixed_primary_workflow_scenario() {
         &repository.path().join("profiles").join("README"),
         "not selected\n",
     );
+    write_file(
+        &repository.path().join("guarded-file.conf"),
+        "guarded content\n",
+    );
+    write_file(
+        &repository.path().join("custom-to-file.conf"),
+        "custom to file\n",
+    );
     let shared_config = format!(
         concat!(
             "version: 1\n",
@@ -135,7 +143,18 @@ fn show_the_default_info_output_for_a_mixed_primary_workflow_scenario() {
             "      - select:\n",
             "          dotfiles: true\n",
             "          exclude:\n",
-            "            - .ignored\n"
+            "            - .ignored\n",
+            "  - from: \".\"\n",
+            "    to: \".local/share/gitenv-info-guarded\"\n",
+            "    when: to_exists\n",
+            "    configs:\n",
+            "      - file: guarded-file.conf\n",
+            "        as: guarded.conf\n",
+            "  - from: \".\"\n",
+            "    to: \".local/share/gitenv-info-custom\"\n",
+            "    configs:\n",
+            "      - file: custom-to-file.conf\n",
+            "        as: custom.conf\n"
         ),
         repository.path().display(),
         repository.path().display()
@@ -197,6 +216,12 @@ fn show_the_default_info_output_for_a_mixed_primary_workflow_scenario() {
         .join("gitenv-info-shared")
         .join("shared")
         .join("config.conf");
+    let custom_to_target = home
+        .path()
+        .join(".local")
+        .join("share")
+        .join("gitenv-info-custom")
+        .join("custom.conf");
     let elsewhere_target = repository.path().join("elsewhere.conf");
 
     fs::create_dir_all(
@@ -243,6 +268,7 @@ fn show_the_default_info_output_for_a_mixed_primary_workflow_scenario() {
             "{} <- {}   not a file\n",
             "{} -> {}   not yet set up\n",
             "{} -> {}   ok\n",
+            "{} -> {}   not yet set up\n",
             "{} <- {}   not yet set up\n",
         ),
         home.path()
@@ -310,6 +336,12 @@ fn show_the_default_info_output_for_a_mixed_primary_workflow_scenario() {
             .join("profiles")
             .join(".profile")
             .display(),
+        custom_to_target.display(),
+        repository
+            .path()
+            .join(".")
+            .join("custom-to-file.conf")
+            .display(),
         shared_config_target.display(),
         repository
             .path()
@@ -328,6 +360,7 @@ fn show_the_default_info_output_for_a_mixed_primary_workflow_scenario() {
 fn show_the_apply_output_for_a_mixed_primary_workflow_scenario() {
     let home = TempDir::new().expect("temporary home directory should be created");
     let repository = TempDir::new().expect("temporary repository should be created");
+    let env_source = TempDir::new().expect("temporary env source directory should be created");
 
     write_file(
         &repository.path().join("create-link.conf"),
@@ -362,6 +395,10 @@ fn show_the_apply_output_for_a_mixed_primary_workflow_scenario() {
     write_file(
         &repository.path().join("profiles").join("README"),
         "not selected\n",
+    );
+    write_file(
+        &env_source.path().join("env-sourced.conf"),
+        "from env source\n",
     );
     let shared_config = format!(
         concat!(
@@ -419,7 +456,12 @@ fn show_the_apply_output_for_a_mixed_primary_workflow_scenario() {
             "      - select:\n",
             "          dotfiles: true\n",
             "          exclude:\n",
-            "            - .ignored\n"
+            "            - .ignored\n",
+            "  - from: $GITENV_TEST_SOURCE_DIR\n",
+            "    to: \".local/share/gitenv-apply-env\"\n",
+            "    configs:\n",
+            "      - file: env-sourced.conf\n",
+            "        as: env.conf\n"
         ),
         repository.path().display(),
         repository.path().display()
@@ -476,6 +518,12 @@ fn show_the_apply_output_for_a_mixed_primary_workflow_scenario() {
         .join("gitenv-apply-shared")
         .join("shared")
         .join("config.conf");
+    let env_sourced_target = home
+        .path()
+        .join(".local")
+        .join("share")
+        .join("gitenv-apply-env")
+        .join("env.conf");
 
     fs::create_dir_all(
         keep_link_target
@@ -501,6 +549,7 @@ fn show_the_apply_output_for_a_mixed_primary_workflow_scenario() {
     .expect("selected profile target should be created");
 
     let output = gitenv_command_for_home(&home)
+        .env("GITENV_TEST_SOURCE_DIR", env_source.path())
         .arg("apply")
         .output()
         .expect("binary should run");
@@ -535,6 +584,7 @@ fn show_the_apply_output_for_a_mixed_primary_workflow_scenario() {
             "copied {} to {}\n",
             "created symlink {} -> {}\n",
             "skipped symlink {} (already exists)\n",
+            "created symlink {} -> {}\n",
             "copied {} to {}\n",
         ),
         create_link_target.display(),
@@ -570,6 +620,11 @@ fn show_the_apply_output_for_a_mixed_primary_workflow_scenario() {
             .join(".aliases")
             .display(),
         selected_profile_target.display(),
+        env_sourced_target.display(),
+        env_source
+            .path()
+            .join("env-sourced.conf")
+            .display(),
         repository
             .path()
             .join(".")
@@ -625,6 +680,11 @@ fn show_the_apply_output_for_a_mixed_primary_workflow_scenario() {
         fs::read_to_string(&shared_config_target)
             .expect("shared include target should be readable"),
         "shared config content\n"
+    );
+    assert_eq!(
+        fs::read_link(&env_sourced_target)
+            .expect("env sourced target should be a symlink"),
+        env_source.path().join("env-sourced.conf")
     );
     assert!(
         !ignored_target.exists(),
