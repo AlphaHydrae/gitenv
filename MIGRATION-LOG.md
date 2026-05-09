@@ -11,6 +11,9 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-09: Skip copy apply work when target content already matches - Reuse
+  copy-status inspection before destructive copy apply work so overwrite and
+  backup modes skip unchanged targets while still replacing mismatched files.
 - 2026-05-09: Reject configs with no sources or no per-source config items
   during parsing.
 - 2026-05-09: Resolve include paths relative to declaring config files - Resolve

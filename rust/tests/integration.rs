@@ -388,6 +388,10 @@ fn test_apply_command() {
         "new copy contents\n",
     );
     write_file(
+        &repository.path().join("match-copy.conf"),
+        "matching copy contents\n",
+    );
+    write_file(
         &repository.path().join("profiles").join(".aliases"),
         "alias gs='git status'\n",
     );
@@ -457,6 +461,11 @@ fn test_apply_command() {
             "        mode: copy\n",
             "        overwrite: true\n",
             "        backup_on_overwrite: true\n",
+            "      - file: match-copy.conf\n",
+            "        as: replace/match.conf\n",
+            "        mode: copy\n",
+            "        overwrite: true\n",
+            "        backup_on_overwrite: true\n",
             "  - from: profiles\n",
             "    to: \".local/share/gitenv-apply/profiles\"\n",
             "    configs:\n",
@@ -504,6 +513,12 @@ fn test_apply_command() {
         .join("gitenv-apply")
         .join("replace")
         .join("copy.conf");
+    let match_copy_target = home
+        .path()
+        .join(".config")
+        .join("gitenv-apply")
+        .join("replace")
+        .join("match.conf");
     let selected_profile_target = home
         .path()
         .join(".local")
@@ -543,6 +558,7 @@ fn test_apply_command() {
     write_file(&keep_copy_target, "keep copy\n");
     write_file(&overwrite_link_target, "replace me\n");
     write_file(&backup_copy_target, "old copy contents\n");
+    write_file(&match_copy_target, "matching copy contents\n");
     fs::create_dir_all(
         selected_profile_target
             .parent()
@@ -590,6 +606,7 @@ fn test_apply_command() {
                 "skipped copy {} (already exists)\n",
                 "created symlink {} -> {}\n",
                 "copied {} to {}\n",
+                "skipped copy {} (already exists)\n",
                 "created symlink {} -> {}\n",
                 "skipped symlink {} (already exists)\n",
                 "created symlink {} -> {}\n",
@@ -621,6 +638,7 @@ fn test_apply_command() {
                 .join("backup-copy.conf")
                 .display(),
             backup_copy_target.display(),
+            match_copy_target.display(),
             selected_aliases_target.display(),
             repository
                 .path()
@@ -672,6 +690,14 @@ fn test_apply_command() {
         fs::read_to_string(backup_copy_target.with_extension("conf.orig"))
             .expect("backup copy file should be readable"),
         "old copy contents\n"
+    );
+    assert_eq!(
+        fs::read_to_string(&match_copy_target).expect("matching copy target should be readable"),
+        "matching copy contents\n"
+    );
+    assert!(
+        !match_copy_target.with_extension("conf.orig").exists(),
+        "matching copy targets should not create backup files"
     );
     assert_eq!(
         fs::read_link(&selected_aliases_target)

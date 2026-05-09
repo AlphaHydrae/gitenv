@@ -41,22 +41,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 44: Skip copy when target content already matches
-
-Why this increment exists:
-
-- "Do not copy files when the target file already matches (hash)" is listed as
-  a pending refactoring in MIGRATION.md.
-- Unnecessary copies waste I/O and can reset file metadata without reason.
-
-Review target:
-
-- Before overwriting in the copy path, compare source and target content via
-  streamed hash (consistent with the existing inspection approach in `status.rs`).
-- Skip the copy and report `SkippedExistingTarget` when hashes match.
-- Add unit and integration tests covering the skip-on-match and overwrite-on-mismatch
-  branches.
-
 ### Increment 45: Normalize error names
 
 Why this increment exists:

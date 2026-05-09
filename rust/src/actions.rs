@@ -1,4 +1,7 @@
-use crate::{FileOperation, OperationAction, OperationPlan, ProgramError, logging};
+use crate::{
+    CopyInspectionState, FileOperation, OperationAction, OperationPlan, ProgramError, logging,
+    status::inspect_copy_operation_status,
+};
 use log::Level;
 use std::path::Path;
 
@@ -155,6 +158,12 @@ fn apply_copy_operation(
         )));
     }
 
+    if inspect_copy_operation_status(operation)?.state == CopyInspectionState::Ok {
+        return Ok(ApplyOperationOutcome::SkippedExistingTarget(
+            OperationAction::Copy(operation.clone()),
+        ));
+    }
+
     match operation.conflict_policy {
         crate::ConflictPolicy::Skip => Ok(ApplyOperationOutcome::SkippedExistingTarget(
             OperationAction::Copy(operation.clone()),
@@ -302,10 +311,13 @@ fn create_symlink_on_filesystem(source: &Path, target: &Path) -> Result<(), Prog
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_operation_plan_with_injectables, backup_path_for_target,
+        apply_copy_operation, apply_operation_plan_with_injectables, backup_path_for_target,
         ensure_parent_directory_exists, move_target_to_backup, remove_target_path, target_exists,
     };
-    use crate::{ConflictPolicy, FileOperation, OperationAction, OperationPlan, ProgramError};
+    use crate::{
+        ApplyOperationOutcome, ConflictPolicy, FileOperation, OperationAction, OperationPlan,
+        ProgramError,
+    };
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
@@ -497,6 +509,70 @@ mod tests {
                 path: PathBuf::from("/home/target"),
                 message: "permission denied".to_string(),
             }
+        );
+    }
+
+    #[test]
+    fn skip_copy_overwrite_when_target_contents_already_match() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source = temp.path().join("source.txt");
+        let target = temp.path().join("target.txt");
+        fs::write(&source, "same\n").expect("source file should be written");
+        fs::write(&target, "same\n").expect("target file should be written");
+
+        let outcome = apply_copy_operation(
+            &FileOperation {
+                source: source.clone(),
+                target: target.clone(),
+                mkdir: true,
+                conflict_policy: ConflictPolicy::Overwrite,
+            },
+            &target_exists,
+        )
+        .expect("matching copy targets should be skipped");
+
+        assert_eq!(
+            outcome,
+            ApplyOperationOutcome::SkippedExistingTarget(OperationAction::Copy(FileOperation {
+                source,
+                target,
+                mkdir: true,
+                conflict_policy: ConflictPolicy::Overwrite,
+            }))
+        );
+    }
+
+    #[test]
+    fn overwrite_copy_when_target_contents_differ() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source = temp.path().join("source.txt");
+        let target = temp.path().join("target.txt");
+        fs::write(&source, "source\n").expect("source file should be written");
+        fs::write(&target, "target\n").expect("target file should be written");
+
+        let outcome = apply_copy_operation(
+            &FileOperation {
+                source: source.clone(),
+                target: target.clone(),
+                mkdir: true,
+                conflict_policy: ConflictPolicy::Overwrite,
+            },
+            &target_exists,
+        )
+        .expect("differing copy targets should be overwritten");
+
+        assert_eq!(
+            outcome,
+            ApplyOperationOutcome::Applied(OperationAction::Copy(FileOperation {
+                source,
+                target: target.clone(),
+                mkdir: true,
+                conflict_policy: ConflictPolicy::Overwrite,
+            }))
+        );
+        assert_eq!(
+            fs::read_to_string(&target).expect("overwritten copy target should be readable"),
+            "source\n"
         );
     }
 
