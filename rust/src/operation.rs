@@ -517,7 +517,7 @@ mod tests {
         );
 
         let error = derive_operation_plan_with_injectables(&intent_plan, home.path(), &|path| {
-            Err(ProgramError::ReadSourceDirectory {
+            Err(ProgramError::SourceDirectoryReadFailed {
                 path: path.to_path_buf(),
                 message: "boom".to_string(),
             })
@@ -526,7 +526,7 @@ mod tests {
 
         assert_eq!(
             error,
-            ProgramError::ReadSourceDirectory {
+            ProgramError::SourceDirectoryReadFailed {
                 path: PathBuf::from("/repo-root/configs"),
                 message: "boom".to_string(),
             }
@@ -691,7 +691,7 @@ mod tests {
 
         assert!(matches!(
             &error,
-            ProgramError::ReadSourceDirectory { path, message }
+            ProgramError::SourceDirectoryReadFailed { path, message }
                 if path == &missing_source && !message.is_empty()
         ));
     }

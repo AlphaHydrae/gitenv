@@ -13,7 +13,7 @@ pub(crate) fn resolve_home_directory(
 }
 
 fn read_source_directory_error(path: &Path, error: impl ToString) -> ProgramError {
-    ProgramError::ReadSourceDirectory {
+    ProgramError::SourceDirectoryReadFailed {
         path: path.to_path_buf(),
         message: error.to_string(),
     }
@@ -95,7 +95,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            ProgramError::ReadSourceDirectory { path, .. } if path == missing_directory
+            ProgramError::SourceDirectoryReadFailed { path, .. } if path == missing_directory
         ));
     }
 }

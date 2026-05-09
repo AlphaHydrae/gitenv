@@ -41,22 +41,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 45: Normalize error names
-
-Why this increment exists:
-
-- "Normalize error names" is listed as a pending refactoring in MIGRATION.md.
-- Consistent naming improves readability and makes error-handling code easier
-  to follow.
-- Requires human guidance on naming conventions before implementation.
-
-Review target:
-
-- Review all error variant names across `ProgramError` and any domain error
-  types; agree on a consistent naming convention with the human.
-- Rename variants to match the agreed convention.
-- Preserve all behavior and test coverage.
-
 ### Increment 46: Improve action tests to assert full directory state
 
 Why this increment exists:

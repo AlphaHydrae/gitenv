@@ -94,7 +94,7 @@ fn target_exists(path: &Path) -> Result<bool, ProgramError> {
     match std::fs::symlink_metadata(path) {
         Ok(_) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(ProgramError::InspectPathMetadata {
+        Err(error) => Err(ProgramError::PathInspectionFailed {
             path: path.to_path_buf(),
             message: error.to_string(),
         }),
@@ -199,7 +199,7 @@ fn copy_source_to_target(source: &Path, target: &Path) -> Result<(), ProgramErro
 
     std::fs::copy(source, target)
         .map(|_| ())
-        .map_err(|error| ProgramError::CopyFile {
+        .map_err(|error| ProgramError::FileCopyFailed {
             source: source.to_path_buf(),
             target: target.to_path_buf(),
             message: error.to_string(),
@@ -217,7 +217,7 @@ fn ensure_parent_directory_exists(target: &Path) -> Result<(), ProgramError> {
         format!("path={}", parent.display()),
     );
 
-    std::fs::create_dir_all(parent).map_err(|error| ProgramError::CreateTargetDirectory {
+    std::fs::create_dir_all(parent).map_err(|error| ProgramError::TargetDirectoryCreationFailed {
         path: parent.to_path_buf(),
         message: error.to_string(),
     })
@@ -230,10 +230,11 @@ fn remove_target_path(path: &Path) -> Result<(), ProgramError> {
         format!("path={}", path.display()),
     );
 
-    let metadata = std::fs::symlink_metadata(path).map_err(|error| ProgramError::RemoveTarget {
-        path: path.to_path_buf(),
-        message: error.to_string(),
-    })?;
+    let metadata =
+        std::fs::symlink_metadata(path).map_err(|error| ProgramError::TargetRemovalFailed {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        })?;
 
     if metadata.file_type().is_dir() {
         logging::system(
@@ -242,7 +243,7 @@ fn remove_target_path(path: &Path) -> Result<(), ProgramError> {
             format!("path={}", path.display()),
         );
 
-        std::fs::remove_dir(path).map_err(|error| ProgramError::RemoveTarget {
+        std::fs::remove_dir(path).map_err(|error| ProgramError::TargetRemovalFailed {
             path: path.to_path_buf(),
             message: error.to_string(),
         })
@@ -253,7 +254,7 @@ fn remove_target_path(path: &Path) -> Result<(), ProgramError> {
             format!("path={}", path.display()),
         );
 
-        std::fs::remove_file(path).map_err(|error| ProgramError::RemoveTarget {
+        std::fs::remove_file(path).map_err(|error| ProgramError::TargetRemovalFailed {
             path: path.to_path_buf(),
             message: error.to_string(),
         })
@@ -271,7 +272,7 @@ fn move_target_to_backup(target: &Path, backup_path: &Path) -> Result<(), Progra
         ),
     );
 
-    std::fs::rename(target, backup_path).map_err(|error| ProgramError::BackupTarget {
+    std::fs::rename(target, backup_path).map_err(|error| ProgramError::TargetBackupFailed {
         path: target.to_path_buf(),
         backup_path: backup_path.to_path_buf(),
         message: error.to_string(),
@@ -292,16 +293,18 @@ fn create_symlink_on_filesystem(source: &Path, target: &Path) -> Result<(), Prog
         format!("source={} target={}", source.display(), target.display()),
     );
 
-    std::os::unix::fs::symlink(source, target).map_err(|error| ProgramError::CreateSymlink {
-        source: source.to_path_buf(),
-        target: target.to_path_buf(),
-        message: error.to_string(),
+    std::os::unix::fs::symlink(source, target).map_err(|error| {
+        ProgramError::SymlinkCreationFailed {
+            source: source.to_path_buf(),
+            target: target.to_path_buf(),
+            message: error.to_string(),
+        }
     })
 }
 
 #[cfg(not(unix))]
 fn create_symlink_on_filesystem(source: &Path, target: &Path) -> Result<(), ProgramError> {
-    Err(ProgramError::CreateSymlink {
+    Err(ProgramError::SymlinkCreationFailed {
         source: source.to_path_buf(),
         target: target.to_path_buf(),
         message: "symlink apply is not supported on this platform".to_string(),
@@ -366,7 +369,7 @@ mod tests {
 
         assert!(matches!(
             &error,
-            ProgramError::CreateTargetDirectory { path, .. } if path == &parent_file
+            ProgramError::TargetDirectoryCreationFailed { path, .. } if path == &parent_file
         ));
     }
 
@@ -379,7 +382,7 @@ mod tests {
 
         assert!(matches!(
             &error,
-            ProgramError::RemoveTarget { path, .. } if path == &missing
+            ProgramError::TargetRemovalFailed { path, .. } if path == &missing
         ));
     }
 
@@ -396,7 +399,7 @@ mod tests {
 
         assert!(matches!(
             &error,
-            ProgramError::RemoveTarget { path, .. } if path == &target_directory
+            ProgramError::TargetRemovalFailed { path, .. } if path == &target_directory
         ));
     }
 
@@ -428,7 +431,7 @@ mod tests {
 
         assert!(matches!(
             &error,
-            ProgramError::RemoveTarget { path, .. } if path == &target_file
+            ProgramError::TargetRemovalFailed { path, .. } if path == &target_file
         ));
     }
 
@@ -443,7 +446,7 @@ mod tests {
 
         assert!(matches!(
             &error,
-            ProgramError::BackupTarget {
+            ProgramError::TargetBackupFailed {
                 path,
                 backup_path,
                 ..
@@ -478,7 +481,7 @@ mod tests {
 
         assert!(matches!(
             &error,
-            ProgramError::InspectPathMetadata { path, .. } if path == &target
+            ProgramError::PathInspectionFailed { path, .. } if path == &target
         ));
     }
 
@@ -494,7 +497,7 @@ mod tests {
         let error = apply_operation_plan_with_injectables(
             &operation_plan,
             &|path| {
-                Err(ProgramError::InspectPathMetadata {
+                Err(ProgramError::PathInspectionFailed {
                     path: path.to_path_buf(),
                     message: "permission denied".to_string(),
                 })
@@ -505,7 +508,7 @@ mod tests {
 
         assert_eq!(
             error,
-            ProgramError::InspectPathMetadata {
+            ProgramError::PathInspectionFailed {
                 path: PathBuf::from("/home/target"),
                 message: "permission denied".to_string(),
             }
@@ -593,7 +596,7 @@ mod tests {
 
         assert!(matches!(
             &error,
-            ProgramError::CopyFile { source, target, .. }
+            ProgramError::FileCopyFailed { source, target, .. }
                 if source == &PathBuf::from("/repo/source")
                     && target == &PathBuf::from("/home/target")
         ));

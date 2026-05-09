@@ -31,7 +31,7 @@ fn derive_representative_plans(
                     config: include.clone(),
                 })
             } else {
-                Err(ProgramError::ReadConfiguration {
+                Err(ProgramError::ConfigurationReadFailed {
                     path: path.to_path_buf(),
                     message: "not found".to_string(),
                 })

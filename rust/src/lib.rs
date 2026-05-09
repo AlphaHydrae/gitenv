@@ -49,7 +49,7 @@ pub enum ProgramError {
     InvalidConfiguration {
         message: String,
     },
-    ReadConfiguration {
+    ConfigurationReadFailed {
         path: PathBuf,
         message: String,
     },
@@ -68,44 +68,44 @@ pub enum ProgramError {
         cycle: Vec<PathBuf>,
     },
     /// A source directory could not be read while expanding selectors.
-    ReadSourceDirectory {
+    SourceDirectoryReadFailed {
         path: PathBuf,
         message: String,
     },
     /// A filesystem path could not be inspected while deriving status.
-    InspectPathMetadata {
+    PathInspectionFailed {
         path: PathBuf,
         message: String,
     },
     /// A symlink target could not be read while deriving status.
-    ReadSymlinkTarget {
+    SymlinkTargetReadFailed {
         path: PathBuf,
         message: String,
     },
     /// A symlink could not be created while applying operations.
-    CreateSymlink {
+    SymlinkCreationFailed {
         source: PathBuf,
         target: PathBuf,
         message: String,
     },
     /// A file copy operation could not be completed while applying operations.
-    CopyFile {
+    FileCopyFailed {
         source: PathBuf,
         target: PathBuf,
         message: String,
     },
     /// The target's parent directory could not be created before apply.
-    CreateTargetDirectory {
+    TargetDirectoryCreationFailed {
         path: PathBuf,
         message: String,
     },
     /// An existing target could not be removed before overwrite.
-    RemoveTarget {
+    TargetRemovalFailed {
         path: PathBuf,
         message: String,
     },
     /// An existing target could not be moved to its backup path.
-    BackupTarget {
+    TargetBackupFailed {
         path: PathBuf,
         backup_path: PathBuf,
         message: String,
@@ -277,7 +277,7 @@ impl fmt::Display for ProgramError {
             ProgramError::InvalidConfiguration { message } => {
                 write!(f, "configuration is invalid ({message})")
             }
-            ProgramError::ReadConfiguration { path, message } => {
+            ProgramError::ConfigurationReadFailed { path, message } => {
                 let setup_guidance = concat!(
                     "\n\nConfig file locations\n",
                     "  - $GITENV_CONFIG (if set)\n",
@@ -316,28 +316,28 @@ impl fmt::Display for ProgramError {
                     .collect::<Vec<_>>()
                     .join("\n  - ")
             ),
-            ProgramError::ReadSourceDirectory { path, message } => {
+            ProgramError::SourceDirectoryReadFailed { path, message } => {
                 write!(
                     f,
                     "cannot read source directory {} ({message})",
                     path.display()
                 )
             }
-            ProgramError::InspectPathMetadata { path, message } => {
+            ProgramError::PathInspectionFailed { path, message } => {
                 write!(
                     f,
                     "cannot inspect path metadata for {} ({message})",
                     path.display()
                 )
             }
-            ProgramError::ReadSymlinkTarget { path, message } => {
+            ProgramError::SymlinkTargetReadFailed { path, message } => {
                 write!(
                     f,
                     "cannot read symlink target for {} ({message})",
                     path.display()
                 )
             }
-            ProgramError::CreateSymlink {
+            ProgramError::SymlinkCreationFailed {
                 source,
                 target,
                 message,
@@ -349,7 +349,7 @@ impl fmt::Display for ProgramError {
                     source.display(),
                 )
             }
-            ProgramError::CopyFile {
+            ProgramError::FileCopyFailed {
                 source,
                 target,
                 message,
@@ -361,21 +361,21 @@ impl fmt::Display for ProgramError {
                     target.display(),
                 )
             }
-            ProgramError::CreateTargetDirectory { path, message } => {
+            ProgramError::TargetDirectoryCreationFailed { path, message } => {
                 write!(
                     f,
                     "cannot create target directory {} ({message})",
                     path.display()
                 )
             }
-            ProgramError::RemoveTarget { path, message } => {
+            ProgramError::TargetRemovalFailed { path, message } => {
                 write!(
                     f,
                     "cannot remove existing target {} ({message})",
                     path.display()
                 )
             }
-            ProgramError::BackupTarget {
+            ProgramError::TargetBackupFailed {
                 path,
                 backup_path,
                 message,
@@ -644,7 +644,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            ProgramError::InspectPathMetadata { path, .. }
+            ProgramError::PathInspectionFailed { path, .. }
                 if path == repository.path().join(".").join("missing-source.txt")
         ));
     }
@@ -879,7 +879,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            ProgramError::CopyFile { source, target, .. }
+            ProgramError::FileCopyFailed { source, target, .. }
                 if source == repository.path().join(".").join("missing-source.txt")
                     && target == home.path().join("missing-source.txt")
         ));
@@ -1102,7 +1102,7 @@ mod tests {
             "configuration is invalid (bad yaml)"
         );
         assert_eq!(
-            ProgramError::ReadConfiguration {
+            ProgramError::ConfigurationReadFailed {
                 path: PathBuf::from("/home/.config/gitenv/config.yml"),
                 message: "missing file".to_string(),
             }
@@ -1146,7 +1146,7 @@ mod tests {
             )
         );
         assert_eq!(
-            ProgramError::ReadSourceDirectory {
+            ProgramError::SourceDirectoryReadFailed {
                 path: PathBuf::from("/repo/private"),
                 message: "permission denied".to_string(),
             }
@@ -1154,7 +1154,7 @@ mod tests {
             "cannot read source directory /repo/private (permission denied)"
         );
         assert_eq!(
-            ProgramError::InspectPathMetadata {
+            ProgramError::PathInspectionFailed {
                 path: PathBuf::from("/home/.zshrc"),
                 message: "input/output error".to_string(),
             }
@@ -1162,7 +1162,7 @@ mod tests {
             "cannot inspect path metadata for /home/.zshrc (input/output error)"
         );
         assert_eq!(
-            ProgramError::ReadSymlinkTarget {
+            ProgramError::SymlinkTargetReadFailed {
                 path: PathBuf::from("/home/.gitconfig"),
                 message: "broken link".to_string(),
             }
@@ -1170,7 +1170,7 @@ mod tests {
             "cannot read symlink target for /home/.gitconfig (broken link)"
         );
         assert_eq!(
-            ProgramError::CreateSymlink {
+            ProgramError::SymlinkCreationFailed {
                 source: PathBuf::from("/repo/.gitconfig"),
                 target: PathBuf::from("/home/.gitconfig"),
                 message: "operation not permitted".to_string(),
@@ -1179,7 +1179,7 @@ mod tests {
             "cannot create symlink /home/.gitconfig -> /repo/.gitconfig (operation not permitted)"
         );
         assert_eq!(
-            ProgramError::CopyFile {
+            ProgramError::FileCopyFailed {
                 source: PathBuf::from("/repo/.gitconfig"),
                 target: PathBuf::from("/home/.gitconfig"),
                 message: "permission denied".to_string(),
@@ -1188,7 +1188,7 @@ mod tests {
             "cannot copy file /repo/.gitconfig -> /home/.gitconfig (permission denied)"
         );
         assert_eq!(
-            ProgramError::CreateTargetDirectory {
+            ProgramError::TargetDirectoryCreationFailed {
                 path: PathBuf::from("/home/.config"),
                 message: "permission denied".to_string(),
             }
@@ -1196,7 +1196,7 @@ mod tests {
             "cannot create target directory /home/.config (permission denied)"
         );
         assert_eq!(
-            ProgramError::RemoveTarget {
+            ProgramError::TargetRemovalFailed {
                 path: PathBuf::from("/home/.gitconfig"),
                 message: "permission denied".to_string(),
             }
@@ -1204,7 +1204,7 @@ mod tests {
             "cannot remove existing target /home/.gitconfig (permission denied)"
         );
         assert_eq!(
-            ProgramError::BackupTarget {
+            ProgramError::TargetBackupFailed {
                 path: PathBuf::from("/home/.gitconfig"),
                 backup_path: PathBuf::from("/home/.gitconfig.orig"),
                 message: "permission denied".to_string(),

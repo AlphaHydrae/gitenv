@@ -389,7 +389,7 @@ pub fn load_config(path: &Path) -> Result<LoadedConfig, ProgramError> {
             "load_config_failed",
             format!("path={} message={error}", path.display()),
         );
-        ProgramError::ReadConfiguration {
+        ProgramError::ConfigurationReadFailed {
             path: path.to_path_buf(),
             message: error.to_string(),
         }
@@ -760,7 +760,7 @@ sources:
 
         assert!(matches!(
             &error,
-            ProgramError::ReadConfiguration { path, message }
+            ProgramError::ConfigurationReadFailed { path, message }
                 if path == &file_path && !message.is_empty()
         ));
     }

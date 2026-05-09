@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-09: Rename ProgramError variants to failure-oriented names - Replace
+  ambiguous operation-style `ProgramError` variant names with concise
+  problem-oriented names across config loading, selector expansion, status
+  inspection, and apply execution paths.
 - 2026-05-09: Skip copy apply work when target content already matches - Reuse
   copy-status inspection before destructive copy apply work so overwrite and
   backup modes skip unchanged targets while still replacing mismatched files.

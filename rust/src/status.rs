@@ -201,7 +201,7 @@ fn target_kind_from_filesystem(path: &std::path::Path) -> Result<TargetKind, Pro
             }
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(TargetKind::Missing),
-        Err(error) => Err(ProgramError::InspectPathMetadata {
+        Err(error) => Err(ProgramError::PathInspectionFailed {
             path: path.to_path_buf(),
             message: error.to_string(),
         }),
@@ -215,7 +215,7 @@ fn read_symlink_target_from_filesystem(path: &std::path::Path) -> Result<PathBuf
         format!("path={}", path.display()),
     );
 
-    std::fs::read_link(path).map_err(|error| ProgramError::ReadSymlinkTarget {
+    std::fs::read_link(path).map_err(|error| ProgramError::SymlinkTargetReadFailed {
         path: path.to_path_buf(),
         message: error.to_string(),
     })
@@ -239,7 +239,7 @@ fn copy_target_kind_from_filesystem(
             }
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(CopyTargetKind::Missing),
-        Err(error) => Err(ProgramError::InspectPathMetadata {
+        Err(error) => Err(ProgramError::PathInspectionFailed {
             path: path.to_path_buf(),
             message: error.to_string(),
         }),
@@ -253,7 +253,7 @@ fn hash_file_contents_from_filesystem(path: &std::path::Path) -> Result<u64, Pro
         format!("path={}", path.display()),
     );
 
-    let file = std::fs::File::open(path).map_err(|error| ProgramError::InspectPathMetadata {
+    let file = std::fs::File::open(path).map_err(|error| ProgramError::PathInspectionFailed {
         path: path.to_path_buf(),
         message: error.to_string(),
     })?;
@@ -262,12 +262,13 @@ fn hash_file_contents_from_filesystem(path: &std::path::Path) -> Result<u64, Pro
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
 
     loop {
-        let read = reader
-            .read(&mut buffer)
-            .map_err(|error| ProgramError::InspectPathMetadata {
-                path: path.to_path_buf(),
-                message: error.to_string(),
-            })?;
+        let read =
+            reader
+                .read(&mut buffer)
+                .map_err(|error| ProgramError::PathInspectionFailed {
+                    path: path.to_path_buf(),
+                    message: error.to_string(),
+                })?;
 
         if read == 0 {
             break;
@@ -426,7 +427,7 @@ mod tests {
         let error = inspect_symlink_operation_status_with_injectables(
             &operation,
             &|path| {
-                Err(ProgramError::InspectPathMetadata {
+                Err(ProgramError::PathInspectionFailed {
                     path: path.to_path_buf(),
                     message: "permission denied".to_string(),
                 })
@@ -437,7 +438,7 @@ mod tests {
 
         assert_eq!(
             error,
-            ProgramError::InspectPathMetadata {
+            ProgramError::PathInspectionFailed {
                 path: target,
                 message: "permission denied".to_string(),
             }
@@ -455,7 +456,7 @@ mod tests {
             &operation,
             &|_| Ok(TargetKind::Symlink),
             &|path| {
-                Err(ProgramError::ReadSymlinkTarget {
+                Err(ProgramError::SymlinkTargetReadFailed {
                     path: path.to_path_buf(),
                     message: "broken link".to_string(),
                 })
@@ -465,7 +466,7 @@ mod tests {
 
         assert_eq!(
             error,
-            ProgramError::ReadSymlinkTarget {
+            ProgramError::SymlinkTargetReadFailed {
                 path: target,
                 message: "broken link".to_string(),
             }
@@ -606,7 +607,7 @@ mod tests {
             &operation,
             &|_| Ok(CopyTargetKind::File),
             &|path| {
-                Err(ProgramError::InspectPathMetadata {
+                Err(ProgramError::PathInspectionFailed {
                     path: path.to_path_buf(),
                     message: "permission denied".to_string(),
                 })
@@ -616,7 +617,7 @@ mod tests {
 
         assert_eq!(
             error,
-            ProgramError::InspectPathMetadata {
+            ProgramError::PathInspectionFailed {
                 path: source,
                 message: "permission denied".to_string(),
             }
@@ -632,7 +633,7 @@ mod tests {
 
         assert!(matches!(
             &error,
-            ProgramError::InspectPathMetadata { path, message }
+            ProgramError::PathInspectionFailed { path, message }
                 if path == &missing && !message.is_empty()
         ));
     }
@@ -646,7 +647,7 @@ mod tests {
 
         assert!(matches!(
             &error,
-            ProgramError::ReadSymlinkTarget { path, message }
+            ProgramError::SymlinkTargetReadFailed { path, message }
                 if path == &missing && !message.is_empty()
         ));
     }
@@ -678,7 +679,7 @@ mod tests {
 
         assert!(matches!(
             &error,
-            ProgramError::InspectPathMetadata { path, message }
+            ProgramError::PathInspectionFailed { path, message }
                 if path == &target && !message.is_empty()
         ));
     }
@@ -710,7 +711,7 @@ mod tests {
 
         assert!(matches!(
             &error,
-            ProgramError::InspectPathMetadata { path, message }
+            ProgramError::PathInspectionFailed { path, message }
                 if path == &target && !message.is_empty()
         ));
     }
@@ -727,7 +728,7 @@ mod tests {
 
         assert!(matches!(
             &error,
-            ProgramError::InspectPathMetadata { path, message }
+            ProgramError::PathInspectionFailed { path, message }
                 if path == &directory && !message.is_empty()
         ));
     }

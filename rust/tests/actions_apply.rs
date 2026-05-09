@@ -298,7 +298,7 @@ fn fail_when_target_parent_directory_is_missing_and_mkdir_is_disabled() {
         .expect_err("mkdir-disabled operations should fail when parent is missing");
 
     match error {
-        ProgramError::CreateSymlink { .. } => {}
+        ProgramError::SymlinkCreationFailed { .. } => {}
         other => panic!("expected create symlink failure, got {other:?}"),
     }
 }
@@ -465,7 +465,7 @@ fn fail_when_copy_target_parent_directory_is_missing_and_mkdir_is_disabled() {
         .expect_err("mkdir-disabled copy operations should fail when parent is missing");
 
     match error {
-        ProgramError::CopyFile { .. } => {}
+        ProgramError::FileCopyFailed { .. } => {}
         other => panic!("expected copy-file failure, got {other:?}"),
     }
 }

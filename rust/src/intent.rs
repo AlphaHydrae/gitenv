@@ -338,13 +338,13 @@ fn plan_sources_recursively(
         let loaded_included_config = match read_config_file(&include_path) {
             Ok(c) => c,
             // Optional includes are silently skipped when the file is missing.
-            Err(ProgramError::ReadConfiguration { .. }) if optional => {
+            Err(ProgramError::ConfigurationReadFailed { .. }) if optional => {
                 seen.insert(include_path);
                 continue;
             }
             // Required includes that cannot be read are collected for the
             // caller to surface as a single IncludeNotFound error.
-            Err(ProgramError::ReadConfiguration { .. }) => {
+            Err(ProgramError::ConfigurationReadFailed { .. }) => {
                 missing_files.insert(include_path);
                 continue;
             }
@@ -1521,7 +1521,7 @@ mod tests {
             &BTreeMap::new(),
             &|_| false,
             &|path: &Path| {
-                Err(ProgramError::ReadConfiguration {
+                Err(ProgramError::ConfigurationReadFailed {
                     path: path.to_path_buf(),
                     message: "not found".to_string(),
                 })
@@ -1562,7 +1562,7 @@ mod tests {
             &BTreeMap::new(),
             &|_| false,
             &|path: &Path| {
-                Err(ProgramError::ReadConfiguration {
+                Err(ProgramError::ConfigurationReadFailed {
                     path: path.to_path_buf(),
                     message: "not found".to_string(),
                 })
@@ -1893,9 +1893,9 @@ mod tests {
 
     #[test]
     fn propagate_parse_errors_from_included_configs() {
-        // An include whose file returns a non-ReadConfiguration error (e.g. a
-        // structural parse failure) must be propagated as-is rather than
-        // collected into an IncludeNotFound set.
+        // An include whose file returns a non-ConfigurationReadFailed error
+        // (e.g. a structural parse failure) must be propagated as-is rather
+        // than collected into an IncludeNotFound set.
         let root = Config {
             includes: vec![Include::Path {
                 path: "/inc/bad.yml".to_string(),
