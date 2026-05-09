@@ -197,6 +197,7 @@ fn run_info(
     Ok(ProgramOutput {
         message: cli::render_default_inspection_output(
             &operation_plan,
+            &home_directory,
             runtime_config.use_color_for_stdout,
         )?,
     })
@@ -217,8 +218,11 @@ fn run_apply(
     )?;
 
     let apply_report = apply_operation_plan(&operation_plan)?;
-    let output_message =
-        cli::render_apply_output(&apply_report, runtime_config.use_color_for_stdout);
+    let output_message = cli::render_apply_output(
+        &apply_report,
+        &home_directory,
+        runtime_config.use_color_for_stdout,
+    );
 
     Ok(ProgramOutput {
         message: output_message,
@@ -533,8 +537,7 @@ mod tests {
         .expect("explicit config path should produce inspection output");
 
         let expected = format!(
-            "{} -> {}   not yet set up",
-            home.path().join(".gitconfig").display(),
+            "~/.gitconfig -> {}   not yet set up",
             repository.path().join(".").join(".gitconfig").display()
         );
         assert_eq!(output.message, expected);
@@ -702,8 +705,7 @@ mod tests {
         .expect("explicit config path should produce apply output");
 
         let expected = format!(
-            "created symlink {} -> {}",
-            home.path().join(".gitconfig").display(),
+            "created symlink ~/.gitconfig -> {}",
             repository.path().join(".").join(".gitconfig").display()
         );
         assert_eq!(output.message, expected);
@@ -821,8 +823,7 @@ mod tests {
         .expect("run_info_from_env should succeed with injected config path");
 
         let expected = format!(
-            "{} -> {}   not yet set up",
-            home.path().join(".profile").display(),
+            "~/.profile -> {}   not yet set up",
             repository.path().join(".").join(".profile").display()
         );
         assert_eq!(output.message, expected);
@@ -864,8 +865,7 @@ mod tests {
         .expect("run_apply_from_env should succeed with injected config path");
 
         let expected = format!(
-            "created symlink {} -> {}",
-            home.path().join(".profile").display(),
+            "created symlink ~/.profile -> {}",
             repository.path().join(".").join(".profile").display()
         );
         assert_eq!(output.message, expected);

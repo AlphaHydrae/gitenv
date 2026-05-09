@@ -19,6 +19,10 @@
         "approve": true,
         "matchCommandLine": true,
       },
+      "^\\s*tail\\s+-\\d+\\s+tmp\\/agent\\/[a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)*\\s*$": {
+        "approve": true,
+        "matchCommandLine": true,
+      },
     },
     "chat.tools.terminal.enableAutoApprove": true,
     "chat.tools.terminal.ignoreDefaultAutoApproveRules": true,

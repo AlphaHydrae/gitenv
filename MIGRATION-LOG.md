@@ -11,6 +11,9 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-09: Display home-based paths with tilde in CLI output - Render
+  source/target paths under HOME with `~`, including `points to ...`
+  diagnostics.
 - 2026-05-09: Expand primary CLI end-to-end workflow coverage - Move the broad
   end-to-end workflow scenarios into `integration.rs`, keep `cli_output.rs`
   focused on minimal subprocess-boundary checks, broaden the info/apply

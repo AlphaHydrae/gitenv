@@ -41,7 +41,7 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 33: Resolve include paths relative to the including file
+### Increment 42: Resolve include paths relative to the including file
 
 Why this increment exists:
 
@@ -62,40 +62,7 @@ Review target:
 - Add unit and integration tests asserting that a relative include path is
   resolved relative to the declaring file, not the working directory.
 
-### Increment 34: Display home-based paths with `~`
-
-Why this increment exists:
-
-- The Rust CLI currently renders home-based paths as absolute paths.
-- The temporary Rust README now uses `~` in output examples for readability and
-  parity with the original documentation style.
-- Phase 3 documentation parity is not complete until CLI output matches that
-  home-relative display form.
-
-Review target:
-
-- Render target and source paths under the current home directory with a `~`
-  prefix in CLI output.
-- Ensure `points to ...` diagnostics also shorten home-based paths.
-- Add unit and integration coverage for the home-relative display behavior.
-
-### Increment 29: Normalize error names
-
-Why this increment exists:
-
-- "Normalize error names" is listed as a pending refactoring in MIGRATION.md.
-- Consistent naming improves readability and makes error-handling code easier
-  to follow.
-- Requires human guidance on naming conventions before implementation.
-
-Review target:
-
-- Review all error variant names across `ProgramError` and any domain error
-  types; agree on a consistent naming convention with the human.
-- Rename variants to match the agreed convention.
-- Preserve all behavior and test coverage.
-
-### Increment 30: Reject empty sources and empty source configs
+### Increment 43: Reject empty sources and empty source configs
 
 Why this increment exists:
 
@@ -112,7 +79,7 @@ Review target:
 - Reject any source entry that declares no configs.
 - Add targeted tests for both invalid shapes and the resulting error messages.
 
-### Increment 31: Skip copy when target content already matches
+### Increment 44: Skip copy when target content already matches
 
 Why this increment exists:
 
@@ -128,7 +95,23 @@ Review target:
 - Add unit and integration tests covering the skip-on-match and overwrite-on-mismatch
   branches.
 
-### Increment 32: Improve action tests to assert full directory state
+### Increment 45: Normalize error names
+
+Why this increment exists:
+
+- "Normalize error names" is listed as a pending refactoring in MIGRATION.md.
+- Consistent naming improves readability and makes error-handling code easier
+  to follow.
+- Requires human guidance on naming conventions before implementation.
+
+Review target:
+
+- Review all error variant names across `ProgramError` and any domain error
+  types; agree on a consistent naming convention with the human.
+- Rename variants to match the agreed convention.
+- Preserve all behavior and test coverage.
+
+### Increment 46: Improve action tests to assert full directory state
 
 Why this increment exists:
 

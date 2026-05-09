@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand, ValueEnum};
+use std::path::Path;
 
 use crate::{
     ApplyOperationOutcome, ApplyOperationReport, ColorMode, CopyInspection, CopyInspectionState,
@@ -10,6 +11,22 @@ const ANSI_RESET: &str = "\x1b[0m";
 const ANSI_GREEN: &str = "\x1b[32m";
 const ANSI_YELLOW: &str = "\x1b[33m";
 const ANSI_RED: &str = "\x1b[31m";
+
+/// Display a path, replacing the home directory prefix with `~` for readability.
+///
+/// If the path starts with the home directory, it is displayed as `~/remainder`.
+/// Otherwise, the path is displayed as-is.
+fn display_path_with_home(path: &Path, home: &Path) -> String {
+    if let Ok(remainder) = path.strip_prefix(home) {
+        if remainder.as_os_str().is_empty() {
+            "~".to_string()
+        } else {
+            format!("~/{}", remainder.display())
+        }
+    } else {
+        path.display().to_string()
+    }
+}
 
 /// Diagnostic log level for the `--log-level` flag.
 ///
@@ -85,13 +102,14 @@ pub fn dispatch_with(
 
 pub(crate) fn render_default_inspection_output(
     operation_plan: &OperationPlan,
+    home: &Path,
     use_color: bool,
 ) -> Result<String, ProgramError> {
     let inspection_report = inspect_operation_plan_status(operation_plan)?;
     let lines = inspection_report
         .outcomes
         .iter()
-        .map(|outcome| render_operation_inspection_line_with_color(outcome, use_color))
+        .map(|outcome| render_operation_inspection_line_with_color(outcome, home, use_color))
         .collect::<Vec<_>>();
 
     if lines.is_empty() {
@@ -101,11 +119,15 @@ pub(crate) fn render_default_inspection_output(
     }
 }
 
-pub(crate) fn render_apply_output(apply_report: &ApplyOperationReport, use_color: bool) -> String {
+pub(crate) fn render_apply_output(
+    apply_report: &ApplyOperationReport,
+    home: &Path,
+    use_color: bool,
+) -> String {
     let lines = apply_report
         .outcomes
         .iter()
-        .map(|outcome| render_apply_outcome_line_with_color(outcome, use_color))
+        .map(|outcome| render_apply_outcome_line_with_color(outcome, home, use_color))
         .collect::<Vec<_>>();
 
     if lines.is_empty() {
@@ -117,20 +139,22 @@ pub(crate) fn render_apply_output(apply_report: &ApplyOperationReport, use_color
 
 fn render_operation_inspection_line_with_color(
     outcome: &OperationInspectionOutcome,
+    home: &Path,
     use_color: bool,
 ) -> String {
     match outcome {
         OperationInspectionOutcome::Symlink(inspection) => {
-            render_symlink_inspection_line_with_color(inspection, use_color)
+            render_symlink_inspection_line_with_color(inspection, home, use_color)
         }
         OperationInspectionOutcome::Copy(inspection) => {
-            render_copy_inspection_line_with_color(inspection, use_color)
+            render_copy_inspection_line_with_color(inspection, home, use_color)
         }
     }
 }
 
 fn render_symlink_inspection_line_with_color(
     inspection: &SymlinkInspection,
+    home: &Path,
     use_color: bool,
 ) -> String {
     let state = match &inspection.state {
@@ -138,7 +162,7 @@ fn render_symlink_inspection_line_with_color(
         SymlinkInspectionState::Missing => colorize("not yet set up", ANSI_YELLOW, use_color),
         SymlinkInspectionState::NotASymlink => colorize("not a symlink", ANSI_RED, use_color),
         SymlinkInspectionState::PointsElsewhere { current_target } => colorize(
-            &format!("points to {}", current_target.display()),
+            &format!("points to {}", display_path_with_home(current_target, home)),
             ANSI_RED,
             use_color,
         ),
@@ -146,13 +170,17 @@ fn render_symlink_inspection_line_with_color(
 
     format!(
         "{} -> {}   {}",
-        inspection.target.display(),
-        inspection.source.display(),
+        display_path_with_home(&inspection.target, home),
+        display_path_with_home(&inspection.source, home),
         state
     )
 }
 
-fn render_copy_inspection_line_with_color(inspection: &CopyInspection, use_color: bool) -> String {
+fn render_copy_inspection_line_with_color(
+    inspection: &CopyInspection,
+    home: &Path,
+    use_color: bool,
+) -> String {
     let state = match inspection.state {
         CopyInspectionState::Ok => colorize("ok", ANSI_GREEN, use_color),
         CopyInspectionState::Missing => colorize("not yet set up", ANSI_YELLOW, use_color),
@@ -162,14 +190,15 @@ fn render_copy_inspection_line_with_color(inspection: &CopyInspection, use_color
 
     format!(
         "{} <- {}   {}",
-        inspection.target.display(),
-        inspection.source.display(),
+        display_path_with_home(&inspection.target, home),
+        display_path_with_home(&inspection.source, home),
         state
     )
 }
 
 fn render_apply_outcome_line_with_color(
     outcome: &ApplyOperationOutcome,
+    home: &Path,
     use_color: bool,
 ) -> String {
     match outcome {
@@ -178,16 +207,16 @@ fn render_apply_outcome_line_with_color(
                 format!(
                     "{} {} -> {}",
                     colorize("created symlink", ANSI_GREEN, use_color),
-                    op.target.display(),
-                    op.source.display()
+                    display_path_with_home(&op.target, home),
+                    display_path_with_home(&op.source, home)
                 )
             }
             OperationAction::Copy(op) => {
                 format!(
                     "{} {} to {}",
                     colorize("copied", ANSI_GREEN, use_color),
-                    op.source.display(),
-                    op.target.display()
+                    display_path_with_home(&op.source, home),
+                    display_path_with_home(&op.target, home)
                 )
             }
         },
@@ -196,14 +225,14 @@ fn render_apply_outcome_line_with_color(
                 format!(
                     "{} {} (already exists)",
                     colorize("skipped symlink", ANSI_YELLOW, use_color),
-                    op.target.display()
+                    display_path_with_home(&op.target, home)
                 )
             }
             OperationAction::Copy(op) => {
                 format!(
                     "{} {} (already exists)",
                     colorize("skipped copy", ANSI_YELLOW, use_color),
-                    op.target.display()
+                    display_path_with_home(&op.target, home)
                 )
             }
         },
@@ -212,16 +241,16 @@ fn render_apply_outcome_line_with_color(
                 format!(
                     "{} {} -> {}",
                     colorize("unsupported: symlink", ANSI_RED, use_color),
-                    op.target.display(),
-                    op.source.display()
+                    display_path_with_home(&op.target, home),
+                    display_path_with_home(&op.source, home)
                 )
             }
             OperationAction::Copy(op) => {
                 format!(
                     "{} {} to {}",
                     colorize("unsupported: copy", ANSI_RED, use_color),
-                    op.source.display(),
-                    op.target.display()
+                    display_path_with_home(&op.source, home),
+                    display_path_with_home(&op.target, home)
                 )
             }
         },
@@ -238,7 +267,10 @@ fn colorize(text: &str, color: &str, use_color: bool) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, dispatch_with, render_apply_output, render_default_inspection_output};
+    use super::{
+        Cli, dispatch_with, display_path_with_home, render_apply_output,
+        render_default_inspection_output,
+    };
     use crate::{
         ApplyOperationOutcome, ApplyOperationReport, ColorMode, ConflictPolicy, FileOperation,
         OperationAction, OperationPlan, ProgramError, ProgramOutput,
@@ -247,8 +279,10 @@ mod tests {
     use std::cell::Cell;
     use std::fs;
     use std::os::unix::fs::symlink;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use tempfile::TempDir;
+
+    const NON_MATCHING_HOME: &str = "/nonexistent/home";
 
     fn tracked_ok_output<'a>(
         message: &'a str,
@@ -332,6 +366,7 @@ mod tests {
                     conflict_policy: ConflictPolicy::Skip,
                 })],
             },
+            Path::new(NON_MATCHING_HOME),
             false,
         )
         .expect("status rendering should succeed for a valid operation plan");
@@ -361,6 +396,7 @@ mod tests {
                     }),
                 ],
             },
+            Path::new(NON_MATCHING_HOME),
             false,
         )
         .expect("status rendering should support symlink and copy outcomes");
@@ -429,6 +465,7 @@ mod tests {
                     }),
                 ],
             },
+            Path::new(NON_MATCHING_HOME),
             false,
         )
         .expect("status rendering should cover all state branches");
@@ -446,8 +483,12 @@ mod tests {
 
     #[test]
     fn render_no_operation_message_when_nothing_is_planned() {
-        let output = render_default_inspection_output(&OperationPlan { actions: vec![] }, false)
-            .expect("empty operation plans should render a stable status message");
+        let output = render_default_inspection_output(
+            &OperationPlan { actions: vec![] },
+            Path::new(NON_MATCHING_HOME),
+            false,
+        )
+        .expect("empty operation plans should render a stable status message");
 
         assert_eq!(output, "No operations to inspect.");
     }
@@ -455,9 +496,7 @@ mod tests {
     #[test]
     fn show_no_operations_to_apply_message_when_outcomes_are_empty() {
         let report = ApplyOperationReport { outcomes: vec![] };
-
-        let output = render_apply_output(&report, false);
-
+        let output = render_apply_output(&report, Path::new(NON_MATCHING_HOME), false);
         assert_eq!(output, "No operations to apply.");
     }
 
@@ -483,6 +522,7 @@ mod tests {
                     ApplyOperationOutcome::Applied(OperationAction::Copy(copy_op)),
                 ],
             },
+            Path::new(NON_MATCHING_HOME),
             false,
         );
 
@@ -519,6 +559,7 @@ mod tests {
                     ApplyOperationOutcome::SkippedExistingTarget(OperationAction::Copy(copy_op)),
                 ],
             },
+            Path::new(NON_MATCHING_HOME),
             false,
         );
 
@@ -555,6 +596,7 @@ mod tests {
                     ApplyOperationOutcome::UnsupportedOperation(OperationAction::Copy(copy_op)),
                 ],
             },
+            Path::new(NON_MATCHING_HOME),
             false,
         );
 
@@ -606,6 +648,7 @@ mod tests {
                     }),
                 ],
             },
+            Path::new(NON_MATCHING_HOME),
             true,
         )
         .expect("colorized status rendering should succeed");
@@ -636,6 +679,7 @@ mod tests {
                     )),
                 ],
             },
+            Path::new(NON_MATCHING_HOME),
             true,
         );
 
@@ -657,6 +701,7 @@ mod tests {
                     },
                 ))],
             },
+            Path::new(NON_MATCHING_HOME),
             false,
         );
 
@@ -664,6 +709,60 @@ mod tests {
             output,
             "created symlink /home/.gitconfig -> /repo/.gitconfig"
         );
+    }
+
+    #[test]
+    fn display_paths_under_home_directory_with_tilde_prefix() {
+        let home = Path::new("/home/user");
+        let path_under_home = Path::new("/home/user/.config/gitenv");
+        let result = display_path_with_home(path_under_home, home);
+        assert_eq!(result, "~/.config/gitenv");
+    }
+
+    #[test]
+    fn display_paths_outside_home_directory_unchanged() {
+        let home = Path::new("/home/user");
+        let path_outside_home = Path::new("/etc/config");
+        let result = display_path_with_home(path_outside_home, home);
+        assert_eq!(result, "/etc/config");
+    }
+
+    #[test]
+    fn display_paths_exactly_at_home_directory_with_tilde() {
+        let home = Path::new("/home/user");
+        let result = display_path_with_home(home, home);
+        assert_eq!(result, "~");
+    }
+
+    #[test]
+    fn do_not_replace_home_prefix_for_paths_that_only_share_a_string_prefix() {
+        // /home/username2/bar shares the string prefix /home/username with /home/username,
+        // but is not inside it. Path::strip_prefix() is component-aware, so it correctly
+        // rejects this case and the path must be returned unchanged.
+        let home = Path::new("/home/username");
+        let path = Path::new("/home/username2/bar");
+        let result = display_path_with_home(path, home);
+        assert_eq!(result, "/home/username2/bar");
+    }
+
+    #[test]
+    fn render_operation_line_with_home_relative_paths() {
+        let home = Path::new("/home/user");
+        let output = render_default_inspection_output(
+            &OperationPlan {
+                actions: vec![OperationAction::Symlink(FileOperation {
+                    source: PathBuf::from("/home/user/.dotfiles/.gitconfig"),
+                    target: PathBuf::from("/home/user/.gitconfig"),
+                    mkdir: false,
+                    conflict_policy: ConflictPolicy::Skip,
+                })],
+            },
+            home,
+            false,
+        )
+        .expect("home-relative rendering should succeed");
+
+        assert!(output.contains("~/.gitconfig -> ~/.dotfiles/.gitconfig   not yet set up"));
     }
 
     // ── --log-level flag ──────────────────────────────────────────────────────

@@ -294,8 +294,8 @@ Current status:
 - [x] Configurable logging controls are available in CLI (`--log-level`) and
   library (`init_logging`).
 - [x] Temporary Rust-port usage examples live in `rust/README.md`.
-- [ ] Home-based CLI path rendering still uses absolute paths; `~` display
-      parity is tracked as a follow-up increment.
+- [x] Home-based CLI path rendering uses `~` display parity for paths under
+  HOME.
 
 Exit criteria:
 

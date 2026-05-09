@@ -24,6 +24,10 @@ fn write_file(path: &Path, contents: &str) {
     fs::write(path, contents).expect("test file should be written");
 }
 
+fn replace_home_prefix_with_tilde(output: String, home: &Path) -> String {
+    output.replace(&format!("{}/", home.display()), "~/")
+}
+
 // These broad integration tests intentionally cover behavior that is also
 // asserted in unit tests. Their job is different: exercise the compiled binary
 // with real config loading, planning, rendering, and filesystem wiring in a
@@ -256,98 +260,101 @@ fn show_the_default_info_output_for_a_mixed_primary_workflow_scenario() {
         .output()
         .expect("binary should run");
 
-    let expected_stdout = format!(
-        concat!(
-            "{} -> {}   not yet set up\n",
-            "{} <- {}   not yet set up\n",
-            "{} -> {}   ok\n",
-            "{} <- {}   ok\n",
-            "{} -> {}   not a symlink\n",
-            "{} -> {}   points to {}\n",
-            "{} <- {}   differs from source\n",
-            "{} <- {}   not a file\n",
-            "{} -> {}   not yet set up\n",
-            "{} -> {}   ok\n",
-            "{} -> {}   not yet set up\n",
-            "{} <- {}   not yet set up\n",
+    let expected_stdout = replace_home_prefix_with_tilde(
+        format!(
+            concat!(
+                "{} -> {}   not yet set up\n",
+                "{} <- {}   not yet set up\n",
+                "{} -> {}   ok\n",
+                "{} <- {}   ok\n",
+                "{} -> {}   not a symlink\n",
+                "{} -> {}   points to {}\n",
+                "{} <- {}   differs from source\n",
+                "{} <- {}   not a file\n",
+                "{} -> {}   not yet set up\n",
+                "{} -> {}   ok\n",
+                "{} -> {}   not yet set up\n",
+                "{} <- {}   not yet set up\n",
+            ),
+            home.path()
+                .join(".config")
+                .join("gitenv-info")
+                .join("missing")
+                .join(".zshrc")
+                .display(),
+            repository.path().join(".").join("missing-zshrc").display(),
+            home.path()
+                .join(".config")
+                .join("gitenv-info")
+                .join("copy")
+                .join("missing.conf")
+                .display(),
+            repository
+                .path()
+                .join(".")
+                .join("copied-missing.conf")
+                .display(),
+            linked_ok_target.display(),
+            repository.path().join(".").join("linked-ok.conf").display(),
+            copied_ok_target.display(),
+            repository.path().join(".").join("copied-ok.conf").display(),
+            not_a_link_target.display(),
+            repository
+                .path()
+                .join(".")
+                .join("file-instead-of-link.conf")
+                .display(),
+            points_elsewhere_target.display(),
+            repository
+                .path()
+                .join(".")
+                .join("points-expected.conf")
+                .display(),
+            elsewhere_target.display(),
+            differs_target.display(),
+            repository
+                .path()
+                .join(".")
+                .join("copied-differs.conf")
+                .display(),
+            not_a_file_target.display(),
+            repository
+                .path()
+                .join(".")
+                .join("copied-not-a-file.conf")
+                .display(),
+            home.path()
+                .join(".local")
+                .join("share")
+                .join("gitenv-info")
+                .join("profiles")
+                .join(".aliases")
+                .display(),
+            repository
+                .path()
+                .join("profiles")
+                .join(".aliases")
+                .display(),
+            selected_profile_target.display(),
+            repository
+                .path()
+                .join("profiles")
+                .join(".profile")
+                .display(),
+            custom_to_target.display(),
+            repository
+                .path()
+                .join(".")
+                .join("custom-to-file.conf")
+                .display(),
+            shared_config_target.display(),
+            repository
+                .path()
+                .join(".")
+                .join("shared-source.conf")
+                .display()
         ),
-        home.path()
-            .join(".config")
-            .join("gitenv-info")
-            .join("missing")
-            .join(".zshrc")
-            .display(),
-        repository.path().join(".").join("missing-zshrc").display(),
-        home.path()
-            .join(".config")
-            .join("gitenv-info")
-            .join("copy")
-            .join("missing.conf")
-            .display(),
-        repository
-            .path()
-            .join(".")
-            .join("copied-missing.conf")
-            .display(),
-        linked_ok_target.display(),
-        repository.path().join(".").join("linked-ok.conf").display(),
-        copied_ok_target.display(),
-        repository.path().join(".").join("copied-ok.conf").display(),
-        not_a_link_target.display(),
-        repository
-            .path()
-            .join(".")
-            .join("file-instead-of-link.conf")
-            .display(),
-        points_elsewhere_target.display(),
-        repository
-            .path()
-            .join(".")
-            .join("points-expected.conf")
-            .display(),
-        elsewhere_target.display(),
-        differs_target.display(),
-        repository
-            .path()
-            .join(".")
-            .join("copied-differs.conf")
-            .display(),
-        not_a_file_target.display(),
-        repository
-            .path()
-            .join(".")
-            .join("copied-not-a-file.conf")
-            .display(),
-        home.path()
-            .join(".local")
-            .join("share")
-            .join("gitenv-info")
-            .join("profiles")
-            .join(".aliases")
-            .display(),
-        repository
-            .path()
-            .join("profiles")
-            .join(".aliases")
-            .display(),
-        selected_profile_target.display(),
-        repository
-            .path()
-            .join("profiles")
-            .join(".profile")
-            .display(),
-        custom_to_target.display(),
-        repository
-            .path()
-            .join(".")
-            .join("custom-to-file.conf")
-            .display(),
-        shared_config_target.display(),
-        repository
-            .path()
-            .join(".")
-            .join("shared-source.conf")
-            .display()
+        home.path(),
     );
 
     assert!(output.status.success());
@@ -574,63 +581,63 @@ fn show_the_apply_output_for_a_mixed_primary_workflow_scenario() {
         .join("profiles")
         .join(".aliases");
 
-    let expected_stdout = format!(
-        concat!(
-            "created symlink {} -> {}\n",
-            "copied {} to {}\n",
-            "skipped symlink {} (already exists)\n",
-            "skipped copy {} (already exists)\n",
-            "created symlink {} -> {}\n",
-            "copied {} to {}\n",
-            "created symlink {} -> {}\n",
-            "skipped symlink {} (already exists)\n",
-            "created symlink {} -> {}\n",
-            "copied {} to {}\n",
+    let expected_stdout = replace_home_prefix_with_tilde(
+        format!(
+            concat!(
+                "created symlink {} -> {}\n",
+                "copied {} to {}\n",
+                "skipped symlink {} (already exists)\n",
+                "skipped copy {} (already exists)\n",
+                "created symlink {} -> {}\n",
+                "copied {} to {}\n",
+                "created symlink {} -> {}\n",
+                "skipped symlink {} (already exists)\n",
+                "created symlink {} -> {}\n",
+                "copied {} to {}\n",
+            ),
+            create_link_target.display(),
+            repository
+                .path()
+                .join(".")
+                .join("create-link.conf")
+                .display(),
+            repository
+                .path()
+                .join(".")
+                .join("create-copy.conf")
+                .display(),
+            create_copy_target.display(),
+            keep_link_target.display(),
+            keep_copy_target.display(),
+            overwrite_link_target.display(),
+            repository
+                .path()
+                .join(".")
+                .join("overwrite-link.conf")
+                .display(),
+            repository
+                .path()
+                .join(".")
+                .join("backup-copy.conf")
+                .display(),
+            backup_copy_target.display(),
+            selected_aliases_target.display(),
+            repository
+                .path()
+                .join("profiles")
+                .join(".aliases")
+                .display(),
+            selected_profile_target.display(),
+            env_sourced_target.display(),
+            env_source.path().join("env-sourced.conf").display(),
+            repository
+                .path()
+                .join(".")
+                .join("shared-source.conf")
+                .display(),
+            shared_config_target.display()
         ),
-        create_link_target.display(),
-        repository
-            .path()
-            .join(".")
-            .join("create-link.conf")
-            .display(),
-        repository
-            .path()
-            .join(".")
-            .join("create-copy.conf")
-            .display(),
-        create_copy_target.display(),
-        keep_link_target.display(),
-        keep_copy_target.display(),
-        overwrite_link_target.display(),
-        repository
-            .path()
-            .join(".")
-            .join("overwrite-link.conf")
-            .display(),
-        repository
-            .path()
-            .join(".")
-            .join("backup-copy.conf")
-            .display(),
-        backup_copy_target.display(),
-        selected_aliases_target.display(),
-        repository
-            .path()
-            .join("profiles")
-            .join(".aliases")
-            .display(),
-        selected_profile_target.display(),
-        env_sourced_target.display(),
-        env_source
-            .path()
-            .join("env-sourced.conf")
-            .display(),
-        repository
-            .path()
-            .join(".")
-            .join("shared-source.conf")
-            .display(),
-        shared_config_target.display()
+        home.path(),
     );
 
     assert!(output.status.success());
@@ -682,8 +689,7 @@ fn show_the_apply_output_for_a_mixed_primary_workflow_scenario() {
         "shared config content\n"
     );
     assert_eq!(
-        fs::read_link(&env_sourced_target)
-            .expect("env sourced target should be a symlink"),
+        fs::read_link(&env_sourced_target).expect("env sourced target should be a symlink"),
         env_source.path().join("env-sourced.conf")
     );
     assert!(
