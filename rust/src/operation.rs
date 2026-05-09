@@ -346,7 +346,7 @@ mod tests {
         let operation_plan = derive_operation_plan_with_injectables(
             &intent_plan,
             &|| Ok(home.path().to_path_buf()),
-            &|_| Ok(Vec::new()),
+            &crate::fs_adapter::list_directory_entries,
         )
         .expect("operation planning should keep explicit file actions");
 
@@ -535,7 +535,7 @@ mod tests {
         let operation_plan = derive_operation_plan_with_injectables(
             &intent_plan,
             &|| Ok(home.path().to_path_buf()),
-            &|_| Ok(Vec::new()),
+            &crate::fs_adapter::list_directory_entries,
         )
         .expect("operation planning should anchor relative targets to the home directory");
 
@@ -567,7 +567,7 @@ mod tests {
         let operation_plan = derive_operation_plan_with_injectables(
             &intent_plan,
             &|| Ok(home.path().to_path_buf()),
-            &|_| Ok(Vec::new()),
+            &crate::fs_adapter::list_directory_entries,
         )
         .expect("operation planning should resolve ~/ paths for copy operations");
 

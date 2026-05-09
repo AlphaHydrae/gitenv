@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-08: Move CLI rendering out of lib.rs into cli.rs - Move status/apply
+  rendering helpers, ANSI color logic, and terminal-color probing into the CLI
+  module; keep `lib.rs` focused on orchestration; migrate rendering tests to
+  `cli.rs`; and add coverage for renderer branch handling.
 - 2026-05-06: Inject system dependencies from the CLI composition root - Add a
   top-down system-calls dependency path from `run_cli` through config-path
   resolution, terminal-color decisions, and operation-plan HOME resolution;

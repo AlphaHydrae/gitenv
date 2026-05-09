@@ -272,8 +272,8 @@ Current status:
 
 Exit criteria:
 
-- [ ] Integration tests validate behavior against fixture directories.
-- [ ] Error messages are stable and documented.
+- [x] Integration tests validate behavior against fixture directories.
+- [x] Error messages are stable and documented.
 
 ### Phase 3: CLI and UX parity
 
@@ -301,7 +301,6 @@ Exit criteria:
 ### Phase 4: Hardening and release readiness
 
 - Add coverage reporting and enforce threshold.
-- Add wrapper scripts for test/lint/build/format/documentation lint.
 - Add CI matrix and release workflow.
 
 Exit criteria:

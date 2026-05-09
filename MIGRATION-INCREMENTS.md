@@ -41,17 +41,111 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 25: Add logging controls and finalize CLI UX parity
+### Increment 26: Introduce structured logging
 
 Why this increment exists:
 
-- Configurable logging is a documented architecture requirement.
-- Phase 3 parity also requires output/UX completion with testable behavior.
+- Configurable logging is a documented architecture requirement (ARCHITECTURE.md
+  "Logging model" section).
+- Adding the logging foundation as a standalone increment keeps it reviewable
+  before log-level controls are wired into the CLI and library API.
 
 Review target:
 
-- Introduce a `logging` module and CLI/API log-level controls.
-- Keep system-call dependency injection routed from `run_cli` as composition
-  root while adding logging behavior.
-- Update README examples/tests so Phase 3 exit criteria are directly
-  verifiable.
+- Add the `log` crate dependency and create a `logging` module.
+- Emit structured log events at appropriate levels from domain modules
+  (`config`, `intent`, `operation`, `actions`, `status`).
+- No user-facing CLI changes yet; logging output requires the next increment.
+
+### Increment 27: Wire log-level controls into CLI and library API
+
+Why this increment exists:
+
+- The logging foundation from Increment 26 needs to be surfaced to users.
+- Phase 3 requires log-level controls in both the CLI and the library API.
+
+Review target:
+
+- Add a `--log-level` (or `--verbose`) flag to the CLI via clap.
+- Expose a log-level parameter in the library API (`run_info`, `run_apply`).
+- Initialize the log subscriber from the composition root (`run_cli`).
+- Add tests for level filtering behavior.
+
+### Increment 28: Update README and finalize Phase 3 exit criteria
+
+Why this increment exists:
+
+- The README still documents the Ruby CLI; Phase 3 requires README examples
+  that match the Rust CLI.
+- Phase 3 exit criteria ("end-to-end CLI tests cover primary workflows" and
+  "README examples run as documented") must be directly verifiable.
+
+Review target:
+
+- Update README to document the Rust CLI commands with accurate examples.
+- Add or expand end-to-end CLI tests so both Phase 3 exit criteria are met.
+- Mark Phase 3 exit criteria as complete in MIGRATION.md.
+
+### Increment 29: Normalize error names
+
+Why this increment exists:
+
+- "Normalize error names" is listed as a pending refactoring in MIGRATION.md.
+- Consistent naming improves readability and makes error-handling code easier
+  to follow.
+- Requires human guidance on naming conventions before implementation.
+
+Review target:
+
+- Review all error variant names across `ProgramError` and any domain error
+  types; agree on a consistent naming convention with the human.
+- Rename variants to match the agreed convention.
+- Preserve all behavior and test coverage.
+
+### Increment 30: Reject empty sources and empty source configs
+
+Why this increment exists:
+
+- A configuration with `sources: []` or a source entry with `configs: []` is
+  currently tolerated, but it is not meaningful user intent.
+- Rejecting these shapes will make configuration errors clearer and reduce the
+  need to reason about no-op configuration structures.
+
+Review target:
+
+- Decide whether the validation belongs in parsing, normalization, or intent
+  derivation.
+- Reject configs with no sources.
+- Reject any source entry that declares no configs.
+- Add targeted tests for both invalid shapes and the resulting error messages.
+
+### Increment 31: Skip copy when target content already matches
+
+Why this increment exists:
+
+- "Do not copy files when the target file already matches (hash)" is listed as
+  a pending refactoring in MIGRATION.md.
+- Unnecessary copies waste I/O and can reset file metadata without reason.
+
+Review target:
+
+- Before overwriting in the copy path, compare source and target content via
+  streamed hash (consistent with the existing inspection approach in `status.rs`).
+- Skip the copy and report `SkippedExistingTarget` when hashes match.
+- Add unit and integration tests covering the skip-on-match and overwrite-on-mismatch
+  branches.
+
+### Increment 32: Improve action tests to assert full directory state
+
+Why this increment exists:
+
+- "Improve action tests by reading the whole temporary test directory state"
+  is listed as a pending refactoring in MIGRATION.md.
+- Current integration tests in `actions_apply.rs` assert individual file
+  outcomes; asserting the full directory state catches unintended side effects.
+
+Review target:
+
+- Extend selected integration tests in `actions_apply.rs` to read and assert
+  the complete state of the temporary test directory after each operation.
+- Ensure no regressions; no new behavior changes.
