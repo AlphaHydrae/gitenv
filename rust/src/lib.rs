@@ -116,7 +116,6 @@ pub enum ProgramError {
     },
     /// The current home directory is required to resolve home-relative paths.
     HomeDirectoryUnavailable,
-    UnsupportedConfiguration,
 }
 
 const DEFAULT_CONFIG_HOME_SUFFIX: &str = ".config";
@@ -398,10 +397,6 @@ impl fmt::Display for ProgramError {
             ProgramError::HomeDirectoryUnavailable => {
                 write!(f, "cannot resolve home directory from $HOME")
             }
-            ProgramError::UnsupportedConfiguration => write!(
-                f,
-                "default inspection currently supports symlink operations only"
-            ),
         }
     }
 }
@@ -1227,10 +1222,6 @@ mod tests {
         assert_eq!(
             ProgramError::HomeDirectoryUnavailable.to_string(),
             "cannot resolve home directory from $HOME"
-        );
-        assert_eq!(
-            ProgramError::UnsupportedConfiguration.to_string(),
-            "default inspection currently supports symlink operations only"
         );
     }
 }
