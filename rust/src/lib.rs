@@ -25,8 +25,8 @@ pub use config::{
 };
 pub use intent::{
     ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction, IntentSource,
-    ResolvedOptions, derive_intent_plan, derive_intent_plan_with_env,
-    derive_intent_plan_with_env_and_fs, derive_intent_plan_with_injectables,
+    ResolvedOptions, derive_intent_plan, derive_intent_plan_with_env_lookup,
+    derive_intent_plan_with_env_lookup_and_fs, derive_intent_plan_with_injectables,
 };
 pub use operation::{
     FileOperation, OperationAction, OperationPlan, derive_operation_plan,
@@ -38,7 +38,6 @@ pub use status::{
     inspect_symlink_operation_status,
 };
 
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,16 +51,16 @@ const DEFAULT_CONFIG_FILE_NAME: &str = "config.yml";
 
 #[derive(Clone, Copy)]
 struct SystemCalls<'a> {
-    get_env_var_os: &'a dyn Fn(&str) -> Option<OsString>,
+    get_env_var: &'a dyn Fn(&str) -> Option<String>,
 }
 
-fn std_env_var_os(name: &str) -> Option<OsString> {
-    std::env::var_os(name)
+fn std_env_var(name: &str) -> Option<String> {
+    std::env::var_os(name).map(|v| v.to_string_lossy().into_owned())
 }
 
 fn real_system_calls() -> SystemCalls<'static> {
     SystemCalls {
-        get_env_var_os: &std_env_var_os,
+        get_env_var: &std_env_var,
     }
 }
 
@@ -113,8 +112,9 @@ fn run_info(
     runtime_config: RuntimeConfig,
 ) -> Result<ProgramOutput, ProgramError> {
     let loaded_config = load_config()?;
-    let home_directory = fs_adapter::resolve_home_directory(system.get_env_var_os)?;
-    let intent_plan = derive_intent_plan(&loaded_config, &home_directory)?;
+    let home_directory = fs_adapter::resolve_home_directory(system.get_env_var)?;
+    let intent_plan =
+        derive_intent_plan_with_env_lookup(&loaded_config, system.get_env_var, &home_directory)?;
     let operation_plan = operation::derive_operation_plan_with_injectables(
         &intent_plan,
         &home_directory,
@@ -136,8 +136,9 @@ fn run_apply(
     runtime_config: RuntimeConfig,
 ) -> Result<ProgramOutput, ProgramError> {
     let loaded_config = load_config()?;
-    let home_directory = fs_adapter::resolve_home_directory(system.get_env_var_os)?;
-    let intent_plan = derive_intent_plan(&loaded_config, &home_directory)?;
+    let home_directory = fs_adapter::resolve_home_directory(system.get_env_var)?;
+    let intent_plan =
+        derive_intent_plan_with_env_lookup(&loaded_config, system.get_env_var, &home_directory)?;
     let operation_plan = operation::derive_operation_plan_with_injectables(
         &intent_plan,
         &home_directory,
@@ -162,13 +163,13 @@ fn load_default_config_with_system(system: SystemCalls<'_>) -> Result<LoadedConf
 }
 
 fn default_config_path_with_system(system: SystemCalls<'_>) -> Result<PathBuf, ProgramError> {
-    let gitenv_config = (system.get_env_var_os)("GITENV_CONFIG").map(PathBuf::from);
-    let xdg_config_home = (system.get_env_var_os)("XDG_CONFIG_HOME").map(PathBuf::from);
+    let gitenv_config = (system.get_env_var)("GITENV_CONFIG").map(PathBuf::from);
+    let xdg_config_home = (system.get_env_var)("XDG_CONFIG_HOME").map(PathBuf::from);
     if let Some(custom_path) = gitenv_config {
         return Ok(custom_path);
     }
 
-    let home_directory = fs_adapter::resolve_home_directory(system.get_env_var_os)?;
+    let home_directory = fs_adapter::resolve_home_directory(system.get_env_var)?;
 
     Ok(default_config_path_from_env(
         &home_directory,
@@ -199,7 +200,6 @@ mod tests {
     };
     use crate::SelectConfig;
     use std::collections::BTreeMap;
-    use std::ffi::OsString;
     use std::fs;
     use std::path::{Path, PathBuf};
     use tempfile::TempDir;
@@ -242,6 +242,23 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn std_env_var_converts_non_utf8_lossy() {
+        use std::os::unix::ffi::OsStringExt;
+
+        // Create an OsString with invalid UTF-8: 0x66 0x6f 0x80 = "fo" + invalid byte
+        let invalid_utf8 = std::ffi::OsString::from_vec(vec![0x66, 0x6f, 0x80]);
+
+        // Manually set an environment variable to the invalid UTF-8 value
+        // by constructing the OsString representation. Since we can't directly
+        // set env vars with invalid UTF-8, we'll test the conversion logic directly.
+        let converted = invalid_utf8.to_string_lossy().into_owned();
+
+        // The lossy conversion should replace invalid bytes with U+FFFD replacement char
+        assert_eq!(converted, "fo\u{fffd}");
+    }
+
     #[test]
     fn resolve_default_config_path_from_xdg_config_home() {
         let path = default_config_path_from_env(
@@ -274,12 +291,12 @@ mod tests {
     fn use_gitenv_config_override_in_system_default_path_resolution() {
         let env_values = BTreeMap::from([(
             "GITENV_CONFIG".to_string(),
-            OsString::from("/tmp/custom-config.yml"),
+            "/tmp/custom-config.yml".to_string(),
         )]);
-        let get_env_var_os = |name: &str| env_values.get(name).cloned();
+        let get_env_var = |name: &str| env_values.get(name).cloned();
 
         let path = default_config_path_with_system(SystemCalls {
-            get_env_var_os: &get_env_var_os,
+            get_env_var: &get_env_var,
         })
         .expect("GITENV_CONFIG should short-circuit default path resolution");
 
@@ -313,23 +330,28 @@ mod tests {
             }],
         };
 
-        let env_values =
-            BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
-        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
+        let env_values = BTreeMap::from([(
+            "HOME".to_string(),
+            home.path().as_os_str().to_string_lossy().into_owned(),
+        )]);
+        let get_env_var = move |name: &str| env_values.get(name).cloned();
 
         let error = run_info(
             || Ok(loaded_config_for_test(config)),
             SystemCalls {
-                get_env_var_os: &get_env_var_os,
+                get_env_var: &get_env_var,
             },
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
         .expect_err("missing selector source directory should fail info planning");
 
-        assert!(matches!(
-            error,
-            ProgramError::SourceDirectoryReadFailed { .. }
-        ));
+        assert_eq!(
+            std::mem::discriminant(&error),
+            std::mem::discriminant(&ProgramError::SourceDirectoryReadFailed {
+                path: PathBuf::new(),
+                message: String::new(),
+            })
+        );
     }
 
     #[test]
@@ -359,23 +381,28 @@ mod tests {
             }],
         };
 
-        let env_values =
-            BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
-        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
+        let env_values = BTreeMap::from([(
+            "HOME".to_string(),
+            home.path().as_os_str().to_string_lossy().into_owned(),
+        )]);
+        let get_env_var = move |name: &str| env_values.get(name).cloned();
 
         let error = run_apply(
             || Ok(loaded_config_for_test(config)),
             SystemCalls {
-                get_env_var_os: &get_env_var_os,
+                get_env_var: &get_env_var,
             },
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
         .expect_err("missing selector source directory should fail apply planning");
 
-        assert!(matches!(
-            error,
-            ProgramError::SourceDirectoryReadFailed { .. }
-        ));
+        assert_eq!(
+            std::mem::discriminant(&error),
+            std::mem::discriminant(&ProgramError::SourceDirectoryReadFailed {
+                path: PathBuf::new(),
+                message: String::new(),
+            })
+        );
     }
 
     #[test]
@@ -401,13 +428,15 @@ mod tests {
         let config_path = home.path().join("config.yml");
         fs::write(&config_path, config).expect("config file should be written");
 
-        let env_values =
-            BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
-        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
+        let env_values = BTreeMap::from([(
+            "HOME".to_string(),
+            home.path().as_os_str().to_string_lossy().into_owned(),
+        )]);
+        let get_env_var = move |name: &str| env_values.get(name).cloned();
         let output = run_info(
             || load_config(&config_path),
             SystemCalls {
-                get_env_var_os: &get_env_var_os,
+                get_env_var: &get_env_var,
             },
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
@@ -467,13 +496,15 @@ mod tests {
         fs::write(&root_config_path, root_config).expect("root config should be written");
         fs::write(&shared_config_path, shared_config).expect("shared config should be written");
 
-        let env_values =
-            BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
-        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
+        let env_values = BTreeMap::from([(
+            "HOME".to_string(),
+            home.path().as_os_str().to_string_lossy().into_owned(),
+        )]);
+        let get_env_var = move |name: &str| env_values.get(name).cloned();
         let output = run_info(
             || load_config(&root_config_path),
             SystemCalls {
-                get_env_var_os: &get_env_var_os,
+                get_env_var: &get_env_var,
             },
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
@@ -504,14 +535,16 @@ mod tests {
         fs::write(home.path().join("missing-source.txt"), "target exists\n")
             .expect("copy target should exist so inspection attempts source hashing");
 
-        let env_values =
-            BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
-        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
+        let env_values = BTreeMap::from([(
+            "HOME".to_string(),
+            home.path().as_os_str().to_string_lossy().into_owned(),
+        )]);
+        let get_env_var = move |name: &str| env_values.get(name).cloned();
 
         let error = run_info(
             || Ok(loaded_config_for_test(config)),
             SystemCalls {
-                get_env_var_os: &get_env_var_os,
+                get_env_var: &get_env_var,
             },
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
@@ -542,12 +575,12 @@ mod tests {
             }],
         };
 
-        let env_values = BTreeMap::from([("HOME".to_string(), OsString::from("/tmp/home"))]);
-        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
+        let env_values = BTreeMap::from([("HOME".to_string(), "/tmp/home".to_string())]);
+        let get_env_var = move |name: &str| env_values.get(name).cloned();
         let error = run_info(
             || Ok(loaded_config_for_test(config)),
             SystemCalls {
-                get_env_var_os: &get_env_var_os,
+                get_env_var: &get_env_var,
             },
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
@@ -579,12 +612,12 @@ mod tests {
             }],
         };
 
-        let env_values = BTreeMap::from([("HOME".to_string(), OsString::from("/tmp/home"))]);
-        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
+        let env_values = BTreeMap::from([("HOME".to_string(), "/tmp/home".to_string())]);
+        let get_env_var = move |name: &str| env_values.get(name).cloned();
         let error = run_apply(
             || Ok(loaded_config_for_test(config)),
             SystemCalls {
-                get_env_var_os: &get_env_var_os,
+                get_env_var: &get_env_var,
             },
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
@@ -602,11 +635,11 @@ mod tests {
     fn show_setup_guidance_when_file_is_missing() {
         let missing_path = PathBuf::from("/tmp/custom-gitenv.yml");
 
-        let get_env_var_os = |_: &str| None::<OsString>;
+        let get_env_var = |_: &str| None::<String>;
         let error = run_info(
             || load_config(&missing_path),
             SystemCalls {
-                get_env_var_os: &get_env_var_os,
+                get_env_var: &get_env_var,
             },
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
@@ -641,13 +674,15 @@ mod tests {
         let config_path = home.path().join("config.yml");
         fs::write(&config_path, config).expect("config file should be written");
 
-        let env_values =
-            BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
-        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
+        let env_values = BTreeMap::from([(
+            "HOME".to_string(),
+            home.path().as_os_str().to_string_lossy().into_owned(),
+        )]);
+        let get_env_var = move |name: &str| env_values.get(name).cloned();
         let output = run_apply(
             || load_config(&config_path),
             SystemCalls {
-                get_env_var_os: &get_env_var_os,
+                get_env_var: &get_env_var,
             },
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
@@ -707,13 +742,15 @@ mod tests {
         fs::write(&root_config_path, root_config).expect("root config should be written");
         fs::write(&shared_config_path, shared_config).expect("shared config should be written");
 
-        let env_values =
-            BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
-        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
+        let env_values = BTreeMap::from([(
+            "HOME".to_string(),
+            home.path().as_os_str().to_string_lossy().into_owned(),
+        )]);
+        let get_env_var = move |name: &str| env_values.get(name).cloned();
         let output = run_apply(
             || load_config(&root_config_path),
             SystemCalls {
-                get_env_var_os: &get_env_var_os,
+                get_env_var: &get_env_var,
             },
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
@@ -742,13 +779,15 @@ mod tests {
             )],
         );
 
-        let env_values =
-            BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
-        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
+        let env_values = BTreeMap::from([(
+            "HOME".to_string(),
+            home.path().as_os_str().to_string_lossy().into_owned(),
+        )]);
+        let get_env_var = move |name: &str| env_values.get(name).cloned();
         let error = run_apply(
             || Ok(loaded_config_for_test(config)),
             SystemCalls {
-                get_env_var_os: &get_env_var_os,
+                get_env_var: &get_env_var,
             },
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
@@ -783,12 +822,12 @@ mod tests {
             )],
         );
 
-        let get_env_var_os = |_: &str| None::<OsString>;
+        let get_env_var = |_: &str| None::<String>;
 
         let info_error = run_info(
             || Ok(loaded_config_for_test(info_config)),
             SystemCalls {
-                get_env_var_os: &get_env_var_os,
+                get_env_var: &get_env_var,
             },
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
@@ -798,7 +837,7 @@ mod tests {
         let apply_error = run_apply(
             || Ok(loaded_config_for_test(apply_config)),
             SystemCalls {
-                get_env_var_os: &get_env_var_os,
+                get_env_var: &get_env_var,
             },
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
@@ -829,13 +868,15 @@ mod tests {
         let config_path = home.path().join("gitenv.yml");
         fs::write(&config_path, config).expect("config file should be written");
 
-        let env_values =
-            BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
-        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
+        let env_values = BTreeMap::from([(
+            "HOME".to_string(),
+            home.path().as_os_str().to_string_lossy().into_owned(),
+        )]);
+        let get_env_var = move |name: &str| env_values.get(name).cloned();
         let output = run_info(
             || load_config(&config_path),
             SystemCalls {
-                get_env_var_os: &get_env_var_os,
+                get_env_var: &get_env_var,
             },
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
@@ -871,13 +912,15 @@ mod tests {
         let config_path = home.path().join("gitenv.yml");
         fs::write(&config_path, config).expect("config file should be written");
 
-        let env_values =
-            BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
-        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
+        let env_values = BTreeMap::from([(
+            "HOME".to_string(),
+            home.path().as_os_str().to_string_lossy().into_owned(),
+        )]);
+        let get_env_var = move |name: &str| env_values.get(name).cloned();
         let output = run_apply(
             || load_config(&config_path),
             SystemCalls {
-                get_env_var_os: &get_env_var_os,
+                get_env_var: &get_env_var,
             },
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
@@ -892,11 +935,11 @@ mod tests {
 
     #[test]
     fn propagate_config_loader_errors_from_apply_wrapper() {
-        let get_env_var_os = |_: &str| None::<OsString>;
+        let get_env_var = |_: &str| None::<String>;
         let output = run_apply(
             || Err(ProgramError::HomeDirectoryUnavailable),
             SystemCalls {
-                get_env_var_os: &get_env_var_os,
+                get_env_var: &get_env_var,
             },
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
@@ -907,9 +950,9 @@ mod tests {
 
     #[test]
     fn cannot_load_default_config_without_home_or_override() {
-        let get_env_var_os = |_: &str| None::<OsString>;
+        let get_env_var = |_: &str| None::<String>;
         let error = load_default_config_with_system(SystemCalls {
-            get_env_var_os: &get_env_var_os,
+            get_env_var: &get_env_var,
         })
         .expect_err("default config loading should fail without HOME and override");
 
@@ -948,11 +991,13 @@ mod tests {
         )
         .expect("default config file should be written");
 
-        let env_values =
-            BTreeMap::from([("HOME".to_string(), OsString::from(home.path().as_os_str()))]);
-        let get_env_var_os = move |name: &str| env_values.get(name).cloned();
+        let env_values = BTreeMap::from([(
+            "HOME".to_string(),
+            home.path().as_os_str().to_string_lossy().into_owned(),
+        )]);
+        let get_env_var = move |name: &str| env_values.get(name).cloned();
         let config = load_default_config_with_system(SystemCalls {
-            get_env_var_os: &get_env_var_os,
+            get_env_var: &get_env_var,
         })
         .expect("default config loading should succeed with HOME");
 

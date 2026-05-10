@@ -18,13 +18,14 @@ fn derive_representative_plans(
         config: root,
     };
     let environment = BTreeMap::from([("DOTS".to_string(), "/repo/dots".to_string())]);
+    let get_env_var = |name: &str| environment.get(name).cloned();
     // Guard paths are checked after home expansion; use absolute paths here.
     let known_directories =
         BTreeSet::from(["/home/tester/shell".to_string(), "/feature/on".to_string()]);
 
     let intent_plan = derive_intent_plan_with_injectables(
         &loaded_root,
-        &environment,
+        &get_env_var,
         Path::new("/home/tester"),
         &|path| known_directories.contains(path),
         &|path: &Path| {

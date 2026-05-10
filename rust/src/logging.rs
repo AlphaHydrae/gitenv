@@ -69,10 +69,9 @@ fn format_unix_millis_iso8601(unix_millis: u128) -> String {
         Err(_) => OffsetDateTime::UNIX_EPOCH,
     };
 
-    match timestamp.format(&Rfc3339) {
-        Ok(text) => text,
-        Err(_) => "1970-01-01T00:00:00Z".to_string(),
-    }
+    timestamp
+        .format(&Rfc3339)
+        .unwrap_or("1970-01-01T00:00:00Z".to_string())
 }
 
 fn level_color(level: Level) -> &'static str {
@@ -221,6 +220,16 @@ mod tests {
     }
 
     #[test]
+    fn fall_back_to_epoch_when_rfc3339_formatting_fails() {
+        // Year 10000 is outside RFC3339 rendering range. Conversion from Unix
+        // millis succeeds, but final formatting fails and should use epoch.
+        assert_eq!(
+            format_unix_millis_iso8601(253_402_300_800_000),
+            "1970-01-01T00:00:00Z"
+        );
+    }
+
+    #[test]
     fn show_colorized_level_for_all_supported_levels() {
         let expectations = [
             (Level::Error, "\x1b[31mERROR\x1b[0m"),
@@ -243,6 +252,31 @@ mod tests {
                 format!("[1970-01-01T00:00:00.007Z] [{colored_level}] gitenv::test: event=test")
             );
         }
+    }
+
+    #[test]
+    fn suppress_log_when_the_record_level_is_below_the_configured_threshold() {
+        use super::init;
+        use log::Log;
+
+        // Calling LOGGER.log() directly bypasses the log_enabled! guard in the
+        // log::log! macro, so SimpleLogger::log() receives the record and runs
+        // its own enabled() check. Setting the max level to Error and logging
+        // at Debug exercises the false branch of that check (the branch where
+        // the eprintln! is skipped).
+        init(log::LevelFilter::Error, false);
+
+        let record = Record::builder()
+            .level(Level::Debug)
+            .target("gitenv::test")
+            .args(format_args!("event=suppressed"))
+            .build();
+
+        LOGGER.log(&record);
+
+        // Restore a permissive level so other tests in this process are not
+        // affected by the restrictive filter set above.
+        init(log::LevelFilter::Trace, false);
     }
 
     #[test]

@@ -1,13 +1,12 @@
 use crate::{ProgramError, logging};
 use log::Level;
-use std::ffi::OsString;
 use std::path::Path;
 use std::path::PathBuf;
 
 pub(crate) fn resolve_home_directory(
-    get_env_var_os: &dyn Fn(&str) -> Option<OsString>,
+    get_env_var: &dyn Fn(&str) -> Option<String>,
 ) -> Result<PathBuf, ProgramError> {
-    get_env_var_os("HOME")
+    get_env_var("HOME")
         .map(PathBuf::from)
         .ok_or(ProgramError::HomeDirectoryUnavailable)
 }
@@ -47,17 +46,17 @@ mod tests {
     use super::{list_directory_entries, resolve_home_directory};
     use crate::ProgramError;
     use std::collections::BTreeMap;
-    use std::ffi::OsString;
+
     use std::fs;
     use std::path::PathBuf;
     use tempfile::TempDir;
 
     #[test]
     fn resolve_home_directory_from_home_environment_variable() {
-        let env_values = BTreeMap::from([("HOME".to_string(), OsString::from("/tmp/home"))]);
-        let get_env_var_os = |name: &str| env_values.get(name).cloned();
+        let env_values = BTreeMap::from([("HOME".to_string(), "/tmp/home".to_string())]);
+        let get_env_var = |name: &str| env_values.get(name).cloned();
 
-        let result = resolve_home_directory(&get_env_var_os)
+        let result = resolve_home_directory(&get_env_var)
             .expect("expected resolver to return HOME when it is present");
 
         assert_eq!(result, PathBuf::from("/tmp/home"));
@@ -65,9 +64,9 @@ mod tests {
 
     #[test]
     fn return_home_directory_unavailable_when_home_environment_variable_is_missing() {
-        let get_env_var_os = |_: &str| None::<OsString>;
+        let get_env_var = |_: &str| None::<String>;
 
-        let error = resolve_home_directory(&get_env_var_os)
+        let error = resolve_home_directory(&get_env_var)
             .expect_err("expected resolver to fail when HOME is missing");
 
         assert_eq!(error, ProgramError::HomeDirectoryUnavailable);
