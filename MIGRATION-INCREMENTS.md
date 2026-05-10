@@ -41,24 +41,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 48: Centralize composition root and runtime wiring in lib.rs
-
-Why this increment exists:
-
-- Runtime wiring is split between `lib.rs` and implementation modules (`intent`,
-	`operation`, `actions`) through layered `*_with_*` entrypoints.
-- The architecture is harder to read when multiple modules both implement
-	behavior and choose concrete dependencies.
-
-Review target:
-
-- Keep a single runtime composition root in `lib.rs` that provides the real
-	dependencies to planning and apply flows.
-- Remove internal runtime self-wiring from implementation modules while
-	preserving behavior.
-- Add focused unit coverage that proves runtime paths still use real adapters
-	via the composition root.
-
 ### Increment 49: Introduce focused context traits for planner and apply paths
 
 Why this increment exists:
@@ -105,6 +87,9 @@ Why this increment exists:
 	composition root while related responsibilities are split across
 	`fs_adapter.rs` and `path_resolution.rs`.
 - The current boundary makes ownership of HOME/env/path logic unclear.
+- Runtime adapters like `target_exists` and `create_symlink_on_filesystem`
+	currently live in `actions.rs` but are wired from `lib.rs` (composition
+	root), which blurs module responsibility boundaries.
 
 Review target:
 
@@ -112,6 +97,10 @@ Review target:
 	module and inject it from `lib.rs`.
 - Keep `fs_adapter` focused on filesystem operations and expand
 	`path_resolution` ownership for shared path normalization where appropriate.
+- Evaluate whether `target_exists` and `create_symlink_on_filesystem` in
+	`actions.rs` should be moved to a dedicated system-calls or platform module,
+	or whether they should stay internal to `actions.rs` with a simpler
+	composition wrapper exposed.
 - Add unit tests that lock module responsibilities and preserve current
 	behavior for HOME, config path resolution, includes, and target/source
 	resolution.

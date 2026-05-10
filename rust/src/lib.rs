@@ -16,8 +16,7 @@ pub use errors::ProgramError;
 pub use logging::init as init_logging;
 
 pub use actions::{
-    ApplyOperationOutcome, ApplyOperationReport, apply_operation_plan,
-    apply_operation_plan_with_injectables,
+    ApplyOperationOutcome, ApplyOperationReport, apply_operation_plan_with_injectables,
 };
 pub use config::{
     ActionMode, Config, ConfigItem, Defaults, FileConfig, Guard, Include, LoadedConfig,
@@ -25,12 +24,10 @@ pub use config::{
 };
 pub use intent::{
     ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction, IntentSource,
-    ResolvedOptions, derive_intent_plan, derive_intent_plan_with_env_lookup,
-    derive_intent_plan_with_env_lookup_and_fs, derive_intent_plan_with_injectables,
+    ResolvedOptions, derive_intent_plan_with_injectables,
 };
 pub use operation::{
-    FileOperation, OperationAction, OperationPlan, derive_operation_plan,
-    derive_operation_plan_with_injectables,
+    FileOperation, OperationAction, OperationPlan, derive_operation_plan_with_injectables,
 };
 pub use status::{
     CopyInspection, CopyInspectionState, OperationInspectionOutcome, OperationInspectionReport,
@@ -62,6 +59,52 @@ fn real_system_calls() -> SystemCalls<'static> {
     SystemCalls {
         get_env_var: &std_env_var,
     }
+}
+
+fn real_is_directory(path: &str) -> bool {
+    logging::system(log::Level::Trace, "metadata", format!("path={path}"));
+    match std::fs::metadata(path) {
+        Ok(metadata) => metadata.is_dir(),
+        Err(_) => false,
+    }
+}
+
+/// Single production entry point for intent planning.
+/// Wires real environment and filesystem adapters from the composition root.
+pub fn derive_intent_plan(
+    loaded_config: &LoadedConfig,
+    home_directory: &Path,
+) -> Result<IntentPlan, ProgramError> {
+    derive_intent_plan_with_injectables(
+        loaded_config,
+        &std_env_var,
+        home_directory,
+        &real_is_directory,
+        &load_config,
+    )
+}
+
+/// Derives an operation plan using real filesystem directory reads.
+pub fn derive_operation_plan(
+    intent_plan: &IntentPlan,
+    home_directory: &Path,
+) -> Result<OperationPlan, ProgramError> {
+    derive_operation_plan_with_injectables(
+        intent_plan,
+        home_directory,
+        &fs_adapter::list_directory_entries,
+    )
+}
+
+/// Applies operations using real filesystem probes and symlink creation.
+pub fn apply_operation_plan(
+    operation_plan: &OperationPlan,
+) -> Result<ApplyOperationReport, ProgramError> {
+    apply_operation_plan_with_injectables(
+        operation_plan,
+        &actions::target_exists,
+        &actions::create_symlink_on_filesystem,
+    )
 }
 
 /// Parse CLI arguments and dispatch to the appropriate library function.
@@ -113,13 +156,14 @@ fn run_info(
 ) -> Result<ProgramOutput, ProgramError> {
     let loaded_config = load_config()?;
     let home_directory = fs_adapter::resolve_home_directory(system.get_env_var)?;
-    let intent_plan =
-        derive_intent_plan_with_env_lookup(&loaded_config, system.get_env_var, &home_directory)?;
-    let operation_plan = operation::derive_operation_plan_with_injectables(
-        &intent_plan,
+    let intent_plan = derive_intent_plan_with_injectables(
+        &loaded_config,
+        system.get_env_var,
         &home_directory,
-        &fs_adapter::list_directory_entries,
+        &real_is_directory,
+        &crate::load_config,
     )?;
+    let operation_plan = derive_operation_plan(&intent_plan, &home_directory)?;
 
     Ok(ProgramOutput {
         message: cli::render_default_inspection_output(
@@ -137,13 +181,14 @@ fn run_apply(
 ) -> Result<ProgramOutput, ProgramError> {
     let loaded_config = load_config()?;
     let home_directory = fs_adapter::resolve_home_directory(system.get_env_var)?;
-    let intent_plan =
-        derive_intent_plan_with_env_lookup(&loaded_config, system.get_env_var, &home_directory)?;
-    let operation_plan = operation::derive_operation_plan_with_injectables(
-        &intent_plan,
+    let intent_plan = derive_intent_plan_with_injectables(
+        &loaded_config,
+        system.get_env_var,
         &home_directory,
-        &fs_adapter::list_directory_entries,
+        &real_is_directory,
+        &crate::load_config,
     )?;
+    let operation_plan = derive_operation_plan(&intent_plan, &home_directory)?;
 
     let apply_report = apply_operation_plan(&operation_plan)?;
     let output_message = cli::render_apply_output(

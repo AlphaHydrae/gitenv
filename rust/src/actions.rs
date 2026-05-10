@@ -21,17 +21,6 @@ pub enum ApplyOperationOutcome {
     UnsupportedOperation(OperationAction),
 }
 
-/// Applies operation-plan actions using real filesystem access.
-pub fn apply_operation_plan(
-    operation_plan: &OperationPlan,
-) -> Result<ApplyOperationReport, ProgramError> {
-    apply_operation_plan_with_injectables(
-        operation_plan,
-        &target_exists,
-        &create_symlink_on_filesystem,
-    )
-}
-
 /// Like `apply_operation_plan` but accepts injectable filesystem probes for
 /// deterministic tests.
 pub fn apply_operation_plan_with_injectables(
@@ -84,7 +73,7 @@ fn action_kind_from_outcome(outcome: &ApplyOperationOutcome) -> &'static str {
     }
 }
 
-fn target_exists(path: &Path) -> Result<bool, ProgramError> {
+pub(crate) fn target_exists(path: &Path) -> Result<bool, ProgramError> {
     logging::system(
         Level::Trace,
         "symlink_metadata",
@@ -286,7 +275,10 @@ fn backup_path_for_target(path: &Path) -> std::path::PathBuf {
 }
 
 #[cfg(unix)]
-fn create_symlink_on_filesystem(source: &Path, target: &Path) -> Result<(), ProgramError> {
+pub(crate) fn create_symlink_on_filesystem(
+    source: &Path,
+    target: &Path,
+) -> Result<(), ProgramError> {
     logging::system(
         Level::Trace,
         "symlink",
@@ -303,7 +295,10 @@ fn create_symlink_on_filesystem(source: &Path, target: &Path) -> Result<(), Prog
 }
 
 #[cfg(not(unix))]
-fn create_symlink_on_filesystem(source: &Path, target: &Path) -> Result<(), ProgramError> {
+pub(crate) fn create_symlink_on_filesystem(
+    source: &Path,
+    target: &Path,
+) -> Result<(), ProgramError> {
     Err(ProgramError::SymlinkCreationFailed {
         source: source.to_path_buf(),
         target: target.to_path_buf(),

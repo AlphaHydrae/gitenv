@@ -2,7 +2,6 @@ use crate::ProgramError;
 use crate::config::{
     ActionMode, Config, ConfigItem, Defaults, Guard, Include, LoadedConfig, SourceRoot,
 };
-use crate::load_config;
 use crate::logging;
 use crate::path_resolution;
 use log::Level;
@@ -79,64 +78,6 @@ pub struct IntentSelectAction {
     /// Filenames explicitly excluded from selection.
     pub exclude: Vec<String>,
     pub options: ResolvedOptions,
-}
-
-/// Derives an intent plan from `config` using the real process environment and
-/// real filesystem access, with an explicit home-directory dependency.
-///
-/// This is the primary entry point for production use.
-pub fn derive_intent_plan(
-    loaded_config: &LoadedConfig,
-    home_directory: &Path,
-) -> Result<IntentPlan, ProgramError> {
-    derive_intent_plan_with_env_lookup(
-        loaded_config,
-        &|name| std::env::var_os(name).map(|v| v.to_string_lossy().into_owned()),
-        home_directory,
-    )
-}
-
-fn real_is_directory(path: &str) -> bool {
-    logging::system(Level::Trace, "metadata", format!("path={path}"));
-    match std::fs::metadata(path) {
-        Ok(metadata) => metadata.is_dir(),
-        Err(_) => false,
-    }
-}
-
-/// Like `derive_intent_plan` but accepts an injected environment-variable
-/// lookup function.
-///
-/// This avoids materializing the entire process environment when only a small
-/// subset of variables is needed during planning.
-pub fn derive_intent_plan_with_env_lookup(
-    loaded_config: &LoadedConfig,
-    get_env_var: &dyn Fn(&str) -> Option<String>,
-    home_directory: &Path,
-) -> Result<IntentPlan, ProgramError> {
-    derive_intent_plan_with_env_lookup_and_fs(
-        loaded_config,
-        get_env_var,
-        home_directory,
-        &real_is_directory,
-    )
-}
-
-/// Like `derive_intent_plan_with_env_lookup` but accepts injected directory
-/// checks for deterministic guard evaluation in tests.
-pub fn derive_intent_plan_with_env_lookup_and_fs(
-    loaded_config: &LoadedConfig,
-    get_env_var: &dyn Fn(&str) -> Option<String>,
-    home_directory: &Path,
-    is_directory: &impl Fn(&str) -> bool,
-) -> Result<IntentPlan, ProgramError> {
-    derive_intent_plan_with_injectables(
-        loaded_config,
-        get_env_var,
-        home_directory,
-        is_directory,
-        &load_config,
-    )
 }
 
 /// Fully injectable planning function used by tests to exercise include
@@ -493,12 +434,11 @@ fn resolve_item_options(
 mod tests {
     use super::{
         ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction,
-        IntentSource, ResolvedOptions, derive_intent_plan, derive_intent_plan_with_env_lookup,
-        derive_intent_plan_with_env_lookup_and_fs, derive_intent_plan_with_injectables,
+        IntentSource, ResolvedOptions, derive_intent_plan_with_injectables,
     };
     use crate::{
         ActionMode, Config, ConfigItem, Defaults, FileConfig, Guard, Include, LoadedConfig,
-        ProgramError, SelectConfig, Source, SourceRoot,
+        ProgramError, SelectConfig, Source, SourceRoot, derive_intent_plan,
     };
     #[cfg(unix)]
     use std::path::{Path, PathBuf};
@@ -509,6 +449,31 @@ mod tests {
 
     fn missing_environment(_: &str) -> Option<String> {
         None
+    }
+
+    fn directory_missing(_: &str) -> bool {
+        false
+    }
+
+    fn unexpected_include_read(_: &Path) -> Result<LoadedConfig, ProgramError> {
+        Err(ProgramError::InvalidConfiguration {
+            message: "includes not tested here".to_string(),
+        })
+    }
+
+    #[test]
+    fn reject_unexpected_include_reads_in_test_helpers() {
+        assert!(!directory_missing("/intent-tests/missing"));
+
+        let error = unexpected_include_read(Path::new("/intent-tests/include.yml"))
+            .expect_err("helper should reject include reads for tests without includes");
+
+        assert_eq!(
+            error,
+            ProgramError::InvalidConfiguration {
+                message: "includes not tested here".to_string(),
+            }
+        );
     }
 
     // ---------------------------------------------------------------------------
@@ -657,10 +622,12 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env_lookup(
+        let plan = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &missing_environment,
             home_directory_for_test(),
+            &directory_missing,
+            &unexpected_include_read,
         )
         .expect("config should produce an intent plan");
 
@@ -786,13 +753,15 @@ mod tests {
                 })],
             }],
         };
-        let plan = derive_intent_plan_with_env_lookup(
+        let plan = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &|name: &str| {
                 assert_eq!(name, "PRIVATE_ENV_DIR");
                 Some("~/projects/private-env".to_string())
             },
             home_directory_for_test(),
+            &directory_missing,
+            &unexpected_include_read,
         )
         .expect("planning should resolve the environment-backed source");
 
@@ -841,10 +810,12 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env_lookup(
+        let plan = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &missing_environment,
             home_directory_for_test(),
+            &directory_missing,
+            &unexpected_include_read,
         )
         .expect("planning should keep explicit path source roots as-is");
 
@@ -886,10 +857,12 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env_lookup(
+        let plan = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &missing_environment,
             home_directory_for_test(),
+            &directory_missing,
+            &unexpected_include_read,
         )
         .expect("planning should collapse overwrite-disabled defaults to skip");
 
@@ -958,10 +931,12 @@ mod tests {
             ],
         };
 
-        let error = derive_intent_plan_with_env_lookup(
+        let error = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &missing_environment,
             home_directory_for_test(),
+            &directory_missing,
+            &unexpected_include_read,
         )
         .expect_err("planning should fail when environment variables are missing");
 
@@ -999,10 +974,12 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env_lookup(
+        let plan = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &missing_environment,
             home_directory_for_test(),
+            &directory_missing,
+            &unexpected_include_read,
         )
         .expect("planning should succeed when an optional environment-backed source is unset");
 
@@ -1045,14 +1022,15 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env_lookup_and_fs(
+        let plan = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &|name: &str| {
                 assert_eq!(name, "SOURCE_DIR");
                 Some("vscode".to_string())
             },
             home_directory_for_test(),
-            &|_| false,
+            &directory_missing,
+            &unexpected_include_read,
         )
         .expect("planning should succeed with a source-level to");
 
@@ -1102,11 +1080,12 @@ mod tests {
             "/home/tester/Library/Application Support/Code/User".to_string(),
         ]);
 
-        let plan = derive_intent_plan_with_env_lookup_and_fs(
+        let plan = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &missing_environment,
             home_directory_for_test(),
             &|path| known_dirs.contains(path),
+            &unexpected_include_read,
         )
         .expect("planning should succeed when the to_exists guard is satisfied");
 
@@ -1151,11 +1130,12 @@ mod tests {
             }],
         };
         // Destination directory is absent after expansion via injected home.
-        let plan = derive_intent_plan_with_env_lookup_and_fs(
+        let plan = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &missing_environment,
             home_directory_for_test(),
-            &|_| false,
+            &directory_missing,
+            &unexpected_include_read,
         )
         .expect("planning should succeed when the to_exists guard is not satisfied");
 
@@ -1186,11 +1166,12 @@ mod tests {
         };
         let known_dirs = std::collections::BTreeSet::from(["/Applications".to_string()]);
 
-        let plan = derive_intent_plan_with_env_lookup_and_fs(
+        let plan = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &missing_environment,
             home_directory_for_test(),
             &|path| known_dirs.contains(path),
+            &unexpected_include_read,
         )
         .expect("planning should succeed when the directory_exists guard is satisfied");
 
@@ -1226,11 +1207,12 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env_lookup_and_fs(
+        let plan = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &missing_environment,
             home_directory_for_test(),
-            &|_| false,
+            &directory_missing,
+            &unexpected_include_read,
         )
         .expect("planning should succeed when the directory_exists guard is not satisfied");
 
@@ -1265,10 +1247,12 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env_lookup(
+        let plan = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &missing_environment,
             home_directory_for_test(),
+            &directory_missing,
+            &unexpected_include_read,
         )
         .expect("planning should skip sources when a real directory guard points to a file");
 
@@ -1300,10 +1284,12 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env_lookup(
+        let plan = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &missing_environment,
             home_directory_for_test(),
+            &directory_missing,
+            &unexpected_include_read,
         )
         .expect("planning should skip sources when a real directory guard path is missing");
 
@@ -1344,11 +1330,12 @@ mod tests {
                 ["/home/tester/AppData/Roaming/Code/User".to_string()],
             );
 
-        let plan = derive_intent_plan_with_env_lookup_and_fs(
+        let plan = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &missing_environment,
             home_directory_for_test(),
             &|path| known_dirs.contains(path),
+            &unexpected_include_read,
         )
         .expect("planning should succeed when to_exists guard uses a home-relative destination");
 
@@ -1396,11 +1383,12 @@ mod tests {
         };
         let known_dirs = std::collections::BTreeSet::from(["/home/tester/work-active".to_string()]);
 
-        let plan = derive_intent_plan_with_env_lookup_and_fs(
+        let plan = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &missing_environment,
             home_directory_for_test(),
             &|path| known_dirs.contains(path),
+            &unexpected_include_read,
         )
         .expect("planning should succeed when directory_exists guard uses a home-relative path");
 
@@ -1442,10 +1430,12 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env_lookup(
+        let plan = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &missing_environment,
             home_directory_for_test(),
+            &directory_missing,
+            &unexpected_include_read,
         )
         .expect("planning should produce overwrite-with-backup conflict policy");
 
@@ -1511,7 +1501,7 @@ mod tests {
             &loaded_config_for_path(&root, None),
             &missing_environment,
             home_directory_for_test(),
-            &|_| false,
+            &directory_missing,
             &|path: &Path| {
                 assert_eq!(path, Path::new("/inc/a.yml"));
                 Ok(loaded_config_for_test(included.clone(), path))
@@ -1556,7 +1546,7 @@ mod tests {
             &loaded_config_for_path(&root, Some(root_path)),
             &missing_environment,
             home_directory_for_test(),
-            &|_| false,
+            &directory_missing,
             &|path: &Path| {
                 assert_eq!(path, Path::new("/configs/inc/a.yml"));
                 Ok(loaded_config_for_test(included.clone(), path))
@@ -1611,7 +1601,7 @@ mod tests {
             &loaded_config_for_path(&root, Some(root_path)),
             &missing_environment,
             home_directory_for_test(),
-            &|_| false,
+            &directory_missing,
             &|path: &Path| {
                 if path == Path::new("/configs/inc/a.yml") {
                     Ok(loaded_config_for_test(a.clone(), path))
@@ -1666,7 +1656,7 @@ mod tests {
             &loaded_config_for_path(&root, None),
             &missing_environment,
             home_directory_for_test(),
-            &|_| false,
+            &directory_missing,
             &|path: &Path| {
                 // The planner must resolve the ~ path to the absolute path.
                 assert_eq!(path, Path::new("/home/tester/configs/shared.yml"));
@@ -1711,11 +1701,12 @@ mod tests {
         // The guard must expand "~" to "/home/tester" before the probe; if it
         // did not, `is_directory` would receive the literal "~" string, return
         // false, and the source would be excluded from the plan.
-        let plan = derive_intent_plan_with_env_lookup_and_fs(
+        let plan = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &missing_environment,
             home_directory_for_test(),
             &|path| path == "/home/tester",
+            &unexpected_include_read,
         )
         .expect(
             "planning should succeed when to_exists guard uses the bare-tilde default destination",
@@ -1763,7 +1754,7 @@ mod tests {
             &loaded_config_for_path(&root, None),
             &missing_environment,
             home_directory_for_test(),
-            &|_| false,
+            &directory_missing,
             &|path: &Path| {
                 if path == Path::new("/inc/a.yml") {
                     Ok(loaded_config_for_test(a.clone(), path))
@@ -1833,7 +1824,7 @@ mod tests {
             &loaded_config_for_path(&root, None),
             &missing_environment,
             home_directory_for_test(),
-            &|_| false,
+            &directory_missing,
             &|path: &Path| {
                 if path == Path::new("/inc/a.yml") {
                     Ok(loaded_config_for_test(a.clone(), path))
@@ -1881,7 +1872,7 @@ mod tests {
             &loaded_config_for_path(&root, None),
             &missing_environment,
             home_directory_for_test(),
-            &|_| false,
+            &directory_missing,
             &|path: &Path| {
                 Err(ProgramError::ConfigurationReadFailed {
                     path: path.to_path_buf(),
@@ -1923,7 +1914,7 @@ mod tests {
             &loaded_config_for_path(&root, None),
             &missing_environment,
             home_directory_for_test(),
-            &|_| false,
+            &directory_missing,
             &|path: &Path| {
                 Err(ProgramError::ConfigurationReadFailed {
                     path: path.to_path_buf(),
@@ -1982,7 +1973,7 @@ mod tests {
             &loaded_config_for_path(&root, None),
             &missing_environment,
             home_directory_for_test(),
-            &|_| false,
+            &directory_missing,
             &|path: &Path| {
                 if path == Path::new("/inc/a.yml") {
                     Ok(loaded_config_for_test(a.clone(), path))
@@ -2024,7 +2015,7 @@ mod tests {
             &loaded_config_for_path(&root, Some(root_path)),
             &missing_environment,
             home_directory_for_test(),
-            &|_| false,
+            &directory_missing,
             &crate::load_config,
         )
         .expect_err("planning should fail when the root config includes itself");
@@ -2063,7 +2054,7 @@ mod tests {
                 Some("/private/.gitenv.yml".to_string())
             },
             home_directory_for_test(),
-            &|_| false,
+            &directory_missing,
             &|path: &Path| {
                 assert_eq!(path, Path::new("/private/.gitenv.yml"));
                 Ok(loaded_config_for_test(included.clone(), path))
@@ -2099,10 +2090,12 @@ mod tests {
             )])
         };
 
-        let plan = derive_intent_plan_with_env_lookup(
+        let plan = derive_intent_plan_with_injectables(
             &root_loaded_config(&root),
             &missing_environment,
             home_directory_for_test(),
+            &directory_missing,
+            &unexpected_include_read,
         )
         .expect("planning should succeed when an optional env-backed include variable is unset");
 
@@ -2128,10 +2121,12 @@ mod tests {
             )])
         };
 
-        let error = derive_intent_plan_with_env_lookup(
+        let error = derive_intent_plan_with_injectables(
             &root_loaded_config(&root),
             &missing_environment,
             home_directory_for_test(),
+            &directory_missing,
+            &unexpected_include_read,
         )
         .expect_err("planning should fail when a required env-backed include variable is unset");
 
@@ -2217,7 +2212,7 @@ mod tests {
             &loaded_config_for_path(&root, None),
             &missing_environment,
             home_directory_for_test(),
-            &|_| false,
+            &directory_missing,
             &|path: &Path| {
                 assert_eq!(path, Path::new("/inc/a.yml"));
                 Ok(loaded_config_for_test(included.clone(), path))
@@ -2280,7 +2275,7 @@ mod tests {
             &loaded_config_for_path(&root, None),
             &missing_environment,
             home_directory_for_test(),
-            &|_| false,
+            &directory_missing,
             &|_| {
                 Err(ProgramError::InvalidConfiguration {
                     message: "unknown field `oops`".to_string(),
@@ -2314,7 +2309,7 @@ mod tests {
             &loaded_config_for_path(&root, None),
             &missing_environment,
             home_directory_for_test(),
-            &|_| false,
+            &directory_missing,
             &|_| {
                 Err(ProgramError::InvalidConfiguration {
                     message: "unknown field `oops`".to_string(),
@@ -2367,10 +2362,12 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env_lookup(
+        let plan = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &missing_environment,
             home_directory_for_test(),
+            &directory_missing,
+            &unexpected_include_read,
         )
         .expect("planning should apply item-level mode override");
 
@@ -2416,11 +2413,12 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env_lookup_and_fs(
+        let plan = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &missing_environment,
             home_directory_for_test(),
-            &|_| false,
+            &directory_missing,
+            &unexpected_include_read,
         )
         .expect("planning should apply item-level to override");
 
@@ -2472,10 +2470,12 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env_lookup(
+        let plan = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &missing_environment,
             home_directory_for_test(),
+            &directory_missing,
+            &unexpected_include_read,
         )
         .expect("planning should apply item-level overwrite override");
 
@@ -2527,10 +2527,12 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env_lookup(
+        let plan = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &missing_environment,
             home_directory_for_test(),
+            &directory_missing,
+            &unexpected_include_read,
         )
         .expect("planning should apply select item overrides");
 
@@ -2577,10 +2579,12 @@ mod tests {
             }],
         };
 
-        let error = derive_intent_plan_with_env_lookup(
+        let error = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &missing_environment,
             home_directory_for_test(),
+            &directory_missing,
+            &unexpected_include_read,
         )
         .expect_err("planning should reject explicit overwrite: false with backup_on_overwrite: true at item level");
 
@@ -2614,10 +2618,12 @@ mod tests {
             }],
         };
 
-        let error = derive_intent_plan_with_env_lookup(
+        let error = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &missing_environment,
             home_directory_for_test(),
+            &directory_missing,
+            &unexpected_include_read,
         )
         .expect_err(
             "planning should reject explicit overwrite: false with backup_on_overwrite: true at select item level",
@@ -2663,10 +2669,12 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_with_env_lookup(
+        let plan = derive_intent_plan_with_injectables(
             &root_loaded_config(&config),
             &missing_environment,
             home_directory_for_test(),
+            &directory_missing,
+            &unexpected_include_read,
         )
         .expect("planning should succeed when backup default is inherited and overwrite is false");
 

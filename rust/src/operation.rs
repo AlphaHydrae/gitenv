@@ -1,6 +1,6 @@
 use crate::{
     ActionMode, ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction,
-    ProgramError, ResolvedOptions, fs_adapter, logging, path_resolution,
+    ProgramError, ResolvedOptions, logging, path_resolution,
 };
 use log::Level;
 use std::path::{Path, PathBuf};
@@ -29,21 +29,6 @@ pub struct FileOperation {
     pub target: PathBuf,
     pub mkdir: bool,
     pub conflict_policy: ConflictPolicy,
-}
-
-/// Derives the operation plan from an intent plan using real filesystem reads.
-///
-/// The home directory is provided by the composition root so operation
-/// planning remains free of direct environment access.
-pub fn derive_operation_plan(
-    intent_plan: &IntentPlan,
-    home_directory: &Path,
-) -> Result<OperationPlan, ProgramError> {
-    derive_operation_plan_with_injectables(
-        intent_plan,
-        home_directory,
-        &fs_adapter::list_directory_entries,
-    )
 }
 
 /// Like `derive_operation_plan` but accepts injected directory access for
@@ -218,12 +203,11 @@ fn should_include_selection_entry(entry: &str, select_action: &IntentSelectActio
 #[cfg(test)]
 mod tests {
     use super::{
-        FileOperation, OperationAction, OperationPlan, derive_operation_plan,
-        derive_operation_plan_with_injectables,
+        FileOperation, OperationAction, OperationPlan, derive_operation_plan_with_injectables,
     };
     use crate::{
         ActionMode, ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction,
-        IntentSource, ProgramError, ResolvedOptions,
+        IntentSource, ProgramError, ResolvedOptions, derive_operation_plan,
     };
     use std::fs;
     #[cfg(unix)]
