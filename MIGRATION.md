@@ -82,6 +82,56 @@ frequently without destabilizing this long-term migration plan.
 
 Completed increments are tracked in [MIGRATION-LOG.md](./MIGRATION-LOG.md).
 
+## Dependency Boundary Refactor Target
+
+This section defines the intended end state for the dependency-injection and
+composition-root refactoring tracked by increments 49-53 in
+[MIGRATION-INCREMENTS.md](./MIGRATION-INCREMENTS.md).
+
+### End-state goals
+
+- Keep `lib.rs` as the composition root that resolves runtime state and wires
+  real adapters.
+- Replace callback-style injectable seams with trait-backed, stage-owned
+  contexts.
+- Keep the public library surface centered on primary entrypoints rather than
+  test-only wrapper functions.
+- Preserve current behavior for intent planning, operation expansion, apply
+  execution, path handling, and diagnostics.
+
+### Shared boundary traits
+
+The shared boundary module should expose only external/system capabilities that
+are reused across stages:
+
+- Environment variable reads.
+- Directory existence probes.
+- Config file reads.
+- Directory listing for selector expansion.
+- Target existence probes.
+- Symlink creation.
+
+Path normalization remains regular deterministic code in `path_resolution.rs`;
+it is not part of the boundary trait surface.
+
+### Stage-owned context shape
+
+Each stage owns a focused context (for example: intent, operation, apply)
+containing only the dependencies and runtime state needed by that stage.
+
+`home_directory` is resolved once in the composition root and carried as data in
+the stage context (not as a trait method), so helper signatures stay small and
+the context fully represents stage runtime inputs.
+
+### Function/API direction
+
+- Internal stage functions accept context references instead of multiple
+  callback arguments.
+- Transitional injectable wrappers are removed once tests are migrated to
+  stage-local trait-based doubles.
+- Public entrypoints stay stable around the primary stage APIs unless an
+  explicitly approved increment states otherwise.
+
 ## Configuration Migration
 
 ## New Format: Declarative YAML
@@ -292,10 +342,10 @@ Current status:
 - [x] Primary inspection/apply status states are colorized for terminal output
       and remain plain in non-terminal contexts.
 - [x] Configurable logging controls are available in CLI (`--log-level`) and
-  library (`init_logging`).
+      library (`init_logging`).
 - [x] Temporary Rust-port usage examples live in `rust/README.md`.
 - [x] Home-based CLI path rendering uses `~` display parity for paths under
-  HOME.
+      HOME.
 
 Exit criteria:
 

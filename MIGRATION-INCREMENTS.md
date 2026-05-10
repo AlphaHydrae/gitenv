@@ -41,84 +41,105 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 49: Introduce focused context traits for planner and apply paths
+### Increment 49: Extract shared dependency boundary traits
 
 Why this increment exists:
 
-- Dependency-heavy signatures and recursive helper plumbing in `intent.rs`
-	(`too_many_arguments`) reduce readability and increase maintenance cost.
-- Function-pointer injection scales poorly as more filesystem/config
-	responsibilities are added.
+- The current intent-stage trait objects are local to `intent.rs`, which makes
+  the dependency boundary look stage-specific even though the same external
+  capabilities will be reused by operation and apply.
+- `lib.rs` still owns ad hoc wiring, so the final dependency boundary is not
+  explicit yet.
 
 Review target:
 
-- Introduce small, responsibility-scoped traits (for example: env/config read,
-	directory probing/listing, apply filesystem operations) and replace large
-	argument lists with trait-backed contexts.
-- Refactor `intent`, `operation`, and `actions` internals to consume those
-	contexts without changing domain behavior.
-- Add or update unit tests to validate deterministic behavior with trait-based
-	test doubles.
+- Follow the end-state contract in
+  [Dependency Boundary Refactor Target](./MIGRATION.md#dependency-boundary-refactor-target).
+- Introduce a small internal boundary module for external dependencies and
+  move the concrete adapters there.
+- Define the final shared trait set for the migration boundary: environment
+  reads, directory existence probes, config reads, directory listing, target
+  existence probes, and symlink creation.
+- Keep path normalization as ordinary utility code, not as a trait.
 
-### Increment 50: Reduce public DI seam surface and hide test-only wiring
+### Increment 50: Remove the intent injectable wrapper
 
 Why this increment exists:
 
-- The crate root currently re-exports several injectable variants that are
-	primarily useful for internal tests, increasing API surface area and
-	discoverability noise.
-- Public API stability is not a concern for this migration stage.
+- `derive_intent_plan_with_injectables` is transitional once the shared trait
+  boundary exists, and leaving it public keeps the API noisier than necessary.
+- The intent stage should be driven by one public entrypoint plus a private
+  internal implementation.
 
 Review target:
 
-- Keep a minimal public surface around primary entrypoints
-	(`derive_intent_plan`, `derive_operation_plan`, `apply_operation_plan`) and
-	move test-only wiring helpers to `pub(crate)` or private scope.
-- Update integration and unit tests to use supported seams (module-local tests,
-	trait doubles, or higher-level public entrypoints) instead of exported
-	internals.
-- Ensure CLI/library behavior parity remains fully covered after API reduction.
+- Follow the end-state contract in
+  [Dependency Boundary Refactor Target](./MIGRATION.md#dependency-boundary-refactor-target).
+- Replace the public injectable intent function with an internal function that
+  takes the shared context directly.
+- Keep `derive_intent_plan` as the sole public intent entrypoint and update
+  tests to construct local trait-backed contexts instead of calling the removed
+  wrapper.
+- Carry `home_directory` as stage context data instead of threading it through
+  helper signatures as a separate argument.
+- Preserve intent behavior and coverage while reducing exported surface area.
 
-### Increment 51: Extract environment/system boundary and rebalance adapters
+### Increment 51: Rebalance operation boundary
 
 Why this increment exists:
 
-- `SystemCalls` in `lib.rs` currently mixes environment concerns into the
-	composition root while related responsibilities are split across
-	`fs_adapter.rs` and `path_resolution.rs`.
-- The current boundary makes ownership of HOME/env/path logic unclear.
-- Runtime adapters like `target_exists` and `create_symlink_on_filesystem`
-	currently live in `actions.rs` but are wired from `lib.rs` (composition
-	root), which blurs module responsibility boundaries.
+- `operation.rs` still uses callback-style seams that do not match the final
+  dependency boundary.
+- `lib.rs` still owns operation-stage wiring instead of delegating through a
+  dedicated boundary module.
 
 Review target:
 
-- Move environment/system lookup (`SystemCalls` replacement) into a dedicated
-	module and inject it from `lib.rs`.
-- Keep `fs_adapter` focused on filesystem operations and expand
-	`path_resolution` ownership for shared path normalization where appropriate.
-- Evaluate whether `target_exists` and `create_symlink_on_filesystem` in
-	`actions.rs` should be moved to a dedicated system-calls or platform module,
-	or whether they should stay internal to `actions.rs` with a simpler
-	composition wrapper exposed.
-- Add unit tests that lock module responsibilities and preserve current
-	behavior for HOME, config path resolution, includes, and target/source
-	resolution.
+- Follow the end-state contract in
+  [Dependency Boundary Refactor Target](./MIGRATION.md#dependency-boundary-refactor-target).
+- Refactor operation planning to consume the shared boundary traits or a
+  stage-owned context instead of bare callbacks.
+- Move the operation-stage wiring out of `lib.rs` so the composition root only
+  assembles real adapters and passes them to the operation planner.
+- Keep `home_directory` resolved in composition root and stored in operation
+  context data.
+- Keep `path_resolution.rs` as a pure helper module and preserve current HOME
+  and filesystem behavior.
 
-### Increment 52: Readability cleanup and naming pass for DI architecture
+### Increment 52: Rebalance apply boundary
 
 Why this increment exists:
 
-- After boundary refactors, naming and documentation drift can keep the code
-	difficult to review even when behavior is correct.
+- `actions.rs` still uses callback-style seams that do not match the final
+  dependency boundary.
+- The apply path should be isolated from the operation refactor so each stage
+  remains reviewable on its own.
 
 Review target:
 
-- Rename DI types/functions for intent-revealing responsibilities and remove
-	obsolete transitional naming.
+- Follow the end-state contract in
+  [Dependency Boundary Refactor Target](./MIGRATION.md#dependency-boundary-refactor-target).
+- Refactor apply execution to consume the shared boundary traits or a
+  stage-owned context instead of bare callbacks.
+- Move the apply-stage wiring out of `lib.rs` so the composition root only
+  assembles real adapters and passes them to the apply executor.
+- Keep `home_directory` resolved in composition root and stored in apply
+  context data when needed by path-related helper flows.
+- Preserve current filesystem behavior and conflict handling semantics.
+
+### Increment 53: Readability cleanup and naming pass for DI architecture
+
+Why this increment exists:
+
+- After the boundary refactors, transitional names and documentation can still
+  make the code harder to review even if the behavior is correct.
+
+Review target:
+
+- Follow the end-state contract in
+  [Dependency Boundary Refactor Target](./MIGRATION.md#dependency-boundary-refactor-target).
+- Rename boundary and context types for intent-revealing responsibility names.
 - Add concise module/function docs that explain where wiring happens and where
-	domain logic begins.
+  domain logic begins.
 - Verify no coverage drop from refactor fallout and document any deferred
-	cleanup as explicit TODOs with closure conditions.
-
-<!-- Increment 47 (expand ~ in guards and includes) is complete. -->
+  cleanup as explicit TODOs with closure conditions.
