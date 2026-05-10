@@ -41,6 +41,95 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-<!-- No increments currently planned. -->
+### Increment 48: Centralize composition root and runtime wiring in lib.rs
+
+Why this increment exists:
+
+- Runtime wiring is split between `lib.rs` and implementation modules (`intent`,
+	`operation`, `actions`) through layered `*_with_*` entrypoints.
+- The architecture is harder to read when multiple modules both implement
+	behavior and choose concrete dependencies.
+
+Review target:
+
+- Keep a single runtime composition root in `lib.rs` that provides the real
+	dependencies to planning and apply flows.
+- Remove internal runtime self-wiring from implementation modules while
+	preserving behavior.
+- Add focused unit coverage that proves runtime paths still use real adapters
+	via the composition root.
+
+### Increment 49: Introduce focused context traits for planner and apply paths
+
+Why this increment exists:
+
+- Dependency-heavy signatures and recursive helper plumbing in `intent.rs`
+	(`too_many_arguments`) reduce readability and increase maintenance cost.
+- Function-pointer injection scales poorly as more filesystem/config
+	responsibilities are added.
+
+Review target:
+
+- Introduce small, responsibility-scoped traits (for example: env/config read,
+	directory probing/listing, apply filesystem operations) and replace large
+	argument lists with trait-backed contexts.
+- Refactor `intent`, `operation`, and `actions` internals to consume those
+	contexts without changing domain behavior.
+- Add or update unit tests to validate deterministic behavior with trait-based
+	test doubles.
+
+### Increment 50: Reduce public DI seam surface and hide test-only wiring
+
+Why this increment exists:
+
+- The crate root currently re-exports several injectable variants that are
+	primarily useful for internal tests, increasing API surface area and
+	discoverability noise.
+- Public API stability is not a concern for this migration stage.
+
+Review target:
+
+- Keep a minimal public surface around primary entrypoints
+	(`derive_intent_plan`, `derive_operation_plan`, `apply_operation_plan`) and
+	move test-only wiring helpers to `pub(crate)` or private scope.
+- Update integration and unit tests to use supported seams (module-local tests,
+	trait doubles, or higher-level public entrypoints) instead of exported
+	internals.
+- Ensure CLI/library behavior parity remains fully covered after API reduction.
+
+### Increment 51: Extract environment/system boundary and rebalance adapters
+
+Why this increment exists:
+
+- `SystemCalls` in `lib.rs` currently mixes environment concerns into the
+	composition root while related responsibilities are split across
+	`fs_adapter.rs` and `path_resolution.rs`.
+- The current boundary makes ownership of HOME/env/path logic unclear.
+
+Review target:
+
+- Move environment/system lookup (`SystemCalls` replacement) into a dedicated
+	module and inject it from `lib.rs`.
+- Keep `fs_adapter` focused on filesystem operations and expand
+	`path_resolution` ownership for shared path normalization where appropriate.
+- Add unit tests that lock module responsibilities and preserve current
+	behavior for HOME, config path resolution, includes, and target/source
+	resolution.
+
+### Increment 52: Readability cleanup and naming pass for DI architecture
+
+Why this increment exists:
+
+- After boundary refactors, naming and documentation drift can keep the code
+	difficult to review even when behavior is correct.
+
+Review target:
+
+- Rename DI types/functions for intent-revealing responsibilities and remove
+	obsolete transitional naming.
+- Add concise module/function docs that explain where wiring happens and where
+	domain logic begins.
+- Verify no coverage drop from refactor fallout and document any deferred
+	cleanup as explicit TODOs with closure conditions.
 
 <!-- Increment 47 (expand ~ in guards and includes) is complete. -->
