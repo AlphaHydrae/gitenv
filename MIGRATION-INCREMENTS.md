@@ -41,40 +41,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 51: Introduce command-owned orchestration contexts
-
-Why this increment exists:
-
-- `SystemCalls` and the command-level `load_config` closures overlap with the
-  new boundary direction and keep command orchestration on ad hoc injections.
-- Once `info` and `apply` live in dedicated modules, they should depend on one
-  focused context each instead of threading multiple closures through helper
-  signatures.
-
-Review target:
-
-- Follow the end-state contract in
-  [Dependency Boundary Refactor Target](./MIGRATION.md#dependency-boundary-refactor-target).
-- Replace command-level closure bundles such as `SystemCalls` and injected
-  config loaders with command-owned contexts that bundle resolved runtime data
-  and wired stage entrypoints.
-- Use resolved facts in those contexts (for example `LoadedConfig` and
-  resolved `home_directory`) instead of deferred bootstrap closures whenever
-  practical.
-- Make the command modules call those wired planning/execution entrypoints
-  instead of lower-level DI seams directly.
-- Correct the misleading module-level doc comments in `app/info.rs` and
-  `app/apply.rs`: they currently claim that boundary wiring lives in the
-  composition root and that the functions operate on a pre-loaded config, but
-  both functions still accept `load_config` closures and `SystemCalls` and
-  construct `RealBoundary` internally. Update the comments to accurately
-  describe the post-increment state once the restructuring is complete.
-- Remove the temporary guarded-apply wiring test from `app/apply.rs` once
-  boundary unit tests and command-module coverage prove it no longer covers
-  anything unique.
-- Preserve current command behavior and coverage while reducing orchestration
-  duplication.
-
 ### Increment 52: Remove the intent injectable wrapper
 
 Why this increment exists:
@@ -93,6 +59,11 @@ Review target:
 - Keep `derive_intent_plan` as the sole public intent entrypoint and update
   tests to construct local trait-backed contexts instead of calling the removed
   wrapper.
+- Refactor `app/info.rs` and `app/apply.rs` unit tests to use fake stage
+  entrypoints by default so command tests verify orchestration behavior without
+  duplicating lower-layer planning coverage.
+- Keep a minimal real-path smoke check (in command-level integration tests)
+  that still executes the full planning/apply pipeline end-to-end.
 - Remove the temporary public-entrypoint wrapper test from `lib.rs` once the
   migrated intent tests prove the same path through the remaining public API.
 - Carry `home_directory` as stage context data instead of threading it through
@@ -114,6 +85,9 @@ Review target:
   [Dependency Boundary Refactor Target](./MIGRATION.md#dependency-boundary-refactor-target).
 - Refactor operation planning to consume the shared boundary traits or a
   stage-owned context instead of bare callbacks.
+- Remove the remaining `SystemCalls` bootstrap shim from `lib.rs` and replace
+  its env/config-path responsibilities with the shared boundary/context path so
+  command/bootstrap wiring uses one dependency model end-to-end.
 - Move the operation-stage wiring out of `lib.rs` so the composition root only
   assembles real adapters and passes them to the operation planner.
 - Keep `home_directory` resolved in composition root and stored in operation
@@ -138,6 +112,9 @@ Review target:
   stage-owned context instead of bare callbacks.
 - Move the apply-stage wiring out of `lib.rs` so the composition root only
   assembles real adapters and passes them to the apply executor.
+- After apply boundary refactoring, keep `app/apply.rs` tests focused on
+  command orchestration via fakes and avoid re-testing lower-layer apply/action
+  behavior already covered in stage tests.
 - Keep `home_directory` resolved in composition root and stored in apply
   context data when needed by path-related helper flows.
 - Preserve current filesystem behavior and conflict handling semantics.

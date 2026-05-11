@@ -1,38 +1,59 @@
 //! Orchestration for the `apply` command.
 //!
 //! Drives the flow from a pre-loaded config through intent planning, operation
-//! planning, and apply execution, then returns rendered output. Boundary wiring
-//! lives in the composition root (`lib.rs`); this module only coordinates
-//! already-wired stages.
+//! planning, and apply execution, then returns rendered output. The
+//! composition root (`lib.rs`) resolves runtime facts and wires stage
+//! entrypoints into `ApplyCommandContext`.
 
-use crate::boundary::{ConfigReader, DirectoryProbe};
 use crate::{
-    LoadedConfig, ProgramError, ProgramOutput, RuntimeConfig, SystemCalls, apply_operation_plan,
-    boundary, cli, derive_intent_plan_with_injectables, derive_operation_plan, fs_adapter,
+    ApplyOperationReport, IntentPlan, LoadedConfig, OperationPlan, ProgramError, ProgramOutput,
+    RuntimeConfig, cli,
 };
+use std::path::{Path, PathBuf};
 
-/// Runs the `apply` command: derives the intent and operation plans from
-/// `loaded_config`, executes the apply step, and returns rendered output.
+type IntentPlanner = dyn Fn(&LoadedConfig, &Path) -> Result<IntentPlan, ProgramError>;
+type OperationPlanner = dyn Fn(&IntentPlan, &Path) -> Result<OperationPlan, ProgramError>;
+type ApplyExecutor = dyn Fn(&OperationPlan) -> Result<ApplyOperationReport, ProgramError>;
+
+/// Command-owned context for `apply` orchestration.
+pub(crate) struct ApplyCommandContext {
+    pub(crate) loaded_config: LoadedConfig,
+    pub(crate) home_directory: PathBuf,
+    pub(crate) derive_intent_plan: Box<IntentPlanner>,
+    pub(crate) derive_operation_plan: Box<OperationPlanner>,
+    pub(crate) apply_operation_plan: Box<ApplyExecutor>,
+}
+
+impl ApplyCommandContext {
+    pub(crate) fn new(
+        loaded_config: LoadedConfig,
+        home_directory: PathBuf,
+        derive_intent_plan: Box<IntentPlanner>,
+        derive_operation_plan: Box<OperationPlanner>,
+        apply_operation_plan: Box<ApplyExecutor>,
+    ) -> Self {
+        Self {
+            loaded_config,
+            home_directory,
+            derive_intent_plan,
+            derive_operation_plan,
+            apply_operation_plan,
+        }
+    }
+}
+
+/// Runs the `apply` command with a pre-wired command context.
 pub(crate) fn run_apply(
-    load_config: impl FnOnce() -> Result<LoadedConfig, ProgramError>,
-    system: SystemCalls<'_>,
+    context: ApplyCommandContext,
     runtime_config: RuntimeConfig,
 ) -> Result<ProgramOutput, ProgramError> {
-    let loaded_config = load_config()?;
-    let home_directory = fs_adapter::resolve_home_directory(system.get_env_var)?;
-    let boundary = boundary::RealBoundary;
-    let intent_plan = derive_intent_plan_with_injectables(
-        &loaded_config,
-        system.get_env_var,
-        &home_directory,
-        &|path| boundary.is_directory(path),
-        &|path| boundary.read_config_file(path),
-    )?;
-    let operation_plan = derive_operation_plan(&intent_plan, &home_directory)?;
-    let apply_report = apply_operation_plan(&operation_plan)?;
+    let intent_plan =
+        (context.derive_intent_plan)(&context.loaded_config, &context.home_directory)?;
+    let operation_plan = (context.derive_operation_plan)(&intent_plan, &context.home_directory)?;
+    let apply_report = (context.apply_operation_plan)(&operation_plan)?;
     let output_message = cli::render_apply_output(
         &apply_report,
-        &home_directory,
+        &context.home_directory,
         runtime_config.use_color_for_stdout,
     );
     Ok(ProgramOutput {
@@ -42,11 +63,13 @@ pub(crate) fn run_apply(
 
 #[cfg(test)]
 mod tests {
-    use super::run_apply;
-    use crate::app::info::run_info;
+    use super::{ApplyCommandContext, run_apply};
+    use crate::boundary::{ConfigReader, DirectoryProbe};
     use crate::{
-        ActionMode, ColorMode, Config, ConfigItem, Defaults, FileConfig, LoadedConfig,
-        ProgramError, RuntimeConfig, SelectConfig, Source, SourceRoot, SystemCalls, load_config,
+        ActionMode, ColorMode, Config, ConfigItem, Defaults, FileConfig, Guard, Include,
+        LoadedConfig, ProgramError, RuntimeConfig, SelectConfig, Source, SourceRoot,
+        apply_operation_plan, derive_intent_plan_with_injectables, derive_operation_plan,
+        fs_adapter,
     };
     use std::collections::BTreeMap;
     use std::fs;
@@ -84,18 +107,43 @@ mod tests {
         })
     }
 
-    fn loaded_config_for_test(config: Config) -> LoadedConfig {
+    fn make_loaded_config(config: Config) -> LoadedConfig {
         LoadedConfig {
             path: PathBuf::from("/tmp/gitenv-test-config.yml"),
             config,
         }
     }
 
-    // TODO(increment 51): Remove this temporary command-wiring coverage test
-    // once command-owned contexts and boundary/module tests prove the guarded
-    // apply path no longer covers anything unique.
+    fn run_apply_with(
+        loaded_config: LoadedConfig,
+        env_values: BTreeMap<String, String>,
+        runtime_config: RuntimeConfig,
+    ) -> Result<crate::ProgramOutput, ProgramError> {
+        let get_env_var = move |name: &str| env_values.get(name).cloned();
+        let home_directory = fs_adapter::resolve_home_directory(&get_env_var)?;
+        let boundary = crate::boundary::RealBoundary;
+        run_apply(
+            ApplyCommandContext::new(
+                loaded_config,
+                home_directory,
+                Box::new(move |loaded_config, home_directory| {
+                    derive_intent_plan_with_injectables(
+                        loaded_config,
+                        &get_env_var,
+                        home_directory,
+                        &|path| boundary.is_directory(path),
+                        &|path| boundary.read_config_file(path),
+                    )
+                }),
+                Box::new(derive_operation_plan),
+                Box::new(apply_operation_plan),
+            ),
+            runtime_config,
+        )
+    }
+
     #[test]
-    fn run_apply_evaluates_directory_guards_with_real_boundary_probe() {
+    fn show_apply_output_when_directory_guard_is_satisfied() {
         let home = TempDir::new().expect("temporary home directory should be created");
         let repository = TempDir::new().expect("temporary repository should be created");
         fs::write(repository.path().join("guarded.conf"), "guarded\n")
@@ -103,33 +151,26 @@ mod tests {
         let destination = home.path().join("target");
         fs::create_dir_all(&destination).expect("guard destination should exist");
 
-        let config = format!(
-            concat!(
-                "version: 1\n",
-                "repository: \"{}\"\n",
-                "sources:\n",
-                "  - from: \".\"\n",
-                "    to: \"{}\"\n",
-                "    when: to_exists\n",
-                "    configs:\n",
-                "      - file: guarded.conf\n"
-            ),
-            repository.path().display(),
-            destination.display()
-        );
-        let config_path = home.path().join("guarded.yml");
-        fs::write(&config_path, config).expect("config file should be written");
+        let loaded_config = make_loaded_config(Config {
+            version: 1,
+            repository: repository.path().display().to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: Some(destination.display().to_string()),
+                guard: Some(Guard::ToExists),
+                configs: vec![make_file_config("guarded.conf", ActionMode::Symlink)],
+            }],
+        });
 
         let env_values = BTreeMap::from([(
             "HOME".to_string(),
             home.path().as_os_str().to_string_lossy().into_owned(),
         )]);
-        let get_env_var = move |name: &str| env_values.get(name).cloned();
-        let output = run_apply(
-            || load_config(&config_path),
-            SystemCalls {
-                get_env_var: &get_env_var,
-            },
+        let output = run_apply_with(
+            loaded_config,
+            env_values,
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
         .expect("guarded source should be applied when destination exists");
@@ -174,13 +215,9 @@ mod tests {
             "HOME".to_string(),
             home.path().as_os_str().to_string_lossy().into_owned(),
         )]);
-        let get_env_var = move |name: &str| env_values.get(name).cloned();
-
-        let error = run_apply(
-            || Ok(loaded_config_for_test(config)),
-            SystemCalls {
-                get_env_var: &get_env_var,
-            },
+        let error = run_apply_with(
+            make_loaded_config(config),
+            env_values,
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
         .expect_err("missing selector source directory should fail apply planning");
@@ -201,32 +238,21 @@ mod tests {
         fs::write(repository.path().join(".gitconfig"), "[user]\n")
             .expect("source file should be written");
 
-        let config = format!(
-            concat!(
-                "version: 1\n",
-                "repository: \"{}\"\n",
-                "sources:\n",
-                "  - from: \".\"\n",
-                "    to: \"{}\"\n",
-                "    configs:\n",
-                "      - file: .gitconfig\n"
-            ),
-            repository.path().display(),
-            home.path().display()
-        );
-        let config_path = home.path().join("config.yml");
-        fs::write(&config_path, config).expect("config file should be written");
+        let loaded_config = make_loaded_config(make_config(
+            repository.path(),
+            vec![make_source(
+                home.path(),
+                vec![make_file_config(".gitconfig", ActionMode::Symlink)],
+            )],
+        ));
 
         let env_values = BTreeMap::from([(
             "HOME".to_string(),
             home.path().as_os_str().to_string_lossy().into_owned(),
         )]);
-        let get_env_var = move |name: &str| env_values.get(name).cloned();
-        let output = run_apply(
-            || load_config(&config_path),
-            SystemCalls {
-                get_env_var: &get_env_var,
-            },
+        let output = run_apply_with(
+            loaded_config,
+            env_values,
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
         .expect("explicit config path should produce apply output");
@@ -250,20 +276,6 @@ mod tests {
         let config_directory = home.path().join("configs");
         let root_config_path = config_directory.join("root.yml");
         let shared_config_path = config_directory.join("includes").join("shared.yml");
-        let root_config = format!(
-            concat!(
-                "version: 1\n",
-                "repository: \"{}\"\n",
-                "includes:\n",
-                "  - includes/shared.yml\n",
-                "sources:\n",
-                "  - from: \".\"\n",
-                "    configs:\n",
-                "      - file: root.conf\n",
-                "        as: .root.conf\n"
-            ),
-            repository.path().display()
-        );
         let shared_config = format!(
             concat!(
                 "version: 1\n",
@@ -282,19 +294,42 @@ mod tests {
                 .expect("shared config should have a parent directory"),
         )
         .expect("shared config directory should be created");
-        fs::write(&root_config_path, root_config).expect("root config should be written");
         fs::write(&shared_config_path, shared_config).expect("shared config should be written");
+
+        let loaded_config = LoadedConfig {
+            path: root_config_path,
+            config: Config {
+                version: 1,
+                repository: repository.path().display().to_string(),
+                defaults: Defaults::default(),
+                includes: vec![Include::Path {
+                    path: "includes/shared.yml".to_string(),
+                    optional: false,
+                }],
+                sources: vec![Source {
+                    from: SourceRoot::Path(".".to_string()),
+                    to: None,
+                    guard: None,
+                    configs: vec![ConfigItem::File(FileConfig {
+                        file: "root.conf".to_string(),
+                        as_name: Some(".root.conf".to_string()),
+                        mode: None,
+                        to: None,
+                        mkdir: None,
+                        overwrite: None,
+                        backup_on_overwrite: None,
+                    })],
+                }],
+            },
+        };
 
         let env_values = BTreeMap::from([(
             "HOME".to_string(),
             home.path().as_os_str().to_string_lossy().into_owned(),
         )]);
-        let get_env_var = move |name: &str| env_values.get(name).cloned();
-        let output = run_apply(
-            || load_config(&root_config_path),
-            SystemCalls {
-                get_env_var: &get_env_var,
-            },
+        let output = run_apply_with(
+            loaded_config,
+            env_values,
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
         .expect("run_apply should resolve relative include paths from the provided config path");
@@ -326,12 +361,9 @@ mod tests {
             "HOME".to_string(),
             home.path().as_os_str().to_string_lossy().into_owned(),
         )]);
-        let get_env_var = move |name: &str| env_values.get(name).cloned();
-        let error = run_apply(
-            || Ok(loaded_config_for_test(config)),
-            SystemCalls {
-                get_env_var: &get_env_var,
-            },
+        let error = run_apply_with(
+            make_loaded_config(config),
+            env_values,
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
         .expect_err("missing copy source should fail apply execution");
@@ -363,12 +395,9 @@ mod tests {
         };
 
         let env_values = BTreeMap::from([("HOME".to_string(), "/tmp/home".to_string())]);
-        let get_env_var = move |name: &str| env_values.get(name).cloned();
-        let error = run_apply(
-            || Ok(loaded_config_for_test(config)),
-            SystemCalls {
-                get_env_var: &get_env_var,
-            },
+        let error = run_apply_with(
+            make_loaded_config(config),
+            env_values,
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
         .expect_err("missing source environment variable should fail apply planning");
@@ -382,41 +411,30 @@ mod tests {
     }
 
     #[test]
-    fn show_apply_output_from_wrapper_with_injected_config_loader() {
+    fn show_apply_output_for_a_loaded_config() {
         let home = TempDir::new().expect("temporary home directory should be created");
         let repository = TempDir::new().expect("temporary repository should be created");
         fs::write(repository.path().join(".profile"), "# profile\n")
             .expect("source file should be written");
 
-        let config = format!(
-            concat!(
-                "version: 1\n",
-                "repository: \"{}\"\n",
-                "sources:\n",
-                "  - from: \".\"\n",
-                "    to: \"{}\"\n",
-                "    configs:\n",
-                "      - file: .profile\n"
-            ),
-            repository.path().display(),
-            home.path().display()
-        );
-        let config_path = home.path().join("gitenv.yml");
-        fs::write(&config_path, config).expect("config file should be written");
+        let loaded_config = make_loaded_config(make_config(
+            repository.path(),
+            vec![make_source(
+                home.path(),
+                vec![make_file_config(".profile", ActionMode::Symlink)],
+            )],
+        ));
 
         let env_values = BTreeMap::from([(
             "HOME".to_string(),
             home.path().as_os_str().to_string_lossy().into_owned(),
         )]);
-        let get_env_var = move |name: &str| env_values.get(name).cloned();
-        let output = run_apply(
-            || load_config(&config_path),
-            SystemCalls {
-                get_env_var: &get_env_var,
-            },
+        let output = run_apply_with(
+            loaded_config,
+            env_values,
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
-        .expect("run_apply_from_env should succeed with injected config path");
+        .expect("run_apply should succeed with an explicit loaded config");
 
         let expected = format!(
             "created symlink ~/.profile -> {}",
@@ -426,33 +444,11 @@ mod tests {
     }
 
     #[test]
-    fn propagate_config_loader_errors_from_apply_wrapper() {
-        let get_env_var = |_: &str| None::<String>;
-        let output = run_apply(
-            || Err(ProgramError::HomeDirectoryUnavailable),
-            SystemCalls {
-                get_env_var: &get_env_var,
-            },
-            RuntimeConfig::new(ColorMode::Auto, false, false),
-        )
-        .expect_err("apply wrapper should propagate path resolution errors");
-
-        assert_eq!(output, ProgramError::HomeDirectoryUnavailable);
-    }
-
-    #[test]
-    fn show_home_missing_errors_for_explicit_config_info_and_apply() {
+    fn cannot_run_apply_when_home_is_missing_for_explicit_config() {
         let home = TempDir::new().expect("temporary home directory should be created");
         let repository = TempDir::new().expect("temporary repository should be created");
         fs::write(repository.path().join(".gitconfig"), "[user]\n")
             .expect("source file should be written");
-        let info_config = make_config(
-            repository.path(),
-            vec![make_source(
-                home.path(),
-                vec![make_file_config(".gitconfig", ActionMode::Symlink)],
-            )],
-        );
         let apply_config = make_config(
             repository.path(),
             vec![make_source(
@@ -461,23 +457,9 @@ mod tests {
             )],
         );
 
-        let get_env_var = |_: &str| None::<String>;
-
-        let info_error = run_info(
-            || Ok(loaded_config_for_test(info_config)),
-            SystemCalls {
-                get_env_var: &get_env_var,
-            },
-            RuntimeConfig::new(ColorMode::Auto, false, false),
-        )
-        .expect_err("missing HOME should fail explicit-config info planning");
-        assert_eq!(info_error, ProgramError::HomeDirectoryUnavailable);
-
-        let apply_error = run_apply(
-            || Ok(loaded_config_for_test(apply_config)),
-            SystemCalls {
-                get_env_var: &get_env_var,
-            },
+        let apply_error = run_apply_with(
+            make_loaded_config(apply_config),
+            BTreeMap::new(),
             RuntimeConfig::new(ColorMode::Auto, false, false),
         )
         .expect_err("missing HOME should fail explicit-config apply planning");

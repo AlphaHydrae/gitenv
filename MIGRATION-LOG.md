@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-11: Introduce command-owned orchestration contexts - Replace `info`
+  and `apply` command closure bundles with command-owned contexts that carry
+  loaded config, resolved home directory, and wired stage entrypoints; move
+  context construction into `lib.rs` composition-root helpers.
 - 2026-05-11: Extract info and apply orchestration modules - Move command
   orchestration for `run_info` and `run_apply` into `app/info.rs` and
   `app/apply.rs`, keep `lib.rs` focused on composition-root wiring/default

@@ -128,21 +128,32 @@ pub fn run_cli() -> Result<ProgramOutput, ProgramError> {
 
     cli::dispatch_with(
         cli,
-        || {
-            app::info::run_info(
-                || load_default_config_with_system(system),
-                system,
-                runtime_config,
-            )
-        },
-        || {
-            app::apply::run_apply(
-                || load_default_config_with_system(system),
-                system,
-                runtime_config,
-            )
-        },
+        || app::info::run_info(info_command_context_with_system(system)?, runtime_config),
+        || app::apply::run_apply(apply_command_context_with_system(system)?, runtime_config),
     )
+}
+
+fn info_command_context_with_system(
+    system: SystemCalls<'_>,
+) -> Result<app::info::InfoCommandContext, ProgramError> {
+    Ok(app::info::InfoCommandContext::new(
+        load_default_config_with_system(system)?,
+        fs_adapter::resolve_home_directory(system.get_env_var)?,
+        Box::new(derive_intent_plan),
+        Box::new(derive_operation_plan),
+    ))
+}
+
+fn apply_command_context_with_system(
+    system: SystemCalls<'_>,
+) -> Result<app::apply::ApplyCommandContext, ProgramError> {
+    Ok(app::apply::ApplyCommandContext::new(
+        load_default_config_with_system(system)?,
+        fs_adapter::resolve_home_directory(system.get_env_var)?,
+        Box::new(derive_intent_plan),
+        Box::new(derive_operation_plan),
+        Box::new(apply_operation_plan),
+    ))
 }
 
 fn load_default_config_with_system(system: SystemCalls<'_>) -> Result<LoadedConfig, ProgramError> {
