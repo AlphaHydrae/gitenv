@@ -11,7 +11,13 @@ Suggested entry shape:
 
 ## Entries
 
-- 2026-05-10: Centralize runtime wiring in lib composition root - Move real runtime adapter wiring for intent, operation, and apply entrypoints into `lib.rs`; keep implementation modules focused on injectable behavior.
+- 2026-05-11: Extract shared dependency boundary traits - Add a shared
+  `boundary` module for environment/config/filesystem dependency traits, move
+  concrete runtime adapters there, and wire intent/operation/apply composition
+  through that boundary from `lib.rs`.
+- 2026-05-10: Centralize runtime wiring in lib composition root - Move real
+  runtime adapter wiring for intent, operation, and apply entrypoints into
+  `lib.rs`; keep implementation modules focused on injectable behavior.
 - 2026-05-09: Expand home-relative paths in guards and includes.
 - 2026-05-09: Assert full directory state in action and integration tests - Add
   a reusable recursive directory snapshot helper for test fixtures, migrate

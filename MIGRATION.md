@@ -92,6 +92,11 @@ composition-root refactoring tracked by increments 49-53 in
 
 - Keep `lib.rs` as the composition root that resolves runtime state and wires
   real adapters.
+- Move command orchestration out of `lib.rs` into focused modules under a
+  directory (for example `app/info.rs` and `app/apply.rs`) so `lib.rs` stays
+  focused on exports and top-level wiring.
+- Keep config path discovery, config loading, and other bootstrap/runtime
+  resolution in the composition root rather than inside command modules.
 - Replace callback-style injectable seams with trait-backed, stage-owned
   contexts.
 - Keep the public library surface centered on primary entrypoints rather than
@@ -119,6 +124,15 @@ it is not part of the boundary trait surface.
 Each stage owns a focused context (for example: intent, operation, apply)
 containing only the dependencies and runtime state needed by that stage.
 
+Command orchestration should follow the same pattern: `info` and `apply`
+modules should each receive a command-owned context that bundles resolved
+runtime data and the already-wired stage entrypoints they need, rather than
+reaching down to lower-level injectable seams directly.
+
+Those command-owned contexts should prefer resolved runtime facts over deferred
+bootstrap work. For example, they should receive `LoadedConfig` and resolved
+`home_directory` data rather than injected config-loader closures.
+
 `home_directory` is resolved once in the composition root and carried as data in
 the stage context (not as a trait method), so helper signatures stay small and
 the context fully represents stage runtime inputs.
@@ -127,6 +141,12 @@ the context fully represents stage runtime inputs.
 
 - Internal stage functions accept context references instead of multiple
   callback arguments.
+- Command orchestration modules accept command-owned contexts that expose the
+  wired planning/execution entrypoints they need; they should not call
+  lower-level test-oriented DI seams directly.
+- The composition root resolves config path overrides/defaults, loads the
+  config file, resolves `HOME`, and constructs the command context before
+  handing control to `info` or `apply` orchestration modules.
 - Transitional injectable wrappers are removed once tests are migrated to
   stage-local trait-based doubles.
 - Public entrypoints stay stable around the primary stage APIs unless an

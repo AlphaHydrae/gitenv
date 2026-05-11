@@ -41,28 +41,57 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 49: Extract shared dependency boundary traits
+### Increment 50: Extract info and apply orchestration modules
 
 Why this increment exists:
 
-- The current intent-stage trait objects are local to `intent.rs`, which makes
-  the dependency boundary look stage-specific even though the same external
-  capabilities will be reused by operation and apply.
-- `lib.rs` still owns ad hoc wiring, so the final dependency boundary is not
-  explicit yet.
+- `lib.rs` still mixes public exports, composition-root wiring, and the
+  `run_info`/`run_apply` command flows, which makes the file harder to review.
+- The dependency-boundary refactor needs a stable home for command-level tests
+  before command contexts replace the remaining ad hoc injections.
 
 Review target:
 
 - Follow the end-state contract in
   [Dependency Boundary Refactor Target](./MIGRATION.md#dependency-boundary-refactor-target).
-- Introduce a small internal boundary module for external dependencies and
-  move the concrete adapters there.
-- Define the final shared trait set for the migration boundary: environment
-  reads, directory existence probes, config reads, directory listing, target
-  existence probes, and symlink creation.
-- Keep path normalization as ordinary utility code, not as a trait.
+- Move `run_info` and `run_apply` plus their associated tests into dedicated
+  modules under a directory (for example `app/info.rs` and `app/apply.rs`).
+- Keep `lib.rs` as the composition root and public export surface.
+- Keep config path discovery and config loading in `lib.rs`; the extracted
+  command modules should operate on already-loaded config/runtime state rather
+  than owning bootstrap logic.
+- Preserve current behavior and keep the existing command seams temporarily if
+  that keeps the move reviewable.
 
-### Increment 50: Remove the intent injectable wrapper
+### Increment 51: Introduce command-owned orchestration contexts
+
+Why this increment exists:
+
+- `SystemCalls` and the command-level `load_config` closures overlap with the
+  new boundary direction and keep command orchestration on ad hoc injections.
+- Once `info` and `apply` live in dedicated modules, they should depend on one
+  focused context each instead of threading multiple closures through helper
+  signatures.
+
+Review target:
+
+- Follow the end-state contract in
+  [Dependency Boundary Refactor Target](./MIGRATION.md#dependency-boundary-refactor-target).
+- Replace command-level closure bundles such as `SystemCalls` and injected
+  config loaders with command-owned contexts that bundle resolved runtime data
+  and wired stage entrypoints.
+- Use resolved facts in those contexts (for example `LoadedConfig` and
+  resolved `home_directory`) instead of deferred bootstrap closures whenever
+  practical.
+- Make the command modules call those wired planning/execution entrypoints
+  instead of lower-level DI seams directly.
+- Remove the temporary guarded-apply wiring test from `lib.rs` once boundary
+  unit tests and command-module coverage prove it no longer covers anything
+  unique.
+- Preserve current command behavior and coverage while reducing orchestration
+  duplication.
+
+### Increment 52: Remove the intent injectable wrapper
 
 Why this increment exists:
 
@@ -80,11 +109,13 @@ Review target:
 - Keep `derive_intent_plan` as the sole public intent entrypoint and update
   tests to construct local trait-backed contexts instead of calling the removed
   wrapper.
+- Remove the temporary public-entrypoint wrapper test from `lib.rs` once the
+  migrated intent tests prove the same path through the remaining public API.
 - Carry `home_directory` as stage context data instead of threading it through
   helper signatures as a separate argument.
 - Preserve intent behavior and coverage while reducing exported surface area.
 
-### Increment 51: Rebalance operation boundary
+### Increment 53: Rebalance operation boundary
 
 Why this increment exists:
 
@@ -106,7 +137,7 @@ Review target:
 - Keep `path_resolution.rs` as a pure helper module and preserve current HOME
   and filesystem behavior.
 
-### Increment 52: Rebalance apply boundary
+### Increment 54: Rebalance apply boundary
 
 Why this increment exists:
 
@@ -127,7 +158,7 @@ Review target:
   context data when needed by path-related helper flows.
 - Preserve current filesystem behavior and conflict handling semantics.
 
-### Increment 53: Readability cleanup and naming pass for DI architecture
+### Increment 55: Readability cleanup and naming pass for DI architecture
 
 Why this increment exists:
 

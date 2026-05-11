@@ -1,4 +1,5 @@
 mod actions;
+mod boundary;
 mod cli;
 mod color;
 mod config;
@@ -37,6 +38,11 @@ pub use status::{
 
 use std::path::{Path, PathBuf};
 
+use crate::boundary::{
+    ConfigReader, DirectoryEntriesReader, DirectoryProbe, EnvironmentReader, SymlinkCreator,
+    TargetProbe,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProgramOutput {
     pub message: String,
@@ -51,21 +57,9 @@ struct SystemCalls<'a> {
     get_env_var: &'a dyn Fn(&str) -> Option<String>,
 }
 
-fn std_env_var(name: &str) -> Option<String> {
-    std::env::var_os(name).map(|v| v.to_string_lossy().into_owned())
-}
-
 fn real_system_calls() -> SystemCalls<'static> {
     SystemCalls {
-        get_env_var: &std_env_var,
-    }
-}
-
-fn real_is_directory(path: &str) -> bool {
-    logging::system(log::Level::Trace, "metadata", format!("path={path}"));
-    match std::fs::metadata(path) {
-        Ok(metadata) => metadata.is_dir(),
-        Err(_) => false,
+        get_env_var: &|name| boundary::RealBoundary.get_env_var(name),
     }
 }
 
@@ -75,12 +69,13 @@ pub fn derive_intent_plan(
     loaded_config: &LoadedConfig,
     home_directory: &Path,
 ) -> Result<IntentPlan, ProgramError> {
+    let boundary = boundary::RealBoundary;
     derive_intent_plan_with_injectables(
         loaded_config,
-        &std_env_var,
+        &|name| boundary.get_env_var(name),
         home_directory,
-        &real_is_directory,
-        &load_config,
+        &|path| boundary.is_directory(path),
+        &|path| boundary.read_config_file(path),
     )
 }
 
@@ -89,21 +84,21 @@ pub fn derive_operation_plan(
     intent_plan: &IntentPlan,
     home_directory: &Path,
 ) -> Result<OperationPlan, ProgramError> {
-    derive_operation_plan_with_injectables(
-        intent_plan,
-        home_directory,
-        &fs_adapter::list_directory_entries,
-    )
+    let boundary = boundary::RealBoundary;
+    derive_operation_plan_with_injectables(intent_plan, home_directory, &|path| {
+        boundary.list_directory_entries(path)
+    })
 }
 
 /// Applies operations using real filesystem probes and symlink creation.
 pub fn apply_operation_plan(
     operation_plan: &OperationPlan,
 ) -> Result<ApplyOperationReport, ProgramError> {
+    let boundary = boundary::RealBoundary;
     apply_operation_plan_with_injectables(
         operation_plan,
-        &actions::target_exists,
-        &actions::create_symlink_on_filesystem,
+        &|path| boundary.target_exists(path),
+        &|source, target| boundary.create_symlink(source, target),
     )
 }
 
@@ -156,12 +151,13 @@ fn run_info(
 ) -> Result<ProgramOutput, ProgramError> {
     let loaded_config = load_config()?;
     let home_directory = fs_adapter::resolve_home_directory(system.get_env_var)?;
+    let boundary = boundary::RealBoundary;
     let intent_plan = derive_intent_plan_with_injectables(
         &loaded_config,
         system.get_env_var,
         &home_directory,
-        &real_is_directory,
-        &crate::load_config,
+        &|path| boundary.is_directory(path),
+        &|path| boundary.read_config_file(path),
     )?;
     let operation_plan = derive_operation_plan(&intent_plan, &home_directory)?;
 
@@ -181,12 +177,13 @@ fn run_apply(
 ) -> Result<ProgramOutput, ProgramError> {
     let loaded_config = load_config()?;
     let home_directory = fs_adapter::resolve_home_directory(system.get_env_var)?;
+    let boundary = boundary::RealBoundary;
     let intent_plan = derive_intent_plan_with_injectables(
         &loaded_config,
         system.get_env_var,
         &home_directory,
-        &real_is_directory,
-        &crate::load_config,
+        &|path| boundary.is_directory(path),
+        &|path| boundary.read_config_file(path),
     )?;
     let operation_plan = derive_operation_plan(&intent_plan, &home_directory)?;
 
@@ -238,10 +235,11 @@ fn default_config_path_from_env(
 #[cfg(test)]
 mod tests {
     use super::{
-        ActionMode, ColorMode, Config, ConfigItem, Defaults, FileConfig, LoadedConfig,
-        ProgramError, RuntimeConfig, Source, SourceRoot, SystemCalls, default_config_path_from_env,
-        default_config_path_with_system, load_config, load_default_config_with_system, run_apply,
-        run_info,
+        ActionMode, ColorMode, Config, ConfigItem, ConflictPolicy, Defaults, FileConfig,
+        IntentAction, IntentFileAction, IntentPlan, IntentSource, LoadedConfig, ProgramError,
+        ResolvedOptions, RuntimeConfig, Source, SourceRoot, SystemCalls,
+        default_config_path_from_env, default_config_path_with_system, derive_intent_plan,
+        load_config, load_default_config_with_system, run_apply, run_info,
     };
     use crate::SelectConfig;
     use std::collections::BTreeMap;
@@ -346,6 +344,149 @@ mod tests {
         .expect("GITENV_CONFIG should short-circuit default path resolution");
 
         assert_eq!(path, PathBuf::from("/tmp/custom-config.yml"));
+    }
+
+    // TODO(increment 52): Remove this temporary wrapper-coverage test once the
+    // intent injectable wrapper is gone and the replacement intent tests prove
+    // the public entrypoint path is already covered.
+    #[test]
+    fn derive_intent_plan_resolves_relative_include_paths_in_the_public_entrypoint() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::write(repository.path().join("root.conf"), "root\n")
+            .expect("root source file should be written");
+        fs::write(repository.path().join("shared.conf"), "shared\n")
+            .expect("shared source file should be written");
+
+        let config_directory = home.path().join("configs");
+        let root_config_path = config_directory.join("root.yml");
+        let shared_config_path = config_directory.join("includes").join("shared.yml");
+        let root_config = format!(
+            concat!(
+                "version: 1\n",
+                "repository: \"{}\"\n",
+                "includes:\n",
+                "  - includes/shared.yml\n",
+                "sources:\n",
+                "  - from: \".\"\n",
+                "    configs:\n",
+                "      - file: root.conf\n",
+                "        as: .root.conf\n"
+            ),
+            repository.path().display()
+        );
+        let shared_config = format!(
+            concat!(
+                "version: 1\n",
+                "repository: \"{}\"\n",
+                "sources:\n",
+                "  - from: \".\"\n",
+                "    configs:\n",
+                "      - file: shared.conf\n",
+                "        as: .shared.conf\n"
+            ),
+            repository.path().display()
+        );
+        fs::create_dir_all(
+            shared_config_path
+                .parent()
+                .expect("shared config should have a parent directory"),
+        )
+        .expect("shared config directory should be created");
+        fs::write(&root_config_path, root_config).expect("root config should be written");
+        fs::write(&shared_config_path, shared_config).expect("shared config should be written");
+
+        let loaded_config = load_config(&root_config_path)
+            .expect("root config should load before deriving intent plan");
+        let intent_plan = derive_intent_plan(&loaded_config, home.path())
+            .expect("public derive_intent_plan should resolve includes");
+
+        assert_eq!(
+            intent_plan,
+            IntentPlan {
+                repository: repository.path().display().to_string(),
+                sources: vec![
+                    IntentSource {
+                        from: ".".to_string(),
+                        actions: vec![IntentAction::File(IntentFileAction {
+                            file: "root.conf".to_string(),
+                            as_name: ".root.conf".to_string(),
+                            options: ResolvedOptions {
+                                mode: ActionMode::Symlink,
+                                to: "~".to_string(),
+                                mkdir: true,
+                                conflict_policy: ConflictPolicy::Skip,
+                            },
+                        })],
+                    },
+                    IntentSource {
+                        from: ".".to_string(),
+                        actions: vec![IntentAction::File(IntentFileAction {
+                            file: "shared.conf".to_string(),
+                            as_name: ".shared.conf".to_string(),
+                            options: ResolvedOptions {
+                                mode: ActionMode::Symlink,
+                                to: "~".to_string(),
+                                mkdir: true,
+                                conflict_policy: ConflictPolicy::Skip,
+                            },
+                        })],
+                    },
+                ],
+            }
+        );
+    }
+
+    // TODO(increment 51): Remove this temporary command-wiring coverage test
+    // once command-owned contexts and boundary/module tests prove the guarded
+    // apply path no longer covers anything unique.
+    #[test]
+    fn run_apply_evaluates_directory_guards_with_real_boundary_probe() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::write(repository.path().join("guarded.conf"), "guarded\n")
+            .expect("source file should be written");
+        let destination = home.path().join("target");
+        fs::create_dir_all(&destination).expect("guard destination should exist");
+
+        let config = format!(
+            concat!(
+                "version: 1\n",
+                "repository: \"{}\"\n",
+                "sources:\n",
+                "  - from: \".\"\n",
+                "    to: \"{}\"\n",
+                "    when: to_exists\n",
+                "    configs:\n",
+                "      - file: guarded.conf\n"
+            ),
+            repository.path().display(),
+            destination.display()
+        );
+        let config_path = home.path().join("guarded.yml");
+        fs::write(&config_path, config).expect("config file should be written");
+
+        let env_values = BTreeMap::from([(
+            "HOME".to_string(),
+            home.path().as_os_str().to_string_lossy().into_owned(),
+        )]);
+        let get_env_var = move |name: &str| env_values.get(name).cloned();
+        let output = run_apply(
+            || load_config(&config_path),
+            SystemCalls {
+                get_env_var: &get_env_var,
+            },
+            RuntimeConfig::new(ColorMode::Auto, false, false),
+        )
+        .expect("guarded source should be applied when destination exists");
+
+        assert_eq!(
+            output.message,
+            format!(
+                "created symlink ~/target/guarded.conf -> {}",
+                repository.path().join(".").join("guarded.conf").display()
+            )
+        );
     }
 
     #[test]

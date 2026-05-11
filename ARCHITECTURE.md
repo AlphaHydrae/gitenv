@@ -174,6 +174,10 @@ effects.
 
 ## Proposed Module Boundaries (Rust)
 
+- `app/`: command orchestration modules (for example `info` and `apply`) that
+  receive wired stage entrypoints and resolved runtime state from the
+  composition root, then return structured outputs without owning terminal
+  parsing or config/bootstrap discovery.
 - `config`: parse + schema validate + normalize input.
 - `intent`: build intent plans from normalized configuration semantics.
 - `operation`: derive flat concrete operations from intent plans by resolving
