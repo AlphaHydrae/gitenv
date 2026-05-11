@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-11: Extract info and apply orchestration modules - Move command
+  orchestration for `run_info` and `run_apply` into `app/info.rs` and
+  `app/apply.rs`, keep `lib.rs` focused on composition-root wiring/default
+  config resolution.
 - 2026-05-11: Extract shared dependency boundary traits - Add a shared
   `boundary` module for environment/config/filesystem dependency traits, move
   concrete runtime adapters there, and wire intent/operation/apply composition

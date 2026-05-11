@@ -41,28 +41,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 50: Extract info and apply orchestration modules
-
-Why this increment exists:
-
-- `lib.rs` still mixes public exports, composition-root wiring, and the
-  `run_info`/`run_apply` command flows, which makes the file harder to review.
-- The dependency-boundary refactor needs a stable home for command-level tests
-  before command contexts replace the remaining ad hoc injections.
-
-Review target:
-
-- Follow the end-state contract in
-  [Dependency Boundary Refactor Target](./MIGRATION.md#dependency-boundary-refactor-target).
-- Move `run_info` and `run_apply` plus their associated tests into dedicated
-  modules under a directory (for example `app/info.rs` and `app/apply.rs`).
-- Keep `lib.rs` as the composition root and public export surface.
-- Keep config path discovery and config loading in `lib.rs`; the extracted
-  command modules should operate on already-loaded config/runtime state rather
-  than owning bootstrap logic.
-- Preserve current behavior and keep the existing command seams temporarily if
-  that keeps the move reviewable.
-
 ### Increment 51: Introduce command-owned orchestration contexts
 
 Why this increment exists:
@@ -85,9 +63,15 @@ Review target:
   practical.
 - Make the command modules call those wired planning/execution entrypoints
   instead of lower-level DI seams directly.
-- Remove the temporary guarded-apply wiring test from `lib.rs` once boundary
-  unit tests and command-module coverage prove it no longer covers anything
-  unique.
+- Correct the misleading module-level doc comments in `app/info.rs` and
+  `app/apply.rs`: they currently claim that boundary wiring lives in the
+  composition root and that the functions operate on a pre-loaded config, but
+  both functions still accept `load_config` closures and `SystemCalls` and
+  construct `RealBoundary` internally. Update the comments to accurately
+  describe the post-increment state once the restructuring is complete.
+- Remove the temporary guarded-apply wiring test from `app/apply.rs` once
+  boundary unit tests and command-module coverage prove it no longer covers
+  anything unique.
 - Preserve current command behavior and coverage while reducing orchestration
   duplication.
 
