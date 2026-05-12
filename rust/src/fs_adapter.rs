@@ -63,7 +63,7 @@ mod tests {
     }
 
     #[test]
-    fn return_home_directory_unavailable_when_home_environment_variable_is_missing() {
+    fn cannot_resolve_home_directory_when_the_home_environment_variable_is_missing() {
         let get_env_var = |_: &str| None::<String>;
 
         let error = resolve_home_directory(&get_env_var)

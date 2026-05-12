@@ -182,7 +182,7 @@ mod tests {
     }
 
     #[test]
-    fn propagate_source_directory_read_error_from_info_planning() {
+    fn cannot_run_info_when_a_source_directory_cannot_be_read() {
         let home_path = PathBuf::from("/tmp/home");
 
         let error = run_info_with(
@@ -360,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn propagate_copy_source_read_failures_from_default_inspection() {
+    fn cannot_run_info_when_copy_source_cannot_be_read() {
         let home_path = PathBuf::from("/tmp/home");
 
         let intent_plan = IntentPlan {

@@ -517,7 +517,7 @@ mod tests {
     }
 
     #[test]
-    fn propagate_target_probe_errors_from_apply_execution() {
+    fn cannot_apply_operation_plan_when_target_probe_fails() {
         let operation_plan = symlink_plan(
             PathBuf::from("/repo/source"),
             PathBuf::from("/home/target"),

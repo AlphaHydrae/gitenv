@@ -57,7 +57,7 @@ fn replace_home_prefix_with_tilde(output: String, home: &Path) -> String {
 
 #[cfg(unix)]
 #[test]
-fn test_info_command() {
+fn invoke_the_info_command() {
     let home = TempDir::new().expect("temporary home directory should be created");
     let repository = TempDir::new().expect("temporary repository should be created");
 
@@ -393,7 +393,7 @@ fn test_info_command() {
 
 #[cfg(unix)]
 #[test]
-fn test_apply_command() {
+fn invoke_the_apply_command() {
     let home = TempDir::new().expect("temporary home directory should be created");
     let repository = TempDir::new().expect("temporary repository should be created");
     let env_source = TempDir::new().expect("temporary env source directory should be created");

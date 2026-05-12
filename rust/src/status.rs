@@ -418,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn propagate_metadata_errors_while_inspecting_symlink_status() {
+    fn cannot_inspect_symlink_status_when_metadata_inspection_fails() {
         let temp = TempDir::new().expect("temporary directory should be created");
         let source = temp.path().join("source.txt");
         let target = temp.path().join("target.txt");
@@ -446,7 +446,7 @@ mod tests {
     }
 
     #[test]
-    fn propagate_readlink_errors_while_inspecting_symlink_status() {
+    fn cannot_inspect_symlink_status_when_readlink_fails() {
         let temp = TempDir::new().expect("temporary directory should be created");
         let source = temp.path().join("source.txt");
         let target = temp.path().join("target.txt");
@@ -597,7 +597,7 @@ mod tests {
     }
 
     #[test]
-    fn propagate_copy_read_errors_while_inspecting_copy_status() {
+    fn cannot_inspect_copy_status_when_read_fails() {
         let temp = TempDir::new().expect("temporary directory should be created");
         let source = temp.path().join("source.txt");
         let target = temp.path().join("target.txt");

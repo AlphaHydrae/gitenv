@@ -515,7 +515,7 @@ mod tests {
     }
 
     #[test]
-    fn propagate_directory_listing_errors_while_expanding_selectors() {
+    fn cannot_derive_operation_plan_when_directory_listing_fails() {
         let home = TempDir::new().expect("temporary home directory should be created");
         let repository = PathBuf::from("/repo-root");
 
@@ -692,7 +692,7 @@ mod tests {
     }
 
     #[test]
-    fn return_read_source_directory_error_for_missing_source_directory() {
+    fn cannot_derive_operation_plan_when_a_source_directory_is_missing() {
         let home = TempDir::new().expect("temporary home directory should be created");
         let repository = TempDir::new().expect("temporary repository should be created");
         let missing_source = repository.path().join("missing");

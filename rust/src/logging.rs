@@ -193,7 +193,7 @@ mod tests {
     }
 
     #[test]
-    fn return_zero_for_timestamps_before_the_epoch() {
+    fn emit_zero_for_timestamps_before_the_epoch() {
         let before_epoch = UNIX_EPOCH
             .checked_sub(Duration::from_secs(1))
             .expect("a one-second subtraction from UNIX_EPOCH should be representable");

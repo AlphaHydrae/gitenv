@@ -2298,7 +2298,7 @@ mod tests {
     }
 
     #[test]
-    fn propagate_parse_errors_from_included_configs() {
+    fn cannot_derive_intent_plan_when_parsing_included_configs_fails() {
         // An include whose file returns a non-ConfigurationReadFailed error
         // (e.g. a structural parse failure) must be propagated as-is rather
         // than collected into an IncludeNotFound set.
@@ -2336,7 +2336,7 @@ mod tests {
     }
 
     #[test]
-    fn propagate_parse_errors_from_optional_includes() {
+    fn cannot_derive_intent_plan_when_parsing_optional_includes_fails() {
         let root = Config {
             includes: vec![Include::Path {
                 path: "/inc/optional-bad.yml".to_string(),

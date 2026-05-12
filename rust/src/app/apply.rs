@@ -198,7 +198,7 @@ mod tests {
     }
 
     #[test]
-    fn propagate_source_directory_read_error_from_apply_planning() {
+    fn cannot_apply_operations_when_source_directory_cannot_be_read_during_apply_planning() {
         let home_path = PathBuf::from("/tmp/home");
 
         let error = run_apply_with(
