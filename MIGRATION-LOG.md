@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-12: Rebalance apply boundary — Convert apply execution from
+  callback-style seams to an apply-stage context, wire real target/symlink
+  adapters from the composition root, and keep command orchestration tests
+  focused on staged fakes rather than lower-layer behavior.
 - 2026-05-12: Rebalance operation boundary — Convert operation planning from
   callback-style seams to a context-backed approach, remove the SystemCalls
   bootstrap shim, and wire the operation stage through the shared boundary

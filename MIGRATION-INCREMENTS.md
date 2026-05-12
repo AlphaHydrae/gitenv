@@ -68,30 +68,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 54: Rebalance apply boundary
-
-Why this increment exists:
-
-- `actions.rs` still uses callback-style seams that do not match the final
-  dependency boundary.
-- The apply path should be isolated from the operation refactor so each stage
-  remains reviewable on its own.
-
-Review target:
-
-- Follow the end-state contract in
-  [Dependency Boundary Refactor Target](./MIGRATION.md#dependency-boundary-refactor-target).
-- Refactor apply execution to consume the shared boundary traits or a
-  stage-owned context instead of bare callbacks.
-- Move the apply-stage wiring out of `lib.rs` so the composition root only
-  assembles real adapters and passes them to the apply executor.
-- After apply boundary refactoring, keep `app/apply.rs` tests focused on
-  command orchestration via fakes and avoid re-testing lower-layer apply/action
-  behavior already covered in stage tests.
-- Keep `home_directory` resolved in composition root and stored in apply
-  context data when needed by path-related helper flows.
-- Preserve current filesystem behavior and conflict handling semantics.
-
 ### Increment 55: Readability cleanup and naming pass for DI architecture
 
 Why this increment exists:

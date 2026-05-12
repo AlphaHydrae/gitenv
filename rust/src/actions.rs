@@ -1,5 +1,7 @@
 use crate::{
-    CopyInspectionState, FileOperation, OperationAction, OperationPlan, ProgramError, logging,
+    CopyInspectionState, FileOperation, OperationAction, OperationPlan, ProgramError,
+    boundary::{SymlinkCreator, TargetProbe},
+    logging,
     status::inspect_copy_operation_status,
 };
 use log::Level;
@@ -21,12 +23,18 @@ pub enum ApplyOperationOutcome {
     UnsupportedOperation(OperationAction),
 }
 
-/// Like `apply_operation_plan` but accepts injectable filesystem probes for
-/// deterministic tests.
-pub fn apply_operation_plan_with_injectables(
+/// Stage-owned context for apply execution, carrying trait-backed dependency
+/// references for filesystem probes and symlink creation.
+pub(crate) struct ApplyContext<'a> {
+    pub(crate) target_probe: &'a dyn TargetProbe,
+    pub(crate) symlink_creator: &'a dyn SymlinkCreator,
+}
+
+/// Internal apply entrypoint accepting a stage-owned context for deterministic
+/// tests and composition-root injection.
+pub(crate) fn apply_operation_plan(
     operation_plan: &OperationPlan,
-    target_exists: &impl Fn(&Path) -> Result<bool, ProgramError>,
-    create_symlink: &impl Fn(&Path, &Path) -> Result<(), ProgramError>,
+    context: &ApplyContext,
 ) -> Result<ApplyOperationReport, ProgramError> {
     logging::actions(
         Level::Info,
@@ -38,10 +46,10 @@ pub fn apply_operation_plan_with_injectables(
 
     for action in &operation_plan.actions {
         let outcome = match action {
-            OperationAction::Symlink(operation) => {
-                apply_symlink_operation(operation, target_exists, create_symlink)?
+            OperationAction::Symlink(operation) => apply_symlink_operation(operation, context)?,
+            OperationAction::Copy(operation) => {
+                apply_copy_operation(operation, context.target_probe)?
             }
-            OperationAction::Copy(operation) => apply_copy_operation(operation, target_exists)?,
         };
 
         logging::actions(
@@ -92,15 +100,16 @@ pub(crate) fn target_exists(path: &Path) -> Result<bool, ProgramError> {
 
 fn apply_symlink_operation(
     operation: &FileOperation,
-    target_exists: &impl Fn(&Path) -> Result<bool, ProgramError>,
-    create_symlink: &impl Fn(&Path, &Path) -> Result<(), ProgramError>,
+    context: &ApplyContext,
 ) -> Result<ApplyOperationOutcome, ProgramError> {
     if operation.mkdir {
         ensure_parent_directory_exists(&operation.target)?;
     }
 
-    if !target_exists(&operation.target)? {
-        create_symlink(&operation.source, &operation.target)?;
+    if !context.target_probe.target_exists(&operation.target)? {
+        context
+            .symlink_creator
+            .create_symlink(&operation.source, &operation.target)?;
         return Ok(ApplyOperationOutcome::Applied(OperationAction::Symlink(
             operation.clone(),
         )));
@@ -112,19 +121,23 @@ fn apply_symlink_operation(
         )),
         crate::ConflictPolicy::Overwrite => {
             remove_target_path(&operation.target)?;
-            create_symlink(&operation.source, &operation.target)?;
+            context
+                .symlink_creator
+                .create_symlink(&operation.source, &operation.target)?;
             Ok(ApplyOperationOutcome::Applied(OperationAction::Symlink(
                 operation.clone(),
             )))
         }
         crate::ConflictPolicy::OverwriteWithBackup => {
             let backup_path = backup_path_for_target(&operation.target);
-            if target_exists(&backup_path)? {
+            if context.target_probe.target_exists(&backup_path)? {
                 return Err(ProgramError::BackupAlreadyExists { path: backup_path });
             }
 
             move_target_to_backup(&operation.target, &backup_path)?;
-            create_symlink(&operation.source, &operation.target)?;
+            context
+                .symlink_creator
+                .create_symlink(&operation.source, &operation.target)?;
             Ok(ApplyOperationOutcome::Applied(OperationAction::Symlink(
                 operation.clone(),
             )))
@@ -134,13 +147,13 @@ fn apply_symlink_operation(
 
 fn apply_copy_operation(
     operation: &FileOperation,
-    target_exists: &impl Fn(&Path) -> Result<bool, ProgramError>,
+    target_probe: &dyn TargetProbe,
 ) -> Result<ApplyOperationOutcome, ProgramError> {
     if operation.mkdir {
         ensure_parent_directory_exists(&operation.target)?;
     }
 
-    if !target_exists(&operation.target)? {
+    if !target_probe.target_exists(&operation.target)? {
         copy_source_to_target(&operation.source, &operation.target)?;
         return Ok(ApplyOperationOutcome::Applied(OperationAction::Copy(
             operation.clone(),
@@ -166,7 +179,7 @@ fn apply_copy_operation(
         }
         crate::ConflictPolicy::OverwriteWithBackup => {
             let backup_path = backup_path_for_target(&operation.target);
-            if target_exists(&backup_path)? {
+            if target_probe.target_exists(&backup_path)? {
                 return Err(ProgramError::BackupAlreadyExists { path: backup_path });
             }
 
@@ -309,18 +322,43 @@ pub(crate) fn create_symlink_on_filesystem(
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_copy_operation, apply_operation_plan_with_injectables, backup_path_for_target,
+        ApplyContext, apply_copy_operation, apply_operation_plan, backup_path_for_target,
         ensure_parent_directory_exists, move_target_to_backup, remove_target_path, target_exists,
     };
     use crate::{
         ApplyOperationOutcome, ConflictPolicy, FileOperation, OperationAction, OperationPlan,
         ProgramError,
+        boundary::{SymlinkCreator, TargetProbe},
     };
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use tempfile::TempDir;
+
+    struct FnTargetProbe<F: Fn(&Path) -> Result<bool, ProgramError>>(F);
+
+    impl<F: Fn(&Path) -> Result<bool, ProgramError>> TargetProbe for FnTargetProbe<F> {
+        fn target_exists(&self, path: &Path) -> Result<bool, ProgramError> {
+            self.0(path)
+        }
+    }
+
+    struct FnSymlinkCreator<F: Fn(&Path, &Path) -> Result<(), ProgramError>>(F);
+
+    impl<F: Fn(&Path, &Path) -> Result<(), ProgramError>> SymlinkCreator for FnSymlinkCreator<F> {
+        fn create_symlink(&self, source: &Path, target: &Path) -> Result<(), ProgramError> {
+            self.0(source, target)
+        }
+    }
+
+    struct NativeTargetProbe;
+
+    impl TargetProbe for NativeTargetProbe {
+        fn target_exists(&self, path: &Path) -> Result<bool, ProgramError> {
+            target_exists(path)
+        }
+    }
 
     fn symlink_plan(
         source: PathBuf,
@@ -488,18 +526,20 @@ mod tests {
             true,
             ConflictPolicy::Skip,
         );
+        let target_probe = FnTargetProbe(|path| {
+            Err(ProgramError::PathInspectionFailed {
+                path: path.to_path_buf(),
+                message: "permission denied".to_string(),
+            })
+        });
+        let symlink_creator = FnSymlinkCreator(super::create_symlink_on_filesystem);
+        let context = ApplyContext {
+            target_probe: &target_probe,
+            symlink_creator: &symlink_creator,
+        };
 
-        let error = apply_operation_plan_with_injectables(
-            &operation_plan,
-            &|path| {
-                Err(ProgramError::PathInspectionFailed {
-                    path: path.to_path_buf(),
-                    message: "permission denied".to_string(),
-                })
-            },
-            &super::create_symlink_on_filesystem,
-        )
-        .expect_err("apply should propagate target probe failures");
+        let error = apply_operation_plan(&operation_plan, &context)
+            .expect_err("apply should propagate target probe failures");
 
         assert_eq!(
             error,
@@ -511,10 +551,49 @@ mod tests {
     }
 
     #[test]
+    fn apply_a_missing_symlink_through_the_stage_context() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source = temp.path().join("source.txt");
+        let target = temp.path().join("target.txt");
+        let operation_plan =
+            symlink_plan(source.clone(), target.clone(), false, ConflictPolicy::Skip);
+        let target_probe = FnTargetProbe(|_| Ok(false));
+        let symlink_creator = FnSymlinkCreator(super::create_symlink_on_filesystem);
+        let context = ApplyContext {
+            target_probe: &target_probe,
+            symlink_creator: &symlink_creator,
+        };
+
+        fs::write(&source, "source\n").expect("source file should be written");
+
+        let report = apply_operation_plan(&operation_plan, &context)
+            .expect("apply context should create a missing symlink target");
+
+        assert_eq!(
+            report,
+            crate::ApplyOperationReport {
+                outcomes: vec![ApplyOperationOutcome::Applied(OperationAction::Symlink(
+                    FileOperation {
+                        source: source.clone(),
+                        target: target.clone(),
+                        mkdir: false,
+                        conflict_policy: ConflictPolicy::Skip,
+                    },
+                ))],
+            }
+        );
+        assert_eq!(
+            std::fs::read_link(&target).expect("created symlink target should be readable"),
+            source
+        );
+    }
+
+    #[test]
     fn skip_copy_overwrite_when_target_contents_already_match() {
         let temp = TempDir::new().expect("temporary directory should be created");
         let source = temp.path().join("source.txt");
         let target = temp.path().join("target.txt");
+        let target_probe = NativeTargetProbe;
         fs::write(&source, "same\n").expect("source file should be written");
         fs::write(&target, "same\n").expect("target file should be written");
 
@@ -525,7 +604,7 @@ mod tests {
                 mkdir: true,
                 conflict_policy: ConflictPolicy::Overwrite,
             },
-            &target_exists,
+            &target_probe,
         )
         .expect("matching copy targets should be skipped");
 
@@ -545,6 +624,7 @@ mod tests {
         let temp = TempDir::new().expect("temporary directory should be created");
         let source = temp.path().join("source.txt");
         let target = temp.path().join("target.txt");
+        let target_probe = NativeTargetProbe;
         fs::write(&source, "source\n").expect("source file should be written");
         fs::write(&target, "target\n").expect("target file should be written");
 
@@ -555,7 +635,7 @@ mod tests {
                 mkdir: true,
                 conflict_policy: ConflictPolicy::Overwrite,
             },
-            &target_exists,
+            &target_probe,
         )
         .expect("differing copy targets should be overwritten");
 
@@ -584,10 +664,15 @@ mod tests {
                 conflict_policy: ConflictPolicy::Skip,
             })],
         };
+        let target_probe = FnTargetProbe(|_| Ok(false));
+        let symlink_creator = FnSymlinkCreator(|_, _| Ok(()));
+        let context = ApplyContext {
+            target_probe: &target_probe,
+            symlink_creator: &symlink_creator,
+        };
 
-        let error =
-            apply_operation_plan_with_injectables(&operation_plan, &|_| Ok(false), &|_, _| Ok(()))
-                .expect_err("copy actions should fail when copy creation cannot run");
+        let error = apply_operation_plan(&operation_plan, &context)
+            .expect_err("copy actions should fail when copy creation cannot run");
 
         assert!(matches!(
             &error,

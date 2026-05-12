@@ -20,9 +20,7 @@ pub use color::{ColorMode, RuntimeConfig};
 pub use errors::ProgramError;
 pub use logging::init as init_logging;
 
-pub use actions::{
-    ApplyOperationOutcome, ApplyOperationReport, apply_operation_plan_with_injectables,
-};
+pub use actions::{ApplyOperationOutcome, ApplyOperationReport};
 pub use config::{
     ActionMode, Config, ConfigItem, Defaults, FileConfig, Guard, Include, LoadedConfig,
     SelectConfig, Source, SourceRoot, load_config, parse_config,
@@ -40,7 +38,7 @@ pub use status::{
 
 use std::path::{Path, PathBuf};
 
-use crate::boundary::{EnvironmentReader, SymlinkCreator, TargetProbe};
+use crate::boundary::EnvironmentReader;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProgramOutput {
@@ -137,11 +135,11 @@ pub fn apply_operation_plan(
     operation_plan: &OperationPlan,
 ) -> Result<ApplyOperationReport, ProgramError> {
     let boundary = boundary::RealBoundary;
-    apply_operation_plan_with_injectables(
-        operation_plan,
-        &|path| boundary.target_exists(path),
-        &|source, target| boundary.create_symlink(source, target),
-    )
+    let context = actions::ApplyContext {
+        target_probe: &boundary,
+        symlink_creator: &boundary,
+    };
+    actions::apply_operation_plan(operation_plan, &context)
 }
 
 /// Resolves the default configuration path from environment and home directory.
