@@ -68,27 +68,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 56: Add `--config PATH` CLI flag
-
-Why this increment exists:
-
-- The Ruby binary accepts `-c`/`--config PATH` to override the config file path
-  directly on the command line. The Rust port only supports the `GITENV_CONFIG`
-  environment variable for this purpose, which is a usability regression for
-  one-off invocations and shell scripts.
-
-Review target:
-
-- A `--config` (`-c`) flag is added to the `Cli` struct in `cli.rs`.
-- When provided, it takes precedence over `GITENV_CONFIG` and the default
-  XDG/HOME paths (precedence order: `--config` > `GITENV_CONFIG` > XDG >
-  default).
-- `default_config_path` (or its caller in `lib.rs`) is updated to receive and
-  apply the override.
-- A unit test covers the new precedence branch.
-- An integration test verifies that `gitenv --config <path> info` resolves the
-  named file.
-
 ### Increment 57: Auto-exclude `.DS_Store` on macOS during selector expansion
 
 Why this increment exists:

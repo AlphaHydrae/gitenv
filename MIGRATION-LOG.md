@@ -11,6 +11,11 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-12: Add explicit config path precedence in CLI parsing - Add
+  `--config`/`-c` parsing in `cli.rs` with clap-backed `GITENV_CONFIG` fallback,
+  resolve and load the configuration once in `run_cli`, pass loaded config into
+  `run_info`/`run_apply`, and keep default path resolution limited to XDG/HOME
+  behavior.
 - 2026-05-12: Composition-root wiring docs parity pass — Update ARCHITECTURE.md
   to document the composition root in `lib.rs`, the eight production entry
   points, the stage-owned context approach, and module boundaries with concise

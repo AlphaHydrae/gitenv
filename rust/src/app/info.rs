@@ -410,6 +410,43 @@ mod tests {
     }
 
     #[test]
+    fn cannot_run_info_when_status_inspection_fails() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let home_path = home.path().to_path_buf();
+        let target_file = home.path().join("target-file");
+        std::fs::write(&target_file, "present\n").expect("target file should be written");
+        let missing_source = home.path().join("missing-source");
+
+        let intent_plan = IntentPlan {
+            repository: "/repo".to_string(),
+            sources: vec![],
+        };
+
+        let operation_plan = OperationPlan {
+            actions: vec![OperationAction::Copy(FileOperation {
+                source: missing_source.clone(),
+                target: target_file,
+                mkdir: false,
+                conflict_policy: ConflictPolicy::Skip,
+            })],
+        };
+
+        let error = run_info_with(
+            home_path,
+            make_loaded_config(make_config(home.path(), vec![])),
+            RuntimeConfig::new(ColorMode::No, true, true),
+            Ok(intent_plan),
+            Ok(operation_plan),
+        )
+        .expect_err("status inspection errors should propagate from rendering");
+
+        assert!(matches!(
+            error,
+            ProgramError::PathInspectionFailed { path, .. } if path == missing_source
+        ));
+    }
+
+    #[test]
     fn cannot_run_info_when_source_environment_is_missing() {
         let home_path = PathBuf::from("/tmp/home");
 

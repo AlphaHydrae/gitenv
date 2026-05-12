@@ -1,10 +1,10 @@
 use clap::{Parser, Subcommand, ValueEnum};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::{
     ApplyOperationOutcome, ApplyOperationReport, ColorMode, CopyInspection, CopyInspectionState,
-    OperationAction, OperationInspectionOutcome, OperationPlan, ProgramError, ProgramOutput,
-    SymlinkInspection, SymlinkInspectionState, inspect_operation_plan_status,
+    OperationAction, OperationInspectionOutcome, OperationPlan, ProgramError, SymlinkInspection,
+    SymlinkInspectionState, inspect_operation_plan_status,
 };
 
 const ANSI_RESET: &str = "\x1b[0m";
@@ -68,6 +68,16 @@ impl From<LogLevel> for log::LevelFilter {
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
+    /// Path to a configuration file.
+    ///
+    /// CLI flag takes precedence over the `GITENV_CONFIG` environment variable.
+    #[arg(
+        short = 'c',
+        long = "config",
+        env = "GITENV_CONFIG",
+        value_name = "PATH"
+    )]
+    pub config_path: Option<PathBuf>,
     /// Set the diagnostic log level. Log messages are written to stderr.
     #[arg(long, default_value = "warn", value_enum)]
     pub log_level: LogLevel,
@@ -84,20 +94,6 @@ pub enum Command {
     Info,
     /// Apply all configured operations to the system.
     Apply,
-}
-
-/// Like `dispatch` but accepts injectable handlers for deterministic unit tests.
-///
-/// Each handler is called at most once, depending on which command is selected.
-pub fn dispatch_with(
-    cli: Cli,
-    run_info: impl FnOnce() -> Result<ProgramOutput, ProgramError>,
-    run_apply: impl FnOnce() -> Result<ProgramOutput, ProgramError>,
-) -> Result<ProgramOutput, ProgramError> {
-    match cli.command {
-        Some(Command::Info) | None => run_info(),
-        Some(Command::Apply) => run_apply(),
-    }
 }
 
 pub(crate) fn render_default_inspection_output(
@@ -268,92 +264,20 @@ fn colorize(text: &str, color: &str, use_color: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        Cli, dispatch_with, display_path_with_home, render_apply_output,
-        render_default_inspection_output,
+        Cli, display_path_with_home, render_apply_output, render_default_inspection_output,
     };
     use crate::{
         ApplyOperationOutcome, ApplyOperationReport, ColorMode, ConflictPolicy, FileOperation,
-        OperationAction, OperationPlan, ProgramError, ProgramOutput,
+        OperationAction, OperationPlan,
     };
-    use clap::Parser;
-    use std::cell::Cell;
+    use clap::{CommandFactory, Parser};
+    use std::ffi::OsStr;
     use std::fs;
     use std::os::unix::fs::symlink;
     use std::path::{Path, PathBuf};
     use tempfile::TempDir;
 
     const NON_MATCHING_HOME: &str = "/nonexistent/home";
-
-    fn tracked_ok_output<'a>(
-        message: &'a str,
-        calls: &'a Cell<usize>,
-    ) -> impl FnOnce() -> Result<ProgramOutput, ProgramError> + 'a {
-        let message = message.to_string();
-        move || {
-            calls.set(calls.get() + 1);
-            Ok(ProgramOutput { message })
-        }
-    }
-
-    #[test]
-    fn invoke_the_info_command() {
-        let cli = Cli::parse_from(["gitenv", "info"]);
-        let info_calls = Cell::new(0);
-        let apply_calls = Cell::new(0);
-        let result = dispatch_with(
-            cli,
-            tracked_ok_output("info result", &info_calls),
-            tracked_ok_output("apply result", &apply_calls),
-        );
-        assert_eq!(
-            result,
-            Ok(ProgramOutput {
-                message: "info result".to_string()
-            })
-        );
-        assert_eq!(info_calls.get(), 1);
-        assert_eq!(apply_calls.get(), 0);
-    }
-
-    #[test]
-    fn invoke_the_apply_command() {
-        let cli = Cli::parse_from(["gitenv", "apply"]);
-        let info_calls = Cell::new(0);
-        let apply_calls = Cell::new(0);
-        let result = dispatch_with(
-            cli,
-            tracked_ok_output("info result", &info_calls),
-            tracked_ok_output("apply result", &apply_calls),
-        );
-        assert_eq!(
-            result,
-            Ok(ProgramOutput {
-                message: "apply result".to_string()
-            })
-        );
-        assert_eq!(info_calls.get(), 0);
-        assert_eq!(apply_calls.get(), 1);
-    }
-
-    #[test]
-    fn invoke_the_info_command_when_no_command_is_provided() {
-        let cli = Cli::parse_from(["gitenv"]);
-        let info_calls = Cell::new(0);
-        let apply_calls = Cell::new(0);
-        let result = dispatch_with(
-            cli,
-            tracked_ok_output("info result", &info_calls),
-            tracked_ok_output("apply result", &apply_calls),
-        );
-        assert_eq!(
-            result,
-            Ok(ProgramOutput {
-                message: "info result".to_string()
-            })
-        );
-        assert_eq!(info_calls.get(), 1);
-        assert_eq!(apply_calls.get(), 0);
-    }
 
     #[test]
     fn render_a_missing_symlink_status_line() {
@@ -777,6 +701,32 @@ mod tests {
     fn default_color_mode_is_auto() {
         let cli = Cli::parse_from(["gitenv"]);
         assert_eq!(cli.color, ColorMode::Auto);
+    }
+
+    #[test]
+    fn parse_config_path_from_the_config_flag() {
+        let cli = Cli::parse_from(["gitenv", "--config", "/tmp/config.yml"]);
+        assert_eq!(cli.config_path, Some(PathBuf::from("/tmp/config.yml")));
+    }
+
+    #[test]
+    fn parse_config_path_from_the_short_config_flag() {
+        let cli = Cli::parse_from(["gitenv", "-c", "/tmp/config.yml"]);
+        assert_eq!(cli.config_path, Some(PathBuf::from("/tmp/config.yml")));
+    }
+
+    #[test]
+    fn register_gitenv_config_as_the_cli_config_path_environment_variable() {
+        let command = Cli::command();
+        let config_path_argument = command
+            .get_arguments()
+            .find(|arg| arg.get_id().as_str() == "config_path")
+            .expect("Cli should define a config_path argument");
+
+        assert_eq!(
+            config_path_argument.get_env(),
+            Some(OsStr::new("GITENV_CONFIG"))
+        );
     }
 
     #[test]

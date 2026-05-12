@@ -71,33 +71,40 @@ where
 pub fn run_cli(cli: Cli) -> Result<ProgramOutput, ProgramError> {
     use std::io::IsTerminal;
 
+    let Cli {
+        command,
+        config_path,
+        log_level,
+        color,
+    } = cli;
+
     let runtime_config = RuntimeConfig::new(
-        cli.color,
+        color,
         std::io::stdout().is_terminal(),
         std::io::stderr().is_terminal(),
     );
 
-    logging::init(
-        cli.log_level.clone().into(),
-        runtime_config.use_color_for_stderr,
-    );
+    logging::init(log_level.into(), runtime_config.use_color_for_stderr);
 
-    cli::dispatch_with(
-        cli,
-        || run_info(runtime_config),
-        || run_apply(runtime_config),
-    )
+    let boundary = boundary::RealBoundary;
+    let home_directory = fs_adapter::resolve_home_directory(&|name| boundary.get_env_var(name))?;
+    let config_path = determine_config_path(config_path.as_deref(), &home_directory, &boundary)?;
+    let loaded_config = load_config(&config_path)?;
+
+    match command {
+        Some(Command::Apply) => run_apply(loaded_config, home_directory, runtime_config),
+        Some(Command::Info) | None => run_info(loaded_config, home_directory, runtime_config),
+    }
 }
 
 /// Run the info workflow using real production adapters.
 ///
-/// Resolves the home directory and configuration file, plans and renders
-/// the current status of all configured operations.
-pub fn run_info(runtime_config: RuntimeConfig) -> Result<ProgramOutput, ProgramError> {
-    let boundary = boundary::RealBoundary;
-    let home_directory = fs_adapter::resolve_home_directory(&|name| boundary.get_env_var(name))?;
-    let config_path = default_config_path(&home_directory, &boundary)?;
-    let loaded_config = load_config(&config_path)?;
+/// Plans and renders the current status of all configured operations.
+pub fn run_info(
+    loaded_config: LoadedConfig,
+    home_directory: PathBuf,
+    runtime_config: RuntimeConfig,
+) -> Result<ProgramOutput, ProgramError> {
     let context = app::info::InfoCommandContext::new(
         loaded_config,
         home_directory,
@@ -109,13 +116,12 @@ pub fn run_info(runtime_config: RuntimeConfig) -> Result<ProgramOutput, ProgramE
 
 /// Run the apply workflow using real production adapters.
 ///
-/// Resolves the home directory and configuration file, plans and applies all
-/// configured operations, returning a rendered summary.
-pub fn run_apply(runtime_config: RuntimeConfig) -> Result<ProgramOutput, ProgramError> {
-    let boundary = boundary::RealBoundary;
-    let home_directory = fs_adapter::resolve_home_directory(&|name| boundary.get_env_var(name))?;
-    let config_path = default_config_path(&home_directory, &boundary)?;
-    let loaded_config = load_config(&config_path)?;
+/// Plans and applies all configured operations, returning a rendered summary.
+pub fn run_apply(
+    loaded_config: LoadedConfig,
+    home_directory: PathBuf,
+    runtime_config: RuntimeConfig,
+) -> Result<ProgramOutput, ProgramError> {
     let context = app::apply::ApplyCommandContext::new(
         loaded_config,
         home_directory,
@@ -172,20 +178,33 @@ pub fn apply_operation_plan(
     actions::apply_operation_plan(operation_plan, &context)
 }
 
+/// Resolves the effective configuration path from explicit and default sources.
+///
+/// Priority:
+/// 1. Explicit config path from parsed CLI arguments (`-c/--config` or
+///    `GITENV_CONFIG` through clap env handling)
+/// 2. Default path derived from `XDG_CONFIG_HOME` and home directory
+fn determine_config_path(
+    explicit_config_path: Option<&Path>,
+    home_directory: &Path,
+    boundary: &impl EnvironmentReader,
+) -> Result<PathBuf, ProgramError> {
+    if let Some(path) = explicit_config_path {
+        return Ok(path.to_path_buf());
+    }
+
+    default_config_path(home_directory, boundary)
+}
+
 /// Resolves the default configuration path from environment and home directory.
 ///
 /// Priority:
-/// 1. GITENV_CONFIG environment variable if set
-/// 2. XDG_CONFIG_HOME/gitenv/config.yml if XDG_CONFIG_HOME is set and absolute
-/// 3. $HOME/.config/gitenv/config.yml as default
+/// 1. XDG_CONFIG_HOME/gitenv/config.yml if XDG_CONFIG_HOME is set and absolute
+/// 2. $HOME/.config/gitenv/config.yml as default
 fn default_config_path(
     home_directory: &Path,
     boundary: &impl EnvironmentReader,
 ) -> Result<PathBuf, ProgramError> {
-    if let Some(custom_path) = boundary.get_env_var("GITENV_CONFIG") {
-        return Ok(PathBuf::from(custom_path));
-    }
-
     let xdg_config_home = boundary.get_env_var("XDG_CONFIG_HOME").map(PathBuf::from);
     Ok(default_config_path_from_env(
         home_directory,
@@ -210,6 +229,7 @@ fn default_config_path_from_env(
 mod tests {
     use super::*;
     use crate::boundary::test_doubles::MapEnvReader;
+    use clap::Parser;
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -241,13 +261,30 @@ mod tests {
     }
 
     #[test]
-    fn use_gitenv_config_override_in_default_path_resolution() {
-        let boundary = MapEnvReader::from_pairs([("GITENV_CONFIG", "/tmp/custom-config.yml")]);
+    fn use_the_explicit_config_path_before_default_config_resolution() {
+        let boundary = MapEnvReader::from_pairs([("XDG_CONFIG_HOME", "/custom/config")]);
 
-        let path = default_config_path(Path::new("/home/alex"), &boundary)
-            .expect("GITENV_CONFIG should short-circuit default path resolution");
+        let path = determine_config_path(
+            Some(Path::new("/tmp/custom-config.yml")),
+            Path::new("/home/alex"),
+            &boundary,
+        )
+        .expect("explicit config path should short-circuit default path resolution");
 
         assert_eq!(path, PathBuf::from("/tmp/custom-config.yml"));
+    }
+
+    #[test]
+    fn ignore_gitenv_config_when_resolving_default_config_path() {
+        let boundary = MapEnvReader::from_pairs([
+            ("GITENV_CONFIG", "/tmp/custom-config.yml"),
+            ("XDG_CONFIG_HOME", "/custom/config"),
+        ]);
+
+        let path = default_config_path(Path::new("/home/alex"), &boundary)
+            .expect("default path should ignore GITENV_CONFIG and use XDG_CONFIG_HOME");
+
+        assert_eq!(path, PathBuf::from("/custom/config/gitenv/config.yml"));
     }
 
     #[test]
@@ -268,5 +305,44 @@ mod tests {
             .expect("default path should be resolved from home directory");
 
         assert_eq!(path, PathBuf::from("/home/alex/.config/gitenv/config.yml"));
+    }
+
+    #[test]
+    fn use_the_explicit_config_path_when_dispatching_the_info_command() {
+        let missing_path = PathBuf::from("/path/that/does/not/exist/config.yml");
+        let cli = Cli::parse_from([
+            "gitenv",
+            "--config",
+            missing_path
+                .to_str()
+                .expect("test path should be valid UTF-8"),
+        ]);
+
+        let result = run_cli(cli);
+
+        assert!(matches!(
+            result,
+            Err(ProgramError::ConfigurationReadFailed { path, .. }) if path == missing_path
+        ));
+    }
+
+    #[test]
+    fn use_the_explicit_config_path_when_dispatching_the_apply_command() {
+        let missing_path = PathBuf::from("/path/that/does/not/exist/config.yml");
+        let cli = Cli::parse_from([
+            "gitenv",
+            "--config",
+            missing_path
+                .to_str()
+                .expect("test path should be valid UTF-8"),
+            "apply",
+        ]);
+
+        let result = run_cli(cli);
+
+        assert!(matches!(
+            result,
+            Err(ProgramError::ConfigurationReadFailed { path, .. }) if path == missing_path
+        ));
     }
 }
