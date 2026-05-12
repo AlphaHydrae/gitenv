@@ -10,10 +10,10 @@
 //! without touching the real filesystem.
 
 use crate::{
-    CopyInspectionState, FileOperation, OperationAction, OperationPlan, ProgramError,
+    FileOperation, OperationAction, OperationPlan, ProgramError,
     boundary::{SymlinkCreator, TargetProbe},
     logging,
-    status::inspect_copy_operation_status,
+    status::{CopyInspectionState, inspect_copy_operation_status},
 };
 use log::Level;
 use std::path::Path;

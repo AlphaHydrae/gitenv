@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-12: Composition-root wiring docs parity pass — Update ARCHITECTURE.md
+  to document the composition root in `lib.rs`, the eight production entry
+  points, the stage-owned context approach, and module boundaries with concise
+  responsibility descriptions.
 - 2026-05-12: Extract shared operation and apply test doubles — Move repeated
   closure-backed test doubles for directory listing, target probing, and
   symlink creation into `boundary::test_doubles`, then reuse them from

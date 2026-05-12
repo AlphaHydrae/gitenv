@@ -68,19 +68,8 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 57: Composition-root wiring docs parity pass
-
-Why this increment exists:
-
-- The refactor is now wired through stage-owned contexts, and architecture docs
-  should explicitly reflect the current composition-root boundaries.
-
-Review target:
-
-- Update [ARCHITECTURE.md](./ARCHITECTURE.md) (and related cross-references) so
-  composition-root responsibilities, stage boundaries, and command
-  orchestration wiring match the current code.
-- Keep documentation consistent across [README.md](./README.md),
-  [MIGRATION.md](./MIGRATION.md), and [MIGRATION-LOG.md](./MIGRATION-LOG.md)
-  where the same wiring expectations are described.
+The active backlog is currently empty. All agreed increments have been
+completed. The next work should be planned based on review of the completed
+increments and the remaining migration goals in
+[MIGRATION.md](./MIGRATION.md).
 

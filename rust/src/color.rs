@@ -26,11 +26,7 @@ impl RuntimeConfig {
     ///
     /// Precomputes color decisions once at startup; the resulting booleans
     /// are then used throughout the program without further terminal probes.
-    pub(crate) fn new(
-        color_mode: ColorMode,
-        stdout_is_terminal: bool,
-        stderr_is_terminal: bool,
-    ) -> Self {
+    pub fn new(color_mode: ColorMode, stdout_is_terminal: bool, stderr_is_terminal: bool) -> Self {
         RuntimeConfig {
             use_color_for_stdout: should_use_color(color_mode, stdout_is_terminal),
             use_color_for_stderr: should_use_color(color_mode, stderr_is_terminal),

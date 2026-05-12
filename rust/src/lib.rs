@@ -33,7 +33,6 @@ pub use operation::{FileOperation, OperationAction, OperationPlan};
 pub use status::{
     CopyInspection, CopyInspectionState, OperationInspectionOutcome, OperationInspectionReport,
     SymlinkInspection, SymlinkInspectionState, inspect_operation_plan_status,
-    inspect_symlink_operation_status,
 };
 
 use std::path::{Path, PathBuf};
@@ -49,15 +48,28 @@ const DEFAULT_CONFIG_HOME_SUFFIX: &str = ".config";
 const DEFAULT_CONFIG_DIRECTORY_NAME: &str = "gitenv";
 const DEFAULT_CONFIG_FILE_NAME: &str = "config.yml";
 
-/// Parse CLI arguments and dispatch to the appropriate library function.
+/// Parse CLI arguments from the provided iterator and run the selected command.
 ///
-/// This is the main entry point for the binary.
-pub fn run_cli() -> Result<ProgramOutput, ProgramError> {
+/// This is the entry point used by the binary. The binary supplies
+/// `std::env::args_os()` as the argument source. Library consumers can supply
+/// any iterator of OS strings, which is useful for embedding and testing.
+/// To dispatch from an already-parsed [`Cli`] struct, use [`run_cli`] instead.
+pub fn run<I, T>(args: I) -> Result<ProgramOutput, ProgramError>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+{
     use clap::Parser;
-    use std::io::IsTerminal;
-
-    let args = std::env::args_os();
     let cli = Cli::parse_from(args);
+    run_cli(cli)
+}
+
+/// Dispatch to the appropriate command using an already-parsed CLI struct.
+///
+/// Resolves runtime configuration (terminal color, log level) from the CLI
+/// struct, then delegates to the selected command's wired workflow.
+pub fn run_cli(cli: Cli) -> Result<ProgramOutput, ProgramError> {
+    use std::io::IsTerminal;
 
     let runtime_config = RuntimeConfig::new(
         cli.color,
@@ -70,34 +82,48 @@ pub fn run_cli() -> Result<ProgramOutput, ProgramError> {
         runtime_config.use_color_for_stderr,
     );
 
-    // Composition root: resolve runtime facts and wire stage entrypoints.
+    cli::dispatch_with(
+        cli,
+        || run_info(runtime_config),
+        || run_apply(runtime_config),
+    )
+}
+
+/// Run the info workflow using real production adapters.
+///
+/// Resolves the home directory and configuration file, plans and renders
+/// the current status of all configured operations.
+pub fn run_info(runtime_config: RuntimeConfig) -> Result<ProgramOutput, ProgramError> {
     let boundary = boundary::RealBoundary;
     let home_directory = fs_adapter::resolve_home_directory(&|name| boundary.get_env_var(name))?;
     let config_path = default_config_path(&home_directory, &boundary)?;
     let loaded_config = load_config(&config_path)?;
+    let context = app::info::InfoCommandContext::new(
+        loaded_config,
+        home_directory,
+        Box::new(derive_intent_plan),
+        Box::new(derive_operation_plan),
+    );
+    app::info::run_info(runtime_config, context)
+}
 
-    cli::dispatch_with(
-        cli,
-        || {
-            let context = app::info::InfoCommandContext::new(
-                loaded_config.clone(),
-                home_directory.clone(),
-                Box::new(derive_intent_plan),
-                Box::new(derive_operation_plan),
-            );
-            app::info::run_info(context, runtime_config)
-        },
-        || {
-            let context = app::apply::ApplyCommandContext::new(
-                loaded_config.clone(),
-                home_directory.clone(),
-                Box::new(derive_intent_plan),
-                Box::new(derive_operation_plan),
-                Box::new(apply_operation_plan),
-            );
-            app::apply::run_apply(context, runtime_config)
-        },
-    )
+/// Run the apply workflow using real production adapters.
+///
+/// Resolves the home directory and configuration file, plans and applies all
+/// configured operations, returning a rendered summary.
+pub fn run_apply(runtime_config: RuntimeConfig) -> Result<ProgramOutput, ProgramError> {
+    let boundary = boundary::RealBoundary;
+    let home_directory = fs_adapter::resolve_home_directory(&|name| boundary.get_env_var(name))?;
+    let config_path = default_config_path(&home_directory, &boundary)?;
+    let loaded_config = load_config(&config_path)?;
+    let context = app::apply::ApplyCommandContext::new(
+        loaded_config,
+        home_directory,
+        Box::new(derive_intent_plan),
+        Box::new(derive_operation_plan),
+        Box::new(apply_operation_plan),
+    );
+    app::apply::run_apply(runtime_config, context)
 }
 
 /// Single production entry point for intent planning.

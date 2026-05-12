@@ -38,8 +38,8 @@ impl InfoCommandContext {
 
 /// Runs the `info` command with a pre-wired command context.
 pub(crate) fn run_info(
-    context: InfoCommandContext,
     runtime_config: RuntimeConfig,
+    context: InfoCommandContext,
 ) -> Result<ProgramOutput, ProgramError> {
     let intent_plan =
         (context.derive_intent_plan)(&context.loaded_config, &context.home_directory)?;
@@ -114,13 +114,13 @@ mod tests {
         operation_plan: Result<OperationPlan, ProgramError>,
     ) -> Result<crate::ProgramOutput, ProgramError> {
         run_info(
+            runtime_config,
             InfoCommandContext::new(
                 loaded_config,
                 home_directory,
                 Box::new(move |_, _| intent_plan.clone()),
                 Box::new(move |_, _| operation_plan.clone()),
             ),
-            runtime_config,
         )
     }
 

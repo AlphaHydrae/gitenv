@@ -1,5 +1,5 @@
 fn main() {
-    match gitenv::run_cli() {
+    match gitenv::run(std::env::args_os()) {
         Ok(output) => println!("{}", output.message),
         Err(error) => {
             eprintln!("gitenv: {error}");

@@ -172,20 +172,53 @@ CLI modules are responsible for:
 This boundary keeps business logic reusable and testable without terminal side
 effects.
 
-## Proposed Module Boundaries (Rust)
+## Composition Root
 
-- `app/`: command orchestration modules (for example `info` and `apply`) that
-  receive wired stage entrypoints and resolved runtime state from the
-  composition root, then return structured outputs without owning terminal
-  parsing or config/bootstrap discovery.
-- `config`: parse + schema validate + normalize input.
-- `intent`: build intent plans from normalized configuration semantics.
-- `operation`: derive flat concrete operations from intent plans by resolving
-  repository-relative sources, home-relative targets, and selector expansion.
-- `actions`: symlink/copy operations.
-- `status`: structured status model.
-- `logging`: log level filtering and structured diagnostic emission contracts.
-- `cli`: argument parsing and output rendering.
+The composition root in `lib.rs` manages all wiring of external dependencies
+and stage entrypoints.
+
+The production entry points are:
+
+1. **`run(args)`** — Parses CLI arguments and runs the selected command.
+2. **`run_cli(cli)`** — Runs a command from already-parsed CLI arguments.
+3. **`run_info(runtime_config)`** — Runs the info workflow.
+4. **`run_apply(runtime_config)`** — Runs the apply workflow.
+5. **`derive_intent_plan(...)`** — Derive an intent plan from parsed
+   configuration.
+6. **`derive_operation_plan(...)`** — Derive an operation plan from an intent
+   plan and file system state. This is where runtime path resolution and
+   selection expansion happens.
+7. **`inspect_operation_plan_status(operation_plan)`** — Compare an operation
+   plan against filesystem state to produce a structured status report.
+8. **`apply_operation_plan(...)`** — Apply an operation plan to the filesystem
+   and produce a structured report of outcomes.
+
+Each entry point handles composition concerns (runtime resolution and dependency
+wiring where needed) and then delegates to the implementation modules.
+
+### Stage-owned contexts:
+
+Each planning/execution stage receives a dedicated context object containing
+the runtime inputs and external capabilities needed by that stage. This keeps
+stage behavior deterministic and testable while keeping composition concerns
+centralized.
+
+## Module Boundaries
+
+- **`boundary`**: Defines dependency boundaries for external/system concerns and
+  provides production and test implementations.
+- **`app/`**: Owns top-level command orchestration flows.
+- **`config`**: Parses, validates, and normalizes configuration input.
+- **`intent`**: Builds deterministic intent plans from normalized config.
+- **`operation`**: Expands intent plans into concrete filesystem operations.
+- **`actions`**: Executes planned filesystem changes.
+- **`status`**: Computes structured inspection/status results.
+- **`logging`**: Handles diagnostic emission and log-level behavior.
+- **`cli`**: Parses CLI arguments and renders user-facing output.
+- **`path_resolution`**: Resolves and expands filesystem path semantics.
+- **`fs_adapter`**: Encapsulates direct filesystem utility interactions.
+- **`color`**: Centralizes color policy and terminal color behavior.
+- **`errors`**: Defines shared error types used across modules.
 
 ## Testing Strategy
 

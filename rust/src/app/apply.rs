@@ -44,8 +44,8 @@ impl ApplyCommandContext {
 
 /// Runs the `apply` command with a pre-wired command context.
 pub(crate) fn run_apply(
-    context: ApplyCommandContext,
     runtime_config: RuntimeConfig,
+    context: ApplyCommandContext,
 ) -> Result<ProgramOutput, ProgramError> {
     let intent_plan =
         (context.derive_intent_plan)(&context.loaded_config, &context.home_directory)?;
@@ -121,6 +121,7 @@ mod tests {
         apply_report: Result<ApplyOperationReport, ProgramError>,
     ) -> Result<crate::ProgramOutput, ProgramError> {
         run_apply(
+            runtime_config,
             ApplyCommandContext::new(
                 loaded_config,
                 home_directory,
@@ -128,7 +129,6 @@ mod tests {
                 Box::new(move |_, _| operation_plan.clone()),
                 Box::new(move |_| apply_report.clone()),
             ),
-            runtime_config,
         )
     }
 
