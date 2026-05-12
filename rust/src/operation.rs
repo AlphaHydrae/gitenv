@@ -229,7 +229,7 @@ mod tests {
     };
     use crate::{
         ActionMode, ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction,
-        IntentSource, ProgramError, ResolvedOptions, boundary::DirectoryEntriesReader,
+        IntentSource, ProgramError, ResolvedOptions, boundary::test_doubles::FnDirectoryReader,
         derive_operation_plan as derive_operation_plan_entrypoint,
     };
     use std::fs;
@@ -237,16 +237,6 @@ mod tests {
     use std::os::unix::fs::symlink;
     use std::path::{Path, PathBuf};
     use tempfile::TempDir;
-
-    /// Test double: wraps a closure for directory listing operations.
-    struct FnDirectoryReader<F: Fn(&Path) -> Result<Vec<String>, ProgramError>>(F);
-    impl<F: Fn(&Path) -> Result<Vec<String>, ProgramError>> DirectoryEntriesReader
-        for FnDirectoryReader<F>
-    {
-        fn list_directory_entries(&self, path: &Path) -> Result<Vec<String>, ProgramError> {
-            self.0(path)
-        }
-    }
 
     // ---------------------------------------------------------------------------
     // Intent model constructors

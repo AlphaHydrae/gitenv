@@ -339,29 +339,16 @@ mod tests {
     use crate::{
         ApplyOperationOutcome, ConflictPolicy, FileOperation, OperationAction, OperationPlan,
         ProgramError,
-        boundary::{SymlinkCreator, TargetProbe},
+        boundary::{
+            TargetProbe,
+            test_doubles::{FnSymlinkCreator, FnTargetProbe},
+        },
     };
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
     use tempfile::TempDir;
-
-    struct FnTargetProbe<F: Fn(&Path) -> Result<bool, ProgramError>>(F);
-
-    impl<F: Fn(&Path) -> Result<bool, ProgramError>> TargetProbe for FnTargetProbe<F> {
-        fn target_exists(&self, path: &Path) -> Result<bool, ProgramError> {
-            self.0(path)
-        }
-    }
-
-    struct FnSymlinkCreator<F: Fn(&Path, &Path) -> Result<(), ProgramError>>(F);
-
-    impl<F: Fn(&Path, &Path) -> Result<(), ProgramError>> SymlinkCreator for FnSymlinkCreator<F> {
-        fn create_symlink(&self, source: &Path, target: &Path) -> Result<(), ProgramError> {
-            self.0(source, target)
-        }
-    }
 
     struct NativeTargetProbe;
 

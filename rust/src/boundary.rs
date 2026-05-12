@@ -96,8 +96,10 @@ impl SymlinkCreator for RealBoundary {
 
 #[cfg(test)]
 pub(crate) mod test_doubles {
-    use super::EnvironmentReader;
+    use super::{DirectoryEntriesReader, EnvironmentReader, SymlinkCreator, TargetProbe};
+    use crate::ProgramError;
     use std::collections::BTreeMap;
+    use std::path::Path;
 
     /// Test double: returns environment variable values from a pre-populated
     /// map. Useful when tests need reproducible env reads without touching the
@@ -130,6 +132,39 @@ pub(crate) mod test_doubles {
     impl EnvironmentReader for MapEnvReader {
         fn get_env_var(&self, name: &str) -> Option<String> {
             self.0.get(name).cloned()
+        }
+    }
+
+    /// Test double: wraps a closure for directory listing operations.
+    pub(crate) struct FnDirectoryReader<F: Fn(&Path) -> Result<Vec<String>, ProgramError>>(
+        pub(crate) F,
+    );
+
+    impl<F: Fn(&Path) -> Result<Vec<String>, ProgramError>> DirectoryEntriesReader
+        for FnDirectoryReader<F>
+    {
+        fn list_directory_entries(&self, path: &Path) -> Result<Vec<String>, ProgramError> {
+            self.0(path)
+        }
+    }
+
+    /// Test double: wraps a closure for operation-target existence probes.
+    pub(crate) struct FnTargetProbe<F: Fn(&Path) -> Result<bool, ProgramError>>(pub(crate) F);
+
+    impl<F: Fn(&Path) -> Result<bool, ProgramError>> TargetProbe for FnTargetProbe<F> {
+        fn target_exists(&self, path: &Path) -> Result<bool, ProgramError> {
+            self.0(path)
+        }
+    }
+
+    /// Test double: wraps a closure for symlink creation calls.
+    pub(crate) struct FnSymlinkCreator<F: Fn(&Path, &Path) -> Result<(), ProgramError>>(
+        pub(crate) F,
+    );
+
+    impl<F: Fn(&Path, &Path) -> Result<(), ProgramError>> SymlinkCreator for FnSymlinkCreator<F> {
+        fn create_symlink(&self, source: &Path, target: &Path) -> Result<(), ProgramError> {
+            self.0(source, target)
         }
     }
 }

@@ -68,3 +68,35 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
+### Increment 56: Boundary naming normalization pass
+
+Why this increment exists:
+
+- Some dependency-boundary and context names still use transitional wording,
+  which slows review even when behavior is stable.
+
+Review target:
+
+- Rename remaining boundary/context symbols to intent-revealing names aligned
+  with the dependency-boundary end state in
+  [Dependency Boundary Refactor Target](./MIGRATION.md#dependency-boundary-refactor-target).
+- Keep behavior and public API unchanged.
+- Update affected tests and docs so names stay consistent across code and
+  migration documentation.
+
+### Increment 57: Composition-root wiring docs parity pass
+
+Why this increment exists:
+
+- The refactor is now wired through stage-owned contexts, and architecture docs
+  should explicitly reflect the current composition-root boundaries.
+
+Review target:
+
+- Update [ARCHITECTURE.md](./ARCHITECTURE.md) (and related cross-references) so
+  composition-root responsibilities, stage boundaries, and command
+  orchestration wiring match the current code.
+- Keep documentation consistent across [README.md](./README.md),
+  [MIGRATION.md](./MIGRATION.md), and [MIGRATION-LOG.md](./MIGRATION-LOG.md)
+  where the same wiring expectations are described.
+

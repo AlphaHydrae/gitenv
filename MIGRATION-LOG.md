@@ -11,6 +11,11 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-12: Extract shared operation and apply test doubles — Move repeated
+  closure-backed test doubles for directory listing, target probing, and
+  symlink creation into `boundary::test_doubles`, then reuse them from
+  `operation.rs` and `actions.rs` tests to reduce duplication while preserving
+  existing test behavior.
 - 2026-05-12: Readability cleanup and naming pass for DI architecture — Add
   module-level doc comments to `boundary.rs`, `operation.rs`, and `actions.rs`;
   improve function-level docs on the three composition-root entrypoints in
