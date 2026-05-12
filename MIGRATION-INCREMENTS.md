@@ -68,31 +68,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 53: Rebalance operation boundary
-
-Why this increment exists:
-
-- `operation.rs` still uses callback-style seams that do not match the final
-  dependency boundary.
-- `lib.rs` still owns operation-stage wiring instead of delegating through a
-  dedicated boundary module.
-
-Review target:
-
-- Follow the end-state contract in
-  [Dependency Boundary Refactor Target](./MIGRATION.md#dependency-boundary-refactor-target).
-- Refactor operation planning to consume the shared boundary traits or a
-  stage-owned context instead of bare callbacks.
-- Remove the remaining `SystemCalls` bootstrap shim from `lib.rs` and replace
-  its env/config-path responsibilities with the shared boundary/context path so
-  command/bootstrap wiring uses one dependency model end-to-end.
-- Move the operation-stage wiring out of `lib.rs` so the composition root only
-  assembles real adapters and passes them to the operation planner.
-- Keep `home_directory` resolved in composition root and stored in operation
-  context data.
-- Keep `path_resolution.rs` as a pure helper module and preserve current HOME
-  and filesystem behavior.
-
 ### Increment 54: Rebalance apply boundary
 
 Why this increment exists:
@@ -131,5 +106,8 @@ Review target:
 - Rename boundary and context types for intent-revealing responsibility names.
 - Add concise module/function docs that explain where wiring happens and where
   domain logic begins.
+- After all DI refactors are complete, run a focused test-code cleanup pass to
+  identify and reduce duplication in fake boundary implementations and any
+  other repeated test setup patterns.
 - Verify no coverage drop from refactor fallout and document any deferred
   cleanup as explicit TODOs with closure conditions.

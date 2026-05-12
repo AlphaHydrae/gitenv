@@ -1,7 +1,7 @@
 // Core plan snapshots for the full intent + operation planning chain.
 //
 // These are internal module tests (not integration tests) because they use
-// `IntentContext` and `derive_intent_plan_from_context`, which are `pub(crate)`
+// `IntentContext` and `derive_intent_plan`, which are `pub(crate)`
 // to keep the public surface focused on the primary entrypoints
 // (`derive_intent_plan`, `derive_operation_plan`).  The injectable seam tests
 // (env-var expansion, directory guards, include resolution) live in the
@@ -9,12 +9,12 @@
 // pipeline with controlled in-memory inputs, verifying that intent and
 // operation planning compose correctly end-to-end.
 
-use crate::boundary::{ConfigReader, DirectoryProbe, EnvironmentReader};
+use crate::boundary::{ConfigReader, DirectoryEntriesReader, DirectoryProbe, EnvironmentReader};
 use crate::intent::{
     ConflictPolicy, IntentAction, IntentContext, IntentFileAction, IntentPlan, IntentSelectAction,
-    IntentSource, ResolvedOptions, derive_intent_plan_from_context,
+    IntentSource, ResolvedOptions, derive_intent_plan,
 };
-use crate::operation::derive_operation_plan_with_injectables;
+use crate::operation::{OperationContext, derive_operation_plan};
 use crate::{
     ActionMode, FileOperation, LoadedConfig, OperationAction, OperationPlan, ProgramError,
     parse_config,
@@ -46,6 +46,15 @@ impl ConfigReader for AssertConfigReader {
     fn read_config_file(&self, path: &Path) -> Result<LoadedConfig, ProgramError> {
         assert_eq!(path, self.expected_path);
         Ok(self.loaded_config.clone())
+    }
+}
+
+struct FnDirectoryReader<F: Fn(&Path) -> Result<Vec<String>, ProgramError>>(F);
+impl<F: Fn(&Path) -> Result<Vec<String>, ProgramError>> DirectoryEntriesReader
+    for FnDirectoryReader<F>
+{
+    fn list_directory_entries(&self, path: &Path) -> Result<Vec<String>, ProgramError> {
+        self.0(path)
     }
 }
 
@@ -87,21 +96,22 @@ fn derive_representative_plans(
         config_reader: &config_reader,
     };
 
-    let intent_plan = derive_intent_plan_from_context(&loaded_root, &context)?;
+    let intent_plan = derive_intent_plan(&loaded_root, &context)?;
 
-    let operation_plan =
-        derive_operation_plan_with_injectables(&intent_plan, Path::new("/home/tester"), &|path| {
-            if path == Path::new("/repo/dots") {
-                Ok(vec![
-                    ".gitignore".to_string(),
-                    ".zshrc".to_string(),
-                    ".vimrc".to_string(),
-                    "notes.txt".to_string(),
-                ])
-            } else {
-                Ok(Vec::new())
-            }
-        })?;
+    let dir_reader = FnDirectoryReader(|path| {
+        assert_eq!(path, Path::new("/repo/dots"));
+        Ok(vec![
+            ".gitignore".to_string(),
+            ".zshrc".to_string(),
+            ".vimrc".to_string(),
+            "notes.txt".to_string(),
+        ])
+    });
+    let operation_context = OperationContext {
+        home_directory: PathBuf::from("/home/tester"),
+        dir_reader: &dir_reader,
+    };
+    let operation_plan = derive_operation_plan(&intent_plan, &operation_context)?;
 
     Ok((intent_plan, operation_plan))
 }

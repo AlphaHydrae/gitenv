@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-12: Rebalance operation boundary — Convert operation planning from
+  callback-style seams to a context-backed approach, remove the SystemCalls
+  bootstrap shim, and wire the operation stage through the shared boundary
+  traits same as intent planning.
 - 2026-05-12: Introduce intent stage context — Shift intent planning from
   callback-based wiring to a dedicated stage context, keep the public entrypoint
   centered in `lib.rs`, and align snapshot coverage with the internal

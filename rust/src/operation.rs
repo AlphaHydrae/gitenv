@@ -1,6 +1,6 @@
 use crate::{
     ActionMode, ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction,
-    ProgramError, ResolvedOptions, logging, path_resolution,
+    ProgramError, ResolvedOptions, boundary::DirectoryEntriesReader, logging, path_resolution,
 };
 use log::Level;
 use std::path::{Path, PathBuf};
@@ -31,21 +31,25 @@ pub struct FileOperation {
     pub conflict_policy: ConflictPolicy,
 }
 
-/// Internal planning function accepting injected directory access for
+/// Stage-owned context for operation planning, carrying resolved runtime state
+/// and trait-backed dependency references.
+///
+/// The composition root creates a `RealBoundary`-backed context; tests create
+/// lightweight local doubles so no real filesystem access is needed.
+pub(crate) struct OperationContext<'a> {
+    /// Resolved home directory for the current process invocation.
+    /// Carried as data rather than as a trait method so helper signatures
+    /// stay small and the context fully represents stage runtime inputs.
+    pub(crate) home_directory: PathBuf,
+    /// Boundary adapter for listing directory entries (used for selector expansion).
+    pub(crate) dir_reader: &'a dyn DirectoryEntriesReader,
+}
+
+/// Internal planning function accepting a stage-owned context for
 /// deterministic tests and composition-root injection.
-///
-/// Target directories are resolved relative to `home_directory` unless they are
-/// absolute or already home-prefixed. Relative source roots are resolved
-/// relative to the intent plan's repository root.
-///
-/// **Internal/Testing API**: This function is not part of the public stable API
-/// and may change without notice. It is only exported for integration test access.
-#[doc(hidden)]
-#[allow(dead_code)] // Used by tests within this module and integration tests
-pub fn derive_operation_plan_with_injectables(
+pub(crate) fn derive_operation_plan(
     intent_plan: &IntentPlan,
-    home_directory: &Path,
-    list_directory: &impl Fn(&Path) -> Result<Vec<String>, ProgramError>,
+    context: &OperationContext,
 ) -> Result<OperationPlan, ProgramError> {
     logging::operation(
         Level::Debug,
@@ -57,11 +61,12 @@ pub fn derive_operation_plan_with_injectables(
         ),
     );
 
-    let repository_root = resolve_repository_root(&intent_plan.repository, home_directory);
+    let repository_root = resolve_repository_root(&intent_plan.repository, &context.home_directory);
     let mut actions = Vec::new();
 
     for source in &intent_plan.sources {
-        let source_root = resolve_source_root(&repository_root, &source.from, home_directory);
+        let source_root =
+            resolve_source_root(&repository_root, &source.from, &context.home_directory);
 
         for action in &source.actions {
             match action {
@@ -69,15 +74,15 @@ pub fn derive_operation_plan_with_injectables(
                     actions.push(expand_file_action(
                         &source_root,
                         file_action,
-                        home_directory,
+                        &context.home_directory,
                     ));
                 }
                 IntentAction::Select(select_action) => {
                     actions.extend(expand_select_action(
                         &source_root,
                         select_action,
-                        home_directory,
-                        list_directory,
+                        &context.home_directory,
+                        &|path| context.dir_reader.list_directory_entries(path),
                     )?);
                 }
             }
@@ -92,6 +97,7 @@ pub fn derive_operation_plan_with_injectables(
 
     Ok(OperationPlan { actions })
 }
+
 fn resolve_repository_root(repository: &str, home_directory: &Path) -> PathBuf {
     path_resolution::expand_home_prefixed_or_literal_path(repository, home_directory)
 }
@@ -208,17 +214,28 @@ fn should_include_selection_entry(entry: &str, select_action: &IntentSelectActio
 #[cfg(test)]
 mod tests {
     use super::{
-        FileOperation, OperationAction, OperationPlan, derive_operation_plan_with_injectables,
+        FileOperation, OperationAction, OperationContext, OperationPlan, derive_operation_plan,
     };
     use crate::{
         ActionMode, ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction,
-        IntentSource, ProgramError, ResolvedOptions, derive_operation_plan,
+        IntentSource, ProgramError, ResolvedOptions, boundary::DirectoryEntriesReader,
+        derive_operation_plan as derive_operation_plan_entrypoint,
     };
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::symlink;
     use std::path::{Path, PathBuf};
     use tempfile::TempDir;
+
+    /// Test double: wraps a closure for directory listing operations.
+    struct FnDirectoryReader<F: Fn(&Path) -> Result<Vec<String>, ProgramError>>(F);
+    impl<F: Fn(&Path) -> Result<Vec<String>, ProgramError>> DirectoryEntriesReader
+        for FnDirectoryReader<F>
+    {
+        fn list_directory_entries(&self, path: &Path) -> Result<Vec<String>, ProgramError> {
+            self.0(path)
+        }
+    }
 
     // ---------------------------------------------------------------------------
     // Intent model constructors
@@ -322,11 +339,12 @@ mod tests {
             )],
         );
 
-        let operation_plan =
-            derive_operation_plan_with_injectables(&intent_plan, home.path(), &|path| {
-                let path = path.to_path_buf();
-                crate::fs_adapter::list_directory_entries(&path)
-            })
+        let dir_reader = FnDirectoryReader(crate::fs_adapter::list_directory_entries);
+        let context = OperationContext {
+            home_directory: home.path().to_path_buf(),
+            dir_reader: &dir_reader,
+        };
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should expand selected files");
 
         assert_eq!(
@@ -351,12 +369,13 @@ mod tests {
             )],
         );
 
-        let operation_plan = derive_operation_plan_with_injectables(
-            &intent_plan,
-            home.path(),
-            &crate::fs_adapter::list_directory_entries,
-        )
-        .expect("operation planning should keep explicit file actions");
+        let dir_reader = FnDirectoryReader(crate::fs_adapter::list_directory_entries);
+        let context = OperationContext {
+            home_directory: home.path().to_path_buf(),
+            dir_reader: &dir_reader,
+        };
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
+            .expect("operation planning should keep explicit file actions");
 
         assert_eq!(
             operation_plan,
@@ -383,11 +402,15 @@ mod tests {
             )],
         );
 
-        let operation_plan =
-            derive_operation_plan_with_injectables(&intent_plan, home.path(), &|path| {
-                let path = path.to_path_buf();
-                crate::fs_adapter::list_directory_entries(&path)
-            })
+        let dir_reader = FnDirectoryReader(|path| {
+            let path = path.to_path_buf();
+            crate::fs_adapter::list_directory_entries(&path)
+        });
+        let context = OperationContext {
+            home_directory: home.path().to_path_buf(),
+            dir_reader: &dir_reader,
+        };
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should expand selected files");
 
         assert_eq!(
@@ -430,11 +453,15 @@ mod tests {
             )],
         );
 
-        let operation_plan =
-            derive_operation_plan_with_injectables(&intent_plan, home.path(), &|path| {
-                let path = path.to_path_buf();
-                crate::fs_adapter::list_directory_entries(&path)
-            })
+        let dir_reader = FnDirectoryReader(|path| {
+            let path = path.to_path_buf();
+            crate::fs_adapter::list_directory_entries(&path)
+        });
+        let context = OperationContext {
+            home_directory: home.path().to_path_buf(),
+            dir_reader: &dir_reader,
+        };
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should expand selected symlink entries");
 
         assert_eq!(
@@ -463,14 +490,18 @@ mod tests {
             )],
         );
 
-        let operation_plan =
-            derive_operation_plan_with_injectables(&intent_plan, home.path(), &|_| {
-                Ok(vec![
-                    ".zshrc".to_string(),
-                    "notes.txt".to_string(),
-                    "tmux.conf".to_string(),
-                ])
-            })
+        let dir_reader = FnDirectoryReader(|_| {
+            Ok(vec![
+                ".zshrc".to_string(),
+                "notes.txt".to_string(),
+                "tmux.conf".to_string(),
+            ])
+        });
+        let context = OperationContext {
+            home_directory: home.path().to_path_buf(),
+            dir_reader: &dir_reader,
+        };
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should expand non-dotfile selection");
 
         assert_eq!(
@@ -495,13 +526,18 @@ mod tests {
             )],
         );
 
-        let error = derive_operation_plan_with_injectables(&intent_plan, home.path(), &|path| {
+        let dir_reader = FnDirectoryReader(|path| {
             Err(ProgramError::SourceDirectoryReadFailed {
                 path: path.to_path_buf(),
                 message: "boom".to_string(),
             })
-        })
-        .expect_err("selector expansion should propagate listing failures");
+        });
+        let context = OperationContext {
+            home_directory: home.path().to_path_buf(),
+            dir_reader: &dir_reader,
+        };
+        let error = derive_operation_plan(&intent_plan, &context)
+            .expect_err("selector expansion should propagate listing failures");
 
         assert_eq!(
             error,
@@ -527,12 +563,13 @@ mod tests {
             )],
         );
 
-        let operation_plan = derive_operation_plan_with_injectables(
-            &intent_plan,
-            home.path(),
-            &crate::fs_adapter::list_directory_entries,
-        )
-        .expect("operation planning should anchor relative targets to the home directory");
+        let dir_reader = FnDirectoryReader(crate::fs_adapter::list_directory_entries);
+        let context = OperationContext {
+            home_directory: home.path().to_path_buf(),
+            dir_reader: &dir_reader,
+        };
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
+            .expect("operation planning should anchor relative targets to the home directory");
 
         assert_eq!(
             operation_plan,
@@ -559,12 +596,13 @@ mod tests {
             )],
         );
 
-        let operation_plan = derive_operation_plan_with_injectables(
-            &intent_plan,
-            home.path(),
-            &crate::fs_adapter::list_directory_entries,
-        )
-        .expect("operation planning should resolve ~/ paths for copy operations");
+        let dir_reader = FnDirectoryReader(crate::fs_adapter::list_directory_entries);
+        let context = OperationContext {
+            home_directory: home.path().to_path_buf(),
+            dir_reader: &dir_reader,
+        };
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
+            .expect("operation planning should resolve ~/ paths for copy operations");
 
         assert_eq!(
             operation_plan,
@@ -597,11 +635,15 @@ mod tests {
             ],
         );
 
-        let operation_plan =
-            derive_operation_plan_with_injectables(&intent_plan, home.path(), &|path| {
-                assert_eq!(path, config_source.as_path());
-                Ok(vec![".nvim".to_string(), ".tmux".to_string()])
-            })
+        let dir_reader = FnDirectoryReader(|path| {
+            assert_eq!(path, config_source.as_path());
+            Ok(vec![".nvim".to_string(), ".tmux".to_string()])
+        });
+        let context = OperationContext {
+            home_directory: home.path().to_path_buf(),
+            dir_reader: &dir_reader,
+        };
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should combine actions from multiple sources");
 
         assert_eq!(
@@ -636,7 +678,7 @@ mod tests {
             )],
         );
 
-        let operation_plan = derive_operation_plan(&intent_plan, home.path())
+        let operation_plan = derive_operation_plan_entrypoint(&intent_plan, home.path())
             .expect("operation planning should use the provided home directory");
 
         assert_eq!(
@@ -662,11 +704,16 @@ mod tests {
             )],
         );
 
-        let error = derive_operation_plan_with_injectables(&intent_plan, home.path(), &|path| {
+        let dir_reader = FnDirectoryReader(|path| {
             let path = path.to_path_buf();
             crate::fs_adapter::list_directory_entries(&path)
-        })
-        .expect_err("missing source directories should fail with typed error");
+        });
+        let context = OperationContext {
+            home_directory: home.path().to_path_buf(),
+            dir_reader: &dir_reader,
+        };
+        let error = derive_operation_plan(&intent_plan, &context)
+            .expect_err("missing source directories should fail with typed error");
 
         assert!(matches!(
             &error,

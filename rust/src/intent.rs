@@ -105,7 +105,7 @@ pub(crate) struct IntentContext<'a> {
 ///
 /// `IntentContext.config_reader` is called once per include path. Tests supply
 /// a local double that returns pre-parsed configs from an in-memory map.
-pub(crate) fn derive_intent_plan_from_context(
+pub(crate) fn derive_intent_plan(
     loaded_config: &LoadedConfig,
     context: &IntentContext,
 ) -> Result<IntentPlan, ProgramError> {
@@ -444,12 +444,13 @@ fn resolve_item_options(
 mod tests {
     use super::{
         ConflictPolicy, IntentAction, IntentContext, IntentFileAction, IntentPlan,
-        IntentSelectAction, IntentSource, ResolvedOptions, derive_intent_plan_from_context,
+        IntentSelectAction, IntentSource, ResolvedOptions, derive_intent_plan,
     };
     use crate::boundary::{ConfigReader, DirectoryProbe, EnvironmentReader};
     use crate::{
         ActionMode, Config, ConfigItem, Defaults, FileConfig, Guard, Include, LoadedConfig,
-        ProgramError, SelectConfig, Source, SourceRoot, derive_intent_plan,
+        ProgramError, SelectConfig, Source, SourceRoot,
+        derive_intent_plan as derive_intent_plan_entrypoint,
     };
     use std::path::{Path, PathBuf};
 
@@ -617,8 +618,9 @@ mod tests {
             SourceRoot::Path(".".to_string()),
             vec![make_file_config_item(".zshrc")],
         )]);
-        let plan = derive_intent_plan(&root_loaded_config(&config), home_directory_for_test())
-            .expect("config should produce an intent plan");
+        let plan =
+            derive_intent_plan_entrypoint(&root_loaded_config(&config), home_directory_for_test())
+                .expect("config should produce an intent plan");
 
         assert_eq!(
             plan,
@@ -678,7 +680,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
         )
@@ -763,8 +765,9 @@ mod tests {
             .to_string_lossy()
             .into_owned();
 
-        let plan = derive_intent_plan(&root_loaded_config(&config), home_directory_for_test())
-            .expect("planning should succeed when the current directory exists");
+        let plan =
+            derive_intent_plan_entrypoint(&root_loaded_config(&config), home_directory_for_test())
+                .expect("planning should succeed when the current directory exists");
 
         assert_eq!(
             plan,
@@ -806,7 +809,7 @@ mod tests {
                 })],
             }],
         };
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(
                 &FnEnvReader(|name: &str| {
@@ -864,7 +867,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
         )
@@ -908,7 +911,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
         )
@@ -979,7 +982,7 @@ mod tests {
             ],
         };
 
-        let error = derive_intent_plan_from_context(
+        let error = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
         )
@@ -1019,7 +1022,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
         )
@@ -1064,7 +1067,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(
                 &FnEnvReader(|name: &str| {
@@ -1123,7 +1126,7 @@ mod tests {
             "/home/tester/Library/Application Support/Code/User".to_string(),
         ]);
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(
                 &NoEnvVars,
@@ -1174,7 +1177,7 @@ mod tests {
             }],
         };
         // Destination directory is absent after expansion via injected home.
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
         )
@@ -1207,7 +1210,7 @@ mod tests {
         };
         let known_dirs = std::collections::BTreeSet::from(["/Applications".to_string()]);
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(
                 &NoEnvVars,
@@ -1249,7 +1252,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
         )
@@ -1286,7 +1289,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
         )
@@ -1320,7 +1323,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
         )
@@ -1363,7 +1366,7 @@ mod tests {
                 ["/home/tester/AppData/Roaming/Code/User".to_string()],
             );
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(
                 &NoEnvVars,
@@ -1417,7 +1420,7 @@ mod tests {
         };
         let known_dirs = std::collections::BTreeSet::from(["/home/tester/work-active".to_string()]);
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(
                 &NoEnvVars,
@@ -1465,7 +1468,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
         )
@@ -1529,7 +1532,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &loaded_config_for_path(&root, None),
             &make_context(
                 &NoEnvVars,
@@ -1575,7 +1578,7 @@ mod tests {
             )])
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &loaded_config_for_path(&root, Some(root_path)),
             &make_context(
                 &NoEnvVars,
@@ -1631,7 +1634,7 @@ mod tests {
             )])
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &loaded_config_for_path(&root, Some(root_path)),
             &make_context(
                 &NoEnvVars,
@@ -1687,7 +1690,7 @@ mod tests {
             )])
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &loaded_config_for_path(&root, None),
             &make_context(
                 &NoEnvVars,
@@ -1737,7 +1740,7 @@ mod tests {
         // The guard must expand "~" to "/home/tester" before the probe; if it
         // did not, `is_directory` would receive the literal "~" string, return
         // false, and the source would be excluded from the plan.
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(
                 &NoEnvVars,
@@ -1787,7 +1790,7 @@ mod tests {
             )])
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &loaded_config_for_path(&root, None),
             &make_context(
                 &NoEnvVars,
@@ -1858,7 +1861,7 @@ mod tests {
             )])
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &loaded_config_for_path(&root, None),
             &make_context(
                 &NoEnvVars,
@@ -1907,7 +1910,7 @@ mod tests {
             )])
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &loaded_config_for_path(&root, None),
             &make_context(
                 &NoEnvVars,
@@ -1950,7 +1953,7 @@ mod tests {
             )])
         };
 
-        let error = derive_intent_plan_from_context(
+        let error = derive_intent_plan(
             &loaded_config_for_path(&root, None),
             &make_context(
                 &NoEnvVars,
@@ -2010,7 +2013,7 @@ mod tests {
             )])
         };
 
-        let error = derive_intent_plan_from_context(
+        let error = derive_intent_plan(
             &loaded_config_for_path(&root, None),
             &make_context(
                 &NoEnvVars,
@@ -2053,7 +2056,7 @@ mod tests {
             )])
         };
 
-        let error = derive_intent_plan_from_context(
+        let error = derive_intent_plan(
             &loaded_config_for_path(&root, Some(root_path)),
             &make_context(
                 &NoEnvVars,
@@ -2090,7 +2093,7 @@ mod tests {
                 vec![make_file_config_item(".zshrc")],
             )])
         };
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &loaded_config_for_path(&root, None),
             &make_context(
                 &FnEnvReader(|name: &str| {
@@ -2134,7 +2137,7 @@ mod tests {
             )])
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &root_loaded_config(&root),
             &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
         )
@@ -2162,7 +2165,7 @@ mod tests {
             )])
         };
 
-        let error = derive_intent_plan_from_context(
+        let error = derive_intent_plan(
             &root_loaded_config(&root),
             &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
         )
@@ -2246,7 +2249,7 @@ mod tests {
             }
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &loaded_config_for_path(&root, None),
             &make_context(
                 &NoEnvVars,
@@ -2310,7 +2313,7 @@ mod tests {
             )])
         };
 
-        let error = derive_intent_plan_from_context(
+        let error = derive_intent_plan(
             &loaded_config_for_path(&root, None),
             &make_context(
                 &NoEnvVars,
@@ -2345,7 +2348,7 @@ mod tests {
             )])
         };
 
-        let error = derive_intent_plan_from_context(
+        let error = derive_intent_plan(
             &loaded_config_for_path(&root, None),
             &make_context(
                 &NoEnvVars,
@@ -2403,7 +2406,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
         )
@@ -2451,7 +2454,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
         )
@@ -2505,7 +2508,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
         )
@@ -2559,7 +2562,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
         )
@@ -2608,7 +2611,7 @@ mod tests {
             }],
         };
 
-        let error = derive_intent_plan_from_context(
+        let error = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
         )
@@ -2644,7 +2647,7 @@ mod tests {
             }],
         };
 
-        let error = derive_intent_plan_from_context(
+        let error = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
         )
@@ -2692,7 +2695,7 @@ mod tests {
             }],
         };
 
-        let plan = derive_intent_plan_from_context(
+        let plan = derive_intent_plan(
             &root_loaded_config(&config),
             &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
         )
