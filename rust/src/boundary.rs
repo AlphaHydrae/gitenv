@@ -1,3 +1,18 @@
+//! Shared boundary traits for external and system capabilities used across
+//! planning and execution stages.
+//!
+//! Each trait abstracts one narrow system concern so that production code and
+//! tests can swap implementations without touching domain logic.
+//!
+//! The composition root in `lib.rs` creates a single [`RealBoundary`] that
+//! implements every trait by delegating to the real filesystem and environment.
+//! Test code defines lightweight local doubles — simple structs or
+//! closure wrappers — that are fast and deterministic without touching the
+//! filesystem or process environment.
+//!
+//! Re-usable test doubles for these traits live in [`test_doubles`], which is
+//! compiled only when running tests.
+
 use crate::ProgramError;
 use crate::actions;
 use crate::config::{LoadedConfig, load_config};
@@ -76,6 +91,46 @@ impl TargetProbe for RealBoundary {
 impl SymlinkCreator for RealBoundary {
     fn create_symlink(&self, source: &Path, target: &Path) -> Result<(), ProgramError> {
         actions::create_symlink_on_filesystem(source, target)
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_doubles {
+    use super::EnvironmentReader;
+    use std::collections::BTreeMap;
+
+    /// Test double: returns environment variable values from a pre-populated
+    /// map. Useful when tests need reproducible env reads without touching the
+    /// real process environment.
+    ///
+    /// Prefer this over an ad-hoc local struct when a test only needs
+    /// `EnvironmentReader` and the logic under test dispatches on specific
+    /// variable names.
+    pub(crate) struct MapEnvReader(pub(crate) BTreeMap<String, String>);
+
+    impl MapEnvReader {
+        /// Creates a reader pre-populated with the given key-value pairs.
+        pub(crate) fn from_pairs(
+            pairs: impl IntoIterator<Item = (&'static str, &'static str)>,
+        ) -> Self {
+            Self(
+                pairs
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+            )
+        }
+
+        /// Creates an empty reader that returns `None` for every variable.
+        pub(crate) fn empty() -> Self {
+            Self(BTreeMap::new())
+        }
+    }
+
+    impl EnvironmentReader for MapEnvReader {
+        fn get_env_var(&self, name: &str) -> Option<String> {
+            self.0.get(name).cloned()
+        }
     }
 }
 

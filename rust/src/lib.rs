@@ -117,7 +117,9 @@ pub fn derive_intent_plan(
     intent::derive_intent_plan(loaded_config, &context)
 }
 
-/// Derives an operation plan using real filesystem directory reads.
+/// Single production entry point for operation planning.
+/// Wires a real boundary adapter into an `OperationContext` and delegates to
+/// the internal planning function.
 pub fn derive_operation_plan(
     intent_plan: &IntentPlan,
     home_directory: &Path,
@@ -130,7 +132,9 @@ pub fn derive_operation_plan(
     operation::derive_operation_plan(intent_plan, &context)
 }
 
-/// Applies operations using real filesystem probes and symlink creation.
+/// Single production entry point for apply execution.
+/// Wires real boundary adapters into an `ApplyContext` and delegates to the
+/// internal execution function.
 pub fn apply_operation_plan(
     operation_plan: &OperationPlan,
 ) -> Result<ApplyOperationReport, ProgramError> {
@@ -179,18 +183,8 @@ fn default_config_path_from_env(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::boundary::EnvironmentReader;
+    use crate::boundary::test_doubles::MapEnvReader;
     use std::path::{Path, PathBuf};
-
-    struct TestBoundary {
-        vars: std::collections::BTreeMap<String, String>,
-    }
-
-    impl EnvironmentReader for TestBoundary {
-        fn get_env_var(&self, name: &str) -> Option<String> {
-            self.vars.get(name).cloned()
-        }
-    }
 
     #[test]
     fn resolve_default_config_path_from_xdg_config_home() {
@@ -222,12 +216,7 @@ mod tests {
 
     #[test]
     fn use_gitenv_config_override_in_default_path_resolution() {
-        let boundary = TestBoundary {
-            vars: std::collections::BTreeMap::from([(
-                "GITENV_CONFIG".to_string(),
-                "/tmp/custom-config.yml".to_string(),
-            )]),
-        };
+        let boundary = MapEnvReader::from_pairs([("GITENV_CONFIG", "/tmp/custom-config.yml")]);
 
         let path = default_config_path(Path::new("/home/alex"), &boundary)
             .expect("GITENV_CONFIG should short-circuit default path resolution");
@@ -237,12 +226,7 @@ mod tests {
 
     #[test]
     fn resolve_default_config_path_with_xdg_config_home_via_boundary() {
-        let boundary = TestBoundary {
-            vars: std::collections::BTreeMap::from([(
-                "XDG_CONFIG_HOME".to_string(),
-                "/custom/config".to_string(),
-            )]),
-        };
+        let boundary = MapEnvReader::from_pairs([("XDG_CONFIG_HOME", "/custom/config")]);
 
         let path = default_config_path(Path::new("/home/alex"), &boundary)
             .expect("XDG_CONFIG_HOME should be used when set");
@@ -252,9 +236,7 @@ mod tests {
 
     #[test]
     fn resolve_default_config_path_without_overrides() {
-        let boundary = TestBoundary {
-            vars: std::collections::BTreeMap::new(),
-        };
+        let boundary = MapEnvReader::empty();
 
         let path = default_config_path(Path::new("/home/alex"), &boundary)
             .expect("default path should be resolved from home directory");

@@ -68,22 +68,3 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 55: Readability cleanup and naming pass for DI architecture
-
-Why this increment exists:
-
-- After the boundary refactors, transitional names and documentation can still
-  make the code harder to review even if the behavior is correct.
-
-Review target:
-
-- Follow the end-state contract in
-  [Dependency Boundary Refactor Target](./MIGRATION.md#dependency-boundary-refactor-target).
-- Rename boundary and context types for intent-revealing responsibility names.
-- Add concise module/function docs that explain where wiring happens and where
-  domain logic begins.
-- After all DI refactors are complete, run a focused test-code cleanup pass to
-  identify and reduce duplication in fake boundary implementations and any
-  other repeated test setup patterns.
-- Verify no coverage drop from refactor fallout and document any deferred
-  cleanup as explicit TODOs with closure conditions.

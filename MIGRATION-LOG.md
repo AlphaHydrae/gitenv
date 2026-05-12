@@ -11,6 +11,12 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-12: Readability cleanup and naming pass for DI architecture — Add
+  module-level doc comments to `boundary.rs`, `operation.rs`, and `actions.rs`;
+  improve function-level docs on the three composition-root entrypoints in
+  `lib.rs`; extract a shared `MapEnvReader` test double into
+  `boundary::test_doubles` and replace the ad-hoc `TestBoundary` in `lib.rs`
+  tests with the shared double.
 - 2026-05-12: Rebalance apply boundary — Convert apply execution from
   callback-style seams to an apply-stage context, wire real target/symlink
   adapters from the composition root, and keep command orchestration tests

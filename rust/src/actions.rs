@@ -1,3 +1,14 @@
+//! Apply execution stage.
+//!
+//! Executes an [`OperationPlan`] against the filesystem, creating symlinks and
+//! copies as directed. Returns a structured [`ApplyOperationReport`] recording
+//! the per-operation outcome.
+//!
+//! The composition root in `lib.rs` wires a real [`TargetProbe`] and
+//! [`SymlinkCreator`] boundary into an [`ApplyContext`]. Tests supply local
+//! closure-based doubles that record calls or return pre-configured results
+//! without touching the real filesystem.
+
 use crate::{
     CopyInspectionState, FileOperation, OperationAction, OperationPlan, ProgramError,
     boundary::{SymlinkCreator, TargetProbe},

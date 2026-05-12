@@ -1,3 +1,14 @@
+//! Operation planning stage.
+//!
+//! Converts an [`IntentPlan`] into a fully resolved [`OperationPlan`] by
+//! expanding source-relative paths and selector patterns into concrete
+//! filesystem operations. This stage only plans — no filesystem writes happen
+//! here.
+//!
+//! The composition root in `lib.rs` wires a real [`DirectoryEntriesReader`]
+//! boundary into an [`OperationContext`]. Tests supply a lightweight local
+//! double that returns pre-built directory listings without touching the disk.
+
 use crate::{
     ActionMode, ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction,
     ProgramError, ResolvedOptions, boundary::DirectoryEntriesReader, logging, path_resolution,
