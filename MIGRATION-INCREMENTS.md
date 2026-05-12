@@ -6,21 +6,48 @@ learn more, this backlog should be split, merged, reordered, rewritten, and
 pruned. The overall migration plan is located in
 [`MIGRATION.md`](./MIGRATION.md).
 
-For every increment, capture a coverage baseline **BEFORE** editing tracked
-files. If baseline capture is missed, recover it from a detached temporary
-worktree at `HEAD` under `tmp/agent/` instead of using `git stash` in the active
-working tree.
+## Increment Workflow Rules
 
-Completed increments must be moved to [`MIGRATION-LOG.md`](./MIGRATION-LOG.md)
-and removed from this file so it stays forward-looking.
+### Coverage Baseline And Regression Rules
 
-Capture and report follow-up work to address significant coverage decreases and
-other gaps in the increment scope. If the follow-up is a discrete task, create
-a new increment with a clear scope and review target. If the follow-up is more
-open-ended, add inline TODO comments in the relevant code and consider adding a
-note in the next increment that explicitly references the TODOs to ensure they
-are not forgotten. Do not add new uncovered code, or cause a coverage drop in
-code modified by the current increment, without explicit human approval.
+- For every increment, capture a coverage baseline **BEFORE** editing tracked
+  files.
+- If baseline capture is missed, recover it from a detached temporary worktree
+  at `HEAD` under `tmp/agent/` instead of using `git stash` in the active
+  working tree.
+- Treat the baseline as the value captured from the branch state at increment
+  start (or recovered from detached `HEAD` per policy), not from an earlier
+  conversation snapshot.
+- Do not infer or restate a baseline from memory; cite the exact command output
+  captured for the current increment.
+- If post-change coverage is lower than that baseline, keep the increment open
+  until coverage is restored or the project owner explicitly approves the drop.
+- Capture and report follow-up work for significant coverage decreases and other
+  gaps in increment scope:
+  1. if follow-up is a discrete task, create a new increment with clear scope
+     and review target,
+  2. if follow-up is open-ended, add inline TODO comments and consider adding a
+     note in the next increment that references those TODOs.
+- Do not add new uncovered code, or cause a coverage drop in code modified by
+  the current increment, without explicit human approval.
+
+### Completion And Evidence Gate
+
+- Do not mark an increment complete while any Review target bullet remains
+  partially implemented, deferred without agreement, or unverified.
+- Do not remove an increment from this file or add its log entry until all of
+  the following evidence exists in the same working pass:
+  1. required wrapper checks executed (`tests`, `lint`, `build`, `format`,
+     `coverage`, and `lint-md` when docs changed),
+  2. command outputs show success exit codes,
+  3. coverage baseline and post-change values are both reported.
+- If scope changes mid-increment, rewrite the increment entry before claiming
+  completion so the backlog reflects the real agreed scope.
+
+### Backlog Hygiene
+
+- Completed increments must be moved to [`MIGRATION-LOG.md`](./MIGRATION-LOG.md)
+  and removed from this file so the backlog stays forward-looking.
 
 ## Documentation
 
@@ -40,35 +67,6 @@ Architectural and design decisions referenced by active increments:
 - [Output boundary: domain data vs CLI rendering](./ARCHITECTURE.md#output-boundary-domain-data-vs-cli-rendering)
 
 ## Current Backlog
-
-### Increment 52: Remove the intent injectable wrapper
-
-Why this increment exists:
-
-- `derive_intent_plan_with_injectables` is transitional once the shared trait
-  boundary exists, and leaving it public keeps the API noisier than necessary.
-- The intent stage should be driven by one public entrypoint plus a private
-  internal implementation.
-
-Review target:
-
-- Follow the end-state contract in
-  [Dependency Boundary Refactor Target](./MIGRATION.md#dependency-boundary-refactor-target).
-- Replace the public injectable intent function with an internal function that
-  takes the shared context directly.
-- Keep `derive_intent_plan` as the sole public intent entrypoint and update
-  tests to construct local trait-backed contexts instead of calling the removed
-  wrapper.
-- Refactor `app/info.rs` and `app/apply.rs` unit tests to use fake stage
-  entrypoints by default so command tests verify orchestration behavior without
-  duplicating lower-layer planning coverage.
-- Keep a minimal real-path smoke check (in command-level integration tests)
-  that still executes the full planning/apply pipeline end-to-end.
-- Remove the temporary public-entrypoint wrapper test from `lib.rs` once the
-  migrated intent tests prove the same path through the remaining public API.
-- Carry `home_directory` as stage context data instead of threading it through
-  helper signatures as a separate argument.
-- Preserve intent behavior and coverage while reducing exported surface area.
 
 ### Increment 53: Rebalance operation boundary
 

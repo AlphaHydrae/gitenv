@@ -11,7 +11,11 @@
   ],
   "settings": {
     "chat.tools.terminal.autoApprove": {
-      "/^\\s*(?:bash +)?(?:\\.\\/)?\\.agent\\/scripts\\/(?:build|coverage|format|lint|lint-md|tests)\\.sh\\s*(?:2>&1\\s*)?(?:\\|\\s*tail\\s+-\\d+\\s*)?$/": {
+      "/^\\s*(?:bash +)?(?:\\.\\/)?\\.agent\\/scripts\\/(?:build|coverage|format|lint|lint-md|tests)\\.sh(?:\\s*2>&1)?(?:\\s*\\|\\s*tail\\s+-\\d+)?\\s*$/": {
+        "approve": true,
+        "matchCommandLine": true,
+      },
+      "/^\\s*cargo\\s+check(?:\\s+--quiet)?(?:\\s+2>&1)?(?:\\s*|\\s*head\\s+-\\d+)?\\s*$/": {
         "approve": true,
         "matchCommandLine": true,
       },
@@ -20,6 +24,10 @@
         "matchCommandLine": true,
       },
       "^\\s*tail\\s+-\\d+\\s+tmp\\/agent\\/[a-zA-Z0-9_]+(?:\\.[a-zA-Z0-9_]+)*\\s*$": {
+        "approve": true,
+        "matchCommandLine": true,
+      },
+      "^\\s*wc\\s+-l\\s+[a-zA-Z0-9_-]+(?:\\/[a-zA-Z0-9_-)*\\s*$": {
         "approve": true,
         "matchCommandLine": true,
       },

@@ -62,10 +62,10 @@ strategy, and quality gates.
   removal/closure condition.
 - Add increment-level regression tests whenever bugs or edge cases are found.
 - For every increment, report test coverage before and after the change. If
-  coverage decreases significantly, explain why and document follow-up work in
-  the living increments backlog and/or inline TODO comments. Treat a drop of
-  about 0.25 percentage points or more as significant unless there is a
-  stronger project-specific reason.
+  coverage decreases, restore it in the same increment unless the project owner
+  explicitly approves a temporary drop; if a drop is approved, explain why and
+  document follow-up work in the living increments backlog and/or inline TODO
+  comments.
 - Avoid mixing architectural refactors and feature delivery in the same
   increment unless explicitly approved.
 - As increments are completed, keep phase exit-criteria checkboxes in this file

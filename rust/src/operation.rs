@@ -31,12 +31,17 @@ pub struct FileOperation {
     pub conflict_policy: ConflictPolicy,
 }
 
-/// Like `derive_operation_plan` but accepts injected directory access for
+/// Internal planning function accepting injected directory access for
 /// deterministic tests and composition-root injection.
 ///
 /// Target directories are resolved relative to `home_directory` unless they are
 /// absolute or already home-prefixed. Relative source roots are resolved
 /// relative to the intent plan's repository root.
+///
+/// **Internal/Testing API**: This function is not part of the public stable API
+/// and may change without notice. It is only exported for integration test access.
+#[doc(hidden)]
+#[allow(dead_code)] // Used by tests within this module and integration tests
 pub fn derive_operation_plan_with_injectables(
     intent_plan: &IntentPlan,
     home_directory: &Path,

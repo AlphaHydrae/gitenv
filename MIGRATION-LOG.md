@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-12: Introduce intent stage context — Shift intent planning from
+  callback-based wiring to a dedicated stage context, keep the public entrypoint
+  centered in `lib.rs`, and align snapshot coverage with the internal
+  context-driven planning flow.
 - 2026-05-11: Introduce command-owned orchestration contexts - Replace `info`
   and `apply` command closure bundles with command-owned contexts that carry
   loaded config, resolved home directory, and wired stage entrypoints; move

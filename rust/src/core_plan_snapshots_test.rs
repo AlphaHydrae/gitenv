@@ -1,11 +1,55 @@
-use gitenv::{
-    ActionMode, ConflictPolicy, FileOperation, IntentAction, IntentFileAction, IntentPlan,
-    IntentSelectAction, IntentSource, LoadedConfig, OperationAction, OperationPlan, ProgramError,
-    ResolvedOptions, derive_intent_plan_with_injectables, derive_operation_plan_with_injectables,
+// Core plan snapshots for the full intent + operation planning chain.
+//
+// These are internal module tests (not integration tests) because they use
+// `IntentContext` and `derive_intent_plan_from_context`, which are `pub(crate)`
+// to keep the public surface focused on the primary entrypoints
+// (`derive_intent_plan`, `derive_operation_plan`).  The injectable seam tests
+// (env-var expansion, directory guards, include resolution) live in the
+// `intent` module's own unit tests.  This file covers the full combined
+// pipeline with controlled in-memory inputs, verifying that intent and
+// operation planning compose correctly end-to-end.
+
+use crate::boundary::{ConfigReader, DirectoryProbe, EnvironmentReader};
+use crate::intent::{
+    ConflictPolicy, IntentAction, IntentContext, IntentFileAction, IntentPlan, IntentSelectAction,
+    IntentSource, ResolvedOptions, derive_intent_plan_from_context,
+};
+use crate::operation::derive_operation_plan_with_injectables;
+use crate::{
+    ActionMode, FileOperation, LoadedConfig, OperationAction, OperationPlan, ProgramError,
     parse_config,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+
+// --- Test doubles -----------------------------------------------------------
+
+struct MapEnvReader(BTreeMap<String, String>);
+impl EnvironmentReader for MapEnvReader {
+    fn get_env_var(&self, name: &str) -> Option<String> {
+        self.0.get(name).cloned()
+    }
+}
+
+struct SetDirProbe(BTreeSet<String>);
+impl DirectoryProbe for SetDirProbe {
+    fn is_directory(&self, path: &str) -> bool {
+        self.0.contains(path)
+    }
+}
+
+struct AssertConfigReader {
+    expected_path: PathBuf,
+    loaded_config: LoadedConfig,
+}
+impl ConfigReader for AssertConfigReader {
+    fn read_config_file(&self, path: &Path) -> Result<LoadedConfig, ProgramError> {
+        assert_eq!(path, self.expected_path);
+        Ok(self.loaded_config.clone())
+    }
+}
+
+// --- Helper -----------------------------------------------------------------
 
 fn derive_representative_plans(
     root_yaml: &str,
@@ -17,31 +61,33 @@ fn derive_representative_plans(
         path: PathBuf::from("/root.yml"),
         config: root,
     };
-    let environment = BTreeMap::from([("DOTS".to_string(), "/repo/dots".to_string())]);
-    let get_env_var = |name: &str| environment.get(name).cloned();
-    // Guard paths are checked after home expansion; use absolute paths here.
-    let known_directories =
-        BTreeSet::from(["/home/tester/shell".to_string(), "/feature/on".to_string()]);
+    let include_loaded = LoadedConfig {
+        path: PathBuf::from("/inc/common.yml"),
+        config: include,
+    };
 
-    let intent_plan = derive_intent_plan_with_injectables(
-        &loaded_root,
-        &get_env_var,
-        Path::new("/home/tester"),
-        &|path| known_directories.contains(path),
-        &|path: &Path| {
-            if path == Path::new("/inc/common.yml") {
-                Ok(LoadedConfig {
-                    path: path.to_path_buf(),
-                    config: include.clone(),
-                })
-            } else {
-                Err(ProgramError::ConfigurationReadFailed {
-                    path: path.to_path_buf(),
-                    message: "not found".to_string(),
-                })
-            }
-        },
-    )?;
+    let env_reader = MapEnvReader(BTreeMap::from([(
+        "DOTS".to_string(),
+        "/repo/dots".to_string(),
+    )]));
+    // Guard paths are checked after home expansion; use absolute paths here.
+    let dir_probe = SetDirProbe(BTreeSet::from([
+        "/home/tester/shell".to_string(),
+        "/feature/on".to_string(),
+    ]));
+    let config_reader = AssertConfigReader {
+        expected_path: PathBuf::from("/inc/common.yml"),
+        loaded_config: include_loaded,
+    };
+
+    let context = IntentContext {
+        home_directory: PathBuf::from("/home/tester"),
+        env_reader: &env_reader,
+        dir_probe: &dir_probe,
+        config_reader: &config_reader,
+    };
+
+    let intent_plan = derive_intent_plan_from_context(&loaded_root, &context)?;
 
     let operation_plan =
         derive_operation_plan_with_injectables(&intent_plan, Path::new("/home/tester"), &|path| {
