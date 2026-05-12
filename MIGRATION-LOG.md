@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-12: Auto-exclude `.DS_Store` through operation context - Add a global
+  exclusion list to `OperationContext`, resolve the platform-specific default in
+  `lib.rs`, and keep selector expansion independent of OS logic while preserving
+  configurable selector filtering.
 - 2026-05-12: Add explicit config path precedence in CLI parsing - Add
   `--config`/`-c` parsing in `cli.rs` with clap-backed `GITENV_CONFIG` fallback,
   resolve and load the configuration once in `run_cli`, pass loaded config into

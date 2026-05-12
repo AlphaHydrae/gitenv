@@ -173,6 +173,9 @@ sources:
 `select` expands a set of files from one source directory. With `dotfiles:
 true`, only entries whose names start with `.` are included.
 
+On macOS, `.DS_Store` is excluded automatically during selector expansion.
+Add it to `exclude` if you want to make the rule explicit for a source.
+
 ### Overwrite and backup
 
 ```yaml

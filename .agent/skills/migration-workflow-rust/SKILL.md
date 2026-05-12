@@ -147,6 +147,10 @@ Run these checks from the repository root (in order):
 
    - **🔴 DO NOT** provide completion status or a suggested commit message
      unless baseline and current coverage are both captured and compared.
+   - **🔴 Current-run evidence gate:** before citing coverage results, verify
+     `tmp/agent/coverage_output.log` contains the same current-run timestamp
+     markers (`Run started at (UTC)` / `Run completed at (UTC)`) and exit code.
+     Treat previous-run logs as invalid evidence.
    - If coverage decreases, restore coverage in the same increment **BEFORE**
      claiming completion.
    - Do not add new uncovered code, or cause a coverage drop in code modified
@@ -168,6 +172,16 @@ Run these checks from the repository root (in order):
 
 **Show exit codes and summary output for every check.** Do not claim tests pass
 without showing actual output.
+
+**Hard evidence requirements for wrapper runs:**
+
+- Use wrapper output from the current run only.
+- Include explicit run timestamp markers and exit code in evidence.
+- If output is missing or timestamp markers indicate a prior run, treat the
+  evidence as stale and rerun before claiming results.
+- Keep human-facing summaries concise: confirm freshness checks were completed,
+   but include only one brief freshness detail unless the human asks for full
+   timestamp output.
 
 ## Commit message format
 

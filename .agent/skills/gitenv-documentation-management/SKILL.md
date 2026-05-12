@@ -163,6 +163,15 @@ After updating any core documentation file, verify:
    - Operational command templates used by agents never contain raw backticks;
      use plain-text fixed-string searches (`rg -F`) or escaped backticks when
      literals are required.
+   - Wrapper-run evidence requires current-run UTC start/end markers and
+     explicit exit codes; missing output or prior-run markers make evidence
+     stale and invalid until rerun.
+   - Human-facing verification summaries stay concise: confirm freshness checks
+     were applied, and include only minimal timestamp detail unless full logs
+     are explicitly requested.
+   - Coverage evidence requires reading `tmp/agent/coverage_output.log` from the
+     same run and validating matching current-run markers before reporting
+     totals.
    - Commit message guidance omits routine tests, migration log/backlog updates,
      and upkeep notes unless those are the primary deliverable.
 

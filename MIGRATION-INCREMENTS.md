@@ -68,28 +68,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 57: Auto-exclude `.DS_Store` on macOS during selector expansion
-
-Why this increment exists:
-
-- Ruby's `Context` silently adds `.DS_Store` to every selector's ignore list
-  when running on macOS. The Rust port requires users to list it explicitly in
-  each `select.exclude` array. This is a silent behavioral difference that
-  affects every macOS user migrating an existing config.
-
-Review target:
-
-- When expanding a `select` action on macOS (detected via
-  `cfg(target_os = "macos")`), `.DS_Store` is excluded by default unless the
-  user has already listed it in `exclude`.
-- The exclusion is applied in the `should_include_selection_entry` helper in
-  `operation.rs` (or via a platform constant injected alongside
-  `IntentSelectAction`).
-- A unit test guarded with `#[cfg(target_os = "macos")]` asserts that
-  `.DS_Store` entries are omitted from the expanded result.
-- A cross-platform note is added to the `select` documentation in
-  `rust/README.md`.
-
 ### Increment 58: Add "select all files" mode to cover dotfiles and non-dotfiles
 
 Why this increment exists:

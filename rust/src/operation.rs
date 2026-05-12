@@ -54,6 +54,8 @@ pub(crate) struct OperationContext<'a> {
     pub(crate) home_directory: PathBuf,
     /// Boundary adapter for listing directory entries (used for selector expansion).
     pub(crate) dir_reader: &'a dyn DirectoryEntriesReader,
+    /// Platform- or configuration-derived exclusions applied to every selector.
+    pub(crate) global_selection_excludes: Vec<String>,
 }
 
 /// Internal planning function accepting a stage-owned context for
@@ -93,6 +95,7 @@ pub(crate) fn derive_operation_plan(
                         &source_root,
                         select_action,
                         &context.home_directory,
+                        &context.global_selection_excludes,
                         &|path| context.dir_reader.list_directory_entries(path),
                     )?);
                 }
@@ -153,13 +156,16 @@ fn expand_select_action(
     source_root: &Path,
     select_action: &IntentSelectAction,
     home_directory: &Path,
+    global_selection_excludes: &[String],
     list_directory: &impl Fn(&Path) -> Result<Vec<String>, ProgramError>,
 ) -> Result<Vec<OperationAction>, ProgramError> {
     let entries = list_directory(source_root)?;
     let total_entries = entries.len();
     let selected_entries = entries
         .into_iter()
-        .filter(|entry| should_include_selection_entry(entry, select_action))
+        .filter(|entry| {
+            should_include_selection_entry(entry, select_action, global_selection_excludes)
+        })
         .collect::<Vec<_>>();
 
     logging::operation(
@@ -207,7 +213,11 @@ fn operation_action(
     }
 }
 
-fn should_include_selection_entry(entry: &str, select_action: &IntentSelectAction) -> bool {
+fn should_include_selection_entry(
+    entry: &str,
+    select_action: &IntentSelectAction,
+    global_selection_excludes: &[String],
+) -> bool {
     let has_dot_prefix = entry.starts_with('.');
     let selected_by_dotfiles = if select_action.dotfiles {
         has_dot_prefix
@@ -216,6 +226,9 @@ fn should_include_selection_entry(entry: &str, select_action: &IntentSelectActio
     };
 
     selected_by_dotfiles
+        && !global_selection_excludes
+            .iter()
+            .any(|excluded| excluded == entry)
         && !select_action
             .exclude
             .iter()
@@ -229,7 +242,8 @@ mod tests {
     };
     use crate::{
         ActionMode, ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction,
-        IntentSource, ProgramError, ResolvedOptions, boundary::test_doubles::FnDirectoryReader,
+        IntentSource, ProgramError, ResolvedOptions,
+        boundary::{DirectoryEntriesReader, test_doubles::FnDirectoryReader},
         derive_operation_plan as derive_operation_plan_entrypoint,
     };
     use std::fs;
@@ -282,6 +296,22 @@ mod tests {
             to: "~".to_string(),
             mkdir: true,
             conflict_policy: ConflictPolicy::Skip,
+        }
+    }
+
+    fn make_operation_context<'a>(
+        home_directory: PathBuf,
+        dir_reader: &'a dyn DirectoryEntriesReader,
+        global_selection_excludes: Option<Vec<&str>>,
+    ) -> OperationContext<'a> {
+        OperationContext {
+            home_directory,
+            dir_reader,
+            global_selection_excludes: global_selection_excludes
+                .unwrap_or_default()
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
         }
     }
 
@@ -341,10 +371,7 @@ mod tests {
         );
 
         let dir_reader = FnDirectoryReader(crate::fs_adapter::list_directory_entries);
-        let context = OperationContext {
-            home_directory: home.path().to_path_buf(),
-            dir_reader: &dir_reader,
-        };
+        let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should expand selected files");
 
@@ -371,10 +398,7 @@ mod tests {
         );
 
         let dir_reader = FnDirectoryReader(crate::fs_adapter::list_directory_entries);
-        let context = OperationContext {
-            home_directory: home.path().to_path_buf(),
-            dir_reader: &dir_reader,
-        };
+        let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should keep explicit file actions");
 
@@ -407,10 +431,7 @@ mod tests {
             let path = path.to_path_buf();
             crate::fs_adapter::list_directory_entries(&path)
         });
-        let context = OperationContext {
-            home_directory: home.path().to_path_buf(),
-            dir_reader: &dir_reader,
-        };
+        let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should expand selected files");
 
@@ -458,10 +479,7 @@ mod tests {
             let path = path.to_path_buf();
             crate::fs_adapter::list_directory_entries(&path)
         });
-        let context = OperationContext {
-            home_directory: home.path().to_path_buf(),
-            dir_reader: &dir_reader,
-        };
+        let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should expand selected symlink entries");
 
@@ -498,10 +516,7 @@ mod tests {
                 "tmux.conf".to_string(),
             ])
         });
-        let context = OperationContext {
-            home_directory: home.path().to_path_buf(),
-            dir_reader: &dir_reader,
-        };
+        let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should expand non-dotfile selection");
 
@@ -533,10 +548,7 @@ mod tests {
                 message: "boom".to_string(),
             })
         });
-        let context = OperationContext {
-            home_directory: home.path().to_path_buf(),
-            dir_reader: &dir_reader,
-        };
+        let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
         let error = derive_operation_plan(&intent_plan, &context)
             .expect_err("selector expansion should propagate listing failures");
 
@@ -565,10 +577,7 @@ mod tests {
         );
 
         let dir_reader = FnDirectoryReader(crate::fs_adapter::list_directory_entries);
-        let context = OperationContext {
-            home_directory: home.path().to_path_buf(),
-            dir_reader: &dir_reader,
-        };
+        let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should anchor relative targets to the home directory");
 
@@ -598,10 +607,7 @@ mod tests {
         );
 
         let dir_reader = FnDirectoryReader(crate::fs_adapter::list_directory_entries);
-        let context = OperationContext {
-            home_directory: home.path().to_path_buf(),
-            dir_reader: &dir_reader,
-        };
+        let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should resolve ~/ paths for copy operations");
 
@@ -640,10 +646,7 @@ mod tests {
             assert_eq!(path, config_source.as_path());
             Ok(vec![".nvim".to_string(), ".tmux".to_string()])
         });
-        let context = OperationContext {
-            home_directory: home.path().to_path_buf(),
-            dir_reader: &dir_reader,
-        };
+        let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should combine actions from multiple sources");
 
@@ -709,10 +712,7 @@ mod tests {
             let path = path.to_path_buf();
             crate::fs_adapter::list_directory_entries(&path)
         });
-        let context = OperationContext {
-            home_directory: home.path().to_path_buf(),
-            dir_reader: &dir_reader,
-        };
+        let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
         let error = derive_operation_plan(&intent_plan, &context)
             .expect_err("missing source directories should fail with typed error");
 
@@ -721,5 +721,77 @@ mod tests {
             ProgramError::SourceDirectoryReadFailed { path, message }
                 if path == &missing_source && !message.is_empty()
         ));
+    }
+
+    #[test]
+    fn exclude_ds_store_entries_during_selector_expansion() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::write(repository.path().join(".DS_Store"), "binary\n")
+            .expect("global dotfile should be written");
+        fs::write(repository.path().join(".zshrc"), "export TEST=1\n")
+            .expect("selectable dotfile should be written");
+
+        let intent_plan = make_intent_plan(
+            repository.path(),
+            vec![make_intent_source(
+                ".",
+                vec![make_select_action(true, vec![], default_options())],
+            )],
+        );
+
+        let dir_reader = FnDirectoryReader(crate::fs_adapter::list_directory_entries);
+        let context = make_operation_context(
+            home.path().to_path_buf(),
+            &dir_reader,
+            Some(vec![".DS_Store"]),
+        );
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
+            .expect("operation planning should honor global excludes");
+
+        assert_eq!(
+            operation_plan,
+            expected_operation_plan(vec![expected_symlink(
+                repository.path().join(".zshrc"),
+                home.path().join(".zshrc"),
+            )])
+        );
+    }
+
+    #[test]
+    fn exclude_multiple_global_selection_entries_during_selector_expansion() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::write(repository.path().join(".DS_Store"), "binary\n")
+            .expect("first global dotfile should be written");
+        fs::write(repository.path().join(".git"), "index\n")
+            .expect("second global dotfile should be written");
+        fs::write(repository.path().join(".zshrc"), "export TEST=1\n")
+            .expect("selectable dotfile should be written");
+
+        let intent_plan = make_intent_plan(
+            repository.path(),
+            vec![make_intent_source(
+                ".",
+                vec![make_select_action(true, vec![], default_options())],
+            )],
+        );
+
+        let dir_reader = FnDirectoryReader(crate::fs_adapter::list_directory_entries);
+        let context = make_operation_context(
+            home.path().to_path_buf(),
+            &dir_reader,
+            Some(vec![".DS_Store", ".git"]),
+        );
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
+            .expect("operation planning should honor multiple global excludes");
+
+        assert_eq!(
+            operation_plan,
+            expected_operation_plan(vec![expected_symlink(
+                repository.path().join(".zshrc"),
+                home.path().join(".zshrc"),
+            )])
+        );
     }
 }

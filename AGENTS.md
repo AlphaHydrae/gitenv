@@ -78,6 +78,20 @@ them to EVERY task, EVERY time.**
 - **🔴 NEVER claim a task is complete without running the required checks.**
   Do not say "tests pass" without showing the actual command output and exit
   code. This is a critical recurring failure mode.
+  - **Current-run evidence gate:** treat prior logs as stale by default. Before
+    claiming any wrapper result, show evidence from the current run only:
+    command output for that run, explicit exit code, and the run timestamp
+    markers emitted by the wrapper (`Run started at (UTC)` / `Run completed at
+(UTC)`).
+  - **Concise reporting gate:** use timestamp markers for verification, but do
+    not flood human-facing summaries with every timestamp from every wrapper.
+    In final reporting, confirm freshness checks were performed and include at
+    most one concise freshness detail (for example latest completed timestamp
+    or a short "completed N seconds ago" note) unless a human explicitly asks
+    for the full timestamp set.
+  - **Stale-output gate:** if wrapper output is missing, truncated, or reuses
+    prior-run timestamp markers, treat the run as invalid and rerun before
+    making any claim.
   - Always run `./.agent/scripts/tests.sh` for test changes.
   - Always run `./.agent/scripts/lint.sh` for source changes.
   - Always run `./.agent/scripts/lint-md.sh` for documentation changes.
@@ -85,6 +99,9 @@ them to EVERY task, EVERY time.**
   - Always run `./.agent/scripts/format.sh` for formatting verification.
   - For migration increments, always run `./.agent/scripts/coverage.sh` again
     after changes and report both previous and current coverage.
+  - **Coverage freshness gate:** after each coverage run, read
+    `tmp/agent/coverage_output.log` and verify it contains the same current-run
+    timestamp markers plus exit code before using it as evidence.
   - If you realize baseline was missed after edits started, stop completion
     reporting immediately and run a recovery baseline before proceeding.
     - **Recovery baseline protocol (safe for review state):**
@@ -397,7 +414,8 @@ These wrappers run the commands documented in
 
 - Use `./.agent/scripts/coverage.sh` from the repository root for test coverage.
 - The script captures full output to `tmp/agent/coverage_output.log`, prints the
-  exit code, and prints the total line coverage when available.
+  exit code, prints UTC start/end run markers, and prints the total line
+  coverage when available.
 - On a default run the script also writes a line-by-line annotated source report
   to `tmp/agent/coverage_annotated.log`. To list every uncovered line quickly:
   ```sh
@@ -408,29 +426,29 @@ These wrappers run the commands documented in
 
 - Use `./.agent/scripts/lint.sh` from the repository root.
 - The script captures full output to `tmp/agent/lint_output.log` and prints the
-  exit code and a summary tail to stdout.
+  exit code, UTC start/end run markers, and a summary tail to stdout.
 
 ### Building
 
 - Use `./.agent/scripts/build.sh` from the repository root when verifying
   builds.
 - The script captures full output to `tmp/agent/build_output.log` and prints the
-  exit code and a summary tail to stdout.
+  exit code, UTC start/end run markers, and a summary tail to stdout.
 
 ### Format wrapper
 
 - Use `./.agent/scripts/format.sh` from the repository root for formatting
   checks.
 - The script captures full output to `tmp/agent/format_output.log` and prints
-  the exit code and a summary tail to stdout.
+  the exit code, UTC start/end run markers, and a summary tail to stdout.
 
 ### Markdown lint wrapper
 
 - Use `./.agent/scripts/lint-md.sh` from the repository root for Markdown
   linting.
 - The script lints all Markdown files in the project, captures full output to
-  `tmp/agent/markdown_lint_output.log`, and prints the exit code plus a summary
-  tail to stdout.
+  `tmp/agent/markdown_lint_output.log`, and prints the exit code, UTC start/end
+  run markers, plus a summary tail to stdout.
 
 ## Former Commands
 

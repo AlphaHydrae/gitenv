@@ -34,12 +34,16 @@ fi
 
 cd "$RUST_WORKSPACE"
 
+RUN_STARTED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
 set +e
 if [[ $# -eq 0 ]]; then
-  echo "Running: cargo test" | tee "$OUTPUT_LOG"
+  echo "Run started at (UTC): $RUN_STARTED_AT" | tee "$OUTPUT_LOG"
+  echo "Running: cargo test" | tee -a "$OUTPUT_LOG"
   cargo test 2>&1 | tee -a "$OUTPUT_LOG"
 else
-  echo "Running: cargo test $*" | tee "$OUTPUT_LOG"
+  echo "Run started at (UTC): $RUN_STARTED_AT" | tee "$OUTPUT_LOG"
+  echo "Running: cargo test $*" | tee -a "$OUTPUT_LOG"
   cargo test "$@" 2>&1 | tee -a "$OUTPUT_LOG"
 fi
 
@@ -48,10 +52,14 @@ set -e
 
 echo "" >> "$OUTPUT_LOG"
 echo "Exit code: $EXIT_CODE" >> "$OUTPUT_LOG"
+RUN_COMPLETED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+echo "Run completed at (UTC): $RUN_COMPLETED_AT" >> "$OUTPUT_LOG"
 
 echo
 echo "===== EXIT STATUS ====="
 echo "Exit code: $EXIT_CODE"
+echo "Run started at (UTC): $RUN_STARTED_AT"
+echo "Run completed at (UTC): $RUN_COMPLETED_AT"
 echo
 echo "===== LAST 30 LINES OF OUTPUT ====="
 tail -30 "$OUTPUT_LOG"

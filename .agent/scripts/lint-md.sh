@@ -32,6 +32,9 @@ fi
 
 cd "$REPO_ROOT"
 
+RUN_STARTED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+echo "Run started at (UTC): $RUN_STARTED_AT" | tee "$OUTPUT_LOG"
+
 LYCHEE_BIN=""
 if command -v lychee >/dev/null 2>&1; then
   LYCHEE_BIN="$(command -v lychee)"
@@ -57,14 +60,14 @@ done < <(
 
 set +e
 if [[ ${#MARKDOWN_FILES[@]} -eq 0 ]]; then
-  echo "No Markdown files found." | tee "$OUTPUT_LOG"
+  echo "No Markdown files found." | tee -a "$OUTPUT_LOG"
   EXIT_CODE=0
 elif [[ -z "$LYCHEE_BIN" ]]; then
-  echo "lychee is not available. Install with: cargo install lychee --version 0.24.1 --locked" | tee "$OUTPUT_LOG"
+  echo "lychee is not available. Install with: cargo install lychee --version 0.24.1 --locked" | tee -a "$OUTPUT_LOG"
   echo "If installed via asdf, run: asdf reshim rust" | tee -a "$OUTPUT_LOG"
   EXIT_CODE=127
 else
-  echo "Running: $LYCHEE_BIN --include-fragments --offline --no-progress <markdown files>" | tee "$OUTPUT_LOG"
+  echo "Running: $LYCHEE_BIN --include-fragments --offline --no-progress <markdown files>" | tee -a "$OUTPUT_LOG"
   "$LYCHEE_BIN" --include-fragments --offline --no-progress "${MARKDOWN_FILES[@]}" 2>&1 | tee -a "$OUTPUT_LOG"
   EXIT_CODE=${PIPESTATUS[0]}
 fi
@@ -72,10 +75,14 @@ set -e
 
 echo "" >> "$OUTPUT_LOG"
 echo "Exit code: $EXIT_CODE" >> "$OUTPUT_LOG"
+RUN_COMPLETED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+echo "Run completed at (UTC): $RUN_COMPLETED_AT" >> "$OUTPUT_LOG"
 
 echo
 echo "===== EXIT STATUS ====="
 echo "Exit code: $EXIT_CODE"
+echo "Run started at (UTC): $RUN_STARTED_AT"
+echo "Run completed at (UTC): $RUN_COMPLETED_AT"
 echo
 echo "===== LAST 30 LINES OF OUTPUT ====="
 tail -30 "$OUTPUT_LOG"

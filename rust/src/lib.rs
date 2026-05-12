@@ -160,6 +160,7 @@ pub fn derive_operation_plan(
     let context = operation::OperationContext {
         home_directory: home_directory.to_path_buf(),
         dir_reader: &boundary,
+        global_selection_excludes: default_global_selection_excludes(std::env::consts::OS),
     };
     operation::derive_operation_plan(intent_plan, &context)
 }
@@ -223,6 +224,16 @@ fn default_config_path_from_env(
     config_home
         .join(DEFAULT_CONFIG_DIRECTORY_NAME)
         .join(DEFAULT_CONFIG_FILE_NAME)
+}
+
+fn default_global_selection_excludes(os_name: &str) -> Vec<String> {
+    let mut excludes = Vec::new();
+
+    if os_name == "macos" {
+        excludes.push(".DS_Store".to_string());
+    }
+
+    excludes
 }
 
 #[cfg(test)]
@@ -344,5 +355,19 @@ mod tests {
             result,
             Err(ProgramError::ConfigurationReadFailed { path, .. }) if path == missing_path
         ));
+    }
+
+    #[test]
+    fn include_ds_store_in_global_selection_excludes_for_macos() {
+        let excludes = default_global_selection_excludes("macos");
+
+        assert_eq!(excludes, vec![".DS_Store".to_string()]);
+    }
+
+    #[test]
+    fn keep_global_selection_excludes_empty_for_non_macos_os_names() {
+        let excludes = default_global_selection_excludes("linux");
+
+        assert_eq!(excludes, Vec::<String>::new());
     }
 }

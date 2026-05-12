@@ -110,6 +110,7 @@ fn derive_representative_plans(
     let operation_context = OperationContext {
         home_directory: PathBuf::from("/home/tester"),
         dir_reader: &dir_reader,
+        global_selection_excludes: vec![],
     };
     let operation_plan = derive_operation_plan(&intent_plan, &operation_context)?;
 

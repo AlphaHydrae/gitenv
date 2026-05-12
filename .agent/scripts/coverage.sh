@@ -41,12 +41,15 @@ fi
 
 cd "$RUST_WORKSPACE"
 
+RUN_STARTED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
 if ! cargo llvm-cov --version >/dev/null 2>&1; then
+  echo "Run started at (UTC): $RUN_STARTED_AT" | tee "$OUTPUT_LOG"
   {
     echo "cargo-llvm-cov is not available."
     echo "Install with: cargo install cargo-llvm-cov --locked"
     echo "If installed via asdf, run: asdf reshim rust"
-  } | tee "$OUTPUT_LOG"
+  } | tee -a "$OUTPUT_LOG"
 
   echo
   echo "===== EXIT STATUS ====="
@@ -59,7 +62,8 @@ fi
 
 set +e
 if [[ $# -eq 0 ]]; then
-  echo "Running: cargo llvm-cov --workspace --all-targets --summary-only" | tee "$OUTPUT_LOG"
+  echo "Run started at (UTC): $RUN_STARTED_AT" | tee "$OUTPUT_LOG"
+  echo "Running: cargo llvm-cov --workspace --all-targets --summary-only" | tee -a "$OUTPUT_LOG"
   cargo llvm-cov --workspace --all-targets --summary-only 2>&1 | tee -a "$OUTPUT_LOG"
   SUMMARY_EXIT_CODE=${PIPESTATUS[0]}
 
@@ -71,7 +75,8 @@ if [[ $# -eq 0 ]]; then
 
   EXIT_CODE=$SUMMARY_EXIT_CODE
 else
-  echo "Running: cargo llvm-cov $*" | tee "$OUTPUT_LOG"
+  echo "Run started at (UTC): $RUN_STARTED_AT" | tee "$OUTPUT_LOG"
+  echo "Running: cargo llvm-cov $*" | tee -a "$OUTPUT_LOG"
   cargo llvm-cov "$@" 2>&1 | tee -a "$OUTPUT_LOG"
   EXIT_CODE=${PIPESTATUS[0]}
 fi
@@ -79,6 +84,8 @@ set -e
 
 echo "" >> "$OUTPUT_LOG"
 echo "Exit code: $EXIT_CODE" >> "$OUTPUT_LOG"
+RUN_COMPLETED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+echo "Run completed at (UTC): $RUN_COMPLETED_AT" >> "$OUTPUT_LOG"
 
 TOTAL_LINE="$(grep -E '^TOTAL' "$OUTPUT_LOG" | tail -1 || true)"
 TOTAL_PERCENT=""
@@ -92,6 +99,8 @@ echo "Exit code: $EXIT_CODE"
 if [[ -n "$TOTAL_PERCENT" ]]; then
   echo "Total line coverage: $TOTAL_PERCENT"
 fi
+echo "Run started at (UTC): $RUN_STARTED_AT"
+echo "Run completed at (UTC): $RUN_COMPLETED_AT"
 echo
 echo "===== LAST 30 LINES OF OUTPUT ====="
 tail -30 "$OUTPUT_LOG"
