@@ -6,23 +6,16 @@ Do not treat it as the final root documentation yet.
 Run `gitenv` without arguments to inspect the planned links and copies.
 
 ```text
-~/.config/gitenv-demo/shell/.zshrc -> ~/projects/env/./dotfiles/zshrc   not yet set up
-~/.config/gitenv-demo/git/config <- ~/projects/env/./dotfiles/gitconfig   not yet set up
-~/.local/share/profiles/.aliases -> ~/projects/env/profiles/.aliases   not yet set up
-~/.local/share/profiles/.profile -> ~/projects/env/profiles/.profile   not yet set up
+~/.zshrc -> ~/projects/dotfiles/.zshrc   not yet set up
+~/.gitconfig <- ~/projects/dotfiles/.gitconfig   not yet set up
 ```
 
 Then run `gitenv apply` to create the missing targets.
 
 ```text
-created symlink ~/.config/gitenv-demo/shell/.zshrc -> ~/projects/env/./dotfiles/zshrc
-copied ~/projects/env/./dotfiles/gitconfig to ~/.config/gitenv-demo/git/config
-created symlink ~/.local/share/profiles/.aliases -> ~/projects/env/profiles/.aliases
-created symlink ~/.local/share/profiles/.profile -> ~/projects/env/profiles/.profile
+created symlink ~/.zshrc -> ~/projects/dotfiles/.zshrc
+copied ~/projects/dotfiles/.gitconfig to ~/projects/dotfiles/.gitconfig
 ```
-
-The output examples below use `~` for readability. A follow-up migration
-increment will align the CLI display with that home-relative format.
 
 ## Installation
 
