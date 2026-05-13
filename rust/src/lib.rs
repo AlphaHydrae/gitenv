@@ -23,7 +23,7 @@ pub use logging::init as init_logging;
 pub use actions::{ApplyOperationOutcome, ApplyOperationReport};
 pub use config::{
     ActionMode, Config, ConfigItem, Defaults, FileConfig, Guard, Include, LoadedConfig,
-    SelectConfig, Source, SourceRoot, load_config, parse_config,
+    SelectConfig, SelectionType, Source, SourceRoot, load_config, parse_config,
 };
 pub use intent::{
     ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction, IntentSource,

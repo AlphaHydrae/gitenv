@@ -1,7 +1,8 @@
 use crate::ProgramError;
 use crate::boundary::{ConfigReader, DirectoryProbe, EnvironmentReader};
 use crate::config::{
-    ActionMode, Config, ConfigItem, Defaults, Guard, Include, LoadedConfig, SourceRoot,
+    ActionMode, Config, ConfigItem, Defaults, Guard, Include, LoadedConfig, SelectionType,
+    SourceRoot,
 };
 use crate::logging;
 use crate::path_resolution;
@@ -33,7 +34,7 @@ pub struct ResolvedOptions {
 /// The intent-stage planning output derived from configuration semantics.
 ///
 /// This stage resolves defaults, source roots, includes, and guards, but keeps
-/// selector intent (for example `dotfiles` and `exclude`) unexpanded.
+/// selector intent (for example selection scope and `exclude`) unexpanded.
 /// Concrete path and selector expansion is the responsibility of the
 /// operation stage.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,8 +75,8 @@ pub struct IntentFileAction {
 /// Resolved action that operates on a glob-selected set of files.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IntentSelectAction {
-    /// When `true`, dotfiles (names starting with `.`) are included.
-    pub dotfiles: bool,
+    /// Selection scope used by operation-stage selector expansion.
+    pub selection_type: SelectionType,
     /// Filenames explicitly excluded from selection.
     pub exclude: Vec<String>,
     pub options: ResolvedOptions,
@@ -280,7 +281,7 @@ fn plan_sources_recursively(
                         select_config.backup_on_overwrite,
                     )?;
                     Ok(IntentAction::Select(IntentSelectAction {
-                        dotfiles: select_config.dotfiles,
+                        selection_type: select_config.selection_type.clone(),
                         exclude: select_config.exclude.clone(),
                         options,
                     }))
@@ -449,7 +450,7 @@ mod tests {
     use crate::boundary::{ConfigReader, DirectoryProbe, EnvironmentReader};
     use crate::{
         ActionMode, Config, ConfigItem, Defaults, FileConfig, Guard, Include, LoadedConfig,
-        ProgramError, SelectConfig, Source, SourceRoot,
+        ProgramError, SelectConfig, SelectionType, Source, SourceRoot,
         derive_intent_plan as derive_intent_plan_entrypoint,
     };
     use std::path::{Path, PathBuf};
@@ -668,7 +669,7 @@ mod tests {
                         backup_on_overwrite: None,
                     }),
                     ConfigItem::Select(SelectConfig {
-                        dotfiles: true,
+                        selection_type: SelectionType::Dot,
                         exclude: vec![".git".to_string()],
                         mode: None,
                         to: None,
@@ -712,7 +713,7 @@ mod tests {
                         },
                     }),
                     IntentAction::Select(IntentSelectAction {
-                        dotfiles: true,
+                        selection_type: SelectionType::Dot,
                         exclude: vec![".git".to_string()],
                         options: ResolvedOptions {
                             mode: ActionMode::Copy,
@@ -722,6 +723,116 @@ mod tests {
                         },
                     }),
                 ],
+            }],
+        };
+
+        assert_eq!(plan, expected);
+    }
+
+    #[test]
+    fn derive_intent_plan_preserves_non_dot_selection_type() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Copy,
+                to: "~/dest".to_string(),
+                mkdir: false,
+                overwrite: true,
+                backup_on_overwrite: false,
+            },
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::Select(SelectConfig {
+                    selection_type: SelectionType::NonDot,
+                    exclude: vec!["Makefile".to_string()],
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        let plan = derive_intent_plan(
+            &root_loaded_config(&config),
+            &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
+        )
+        .expect("config should produce an intent plan");
+
+        let expected = IntentPlan {
+            repository: "~/projects/env".to_string(),
+            sources: vec![IntentSource {
+                from: ".".to_string(),
+                actions: vec![IntentAction::Select(IntentSelectAction {
+                    selection_type: SelectionType::NonDot,
+                    exclude: vec!["Makefile".to_string()],
+                    options: ResolvedOptions {
+                        mode: ActionMode::Copy,
+                        to: "~/dest".to_string(),
+                        mkdir: false,
+                        conflict_policy: ConflictPolicy::Overwrite,
+                    },
+                })],
+            }],
+        };
+
+        assert_eq!(plan, expected);
+    }
+
+    #[test]
+    fn derive_intent_plan_preserves_all_selection_type() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults {
+                mode: ActionMode::Symlink,
+                to: "~".to_string(),
+                mkdir: true,
+                overwrite: false,
+                backup_on_overwrite: false,
+            },
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path("config".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::Select(SelectConfig {
+                    selection_type: SelectionType::All,
+                    exclude: vec![".backup".to_string(), ".tmp".to_string()],
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        let plan = derive_intent_plan(
+            &root_loaded_config(&config),
+            &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
+        )
+        .expect("config should produce an intent plan");
+
+        let expected = IntentPlan {
+            repository: "~/projects/env".to_string(),
+            sources: vec![IntentSource {
+                from: "config".to_string(),
+                actions: vec![IntentAction::Select(IntentSelectAction {
+                    selection_type: SelectionType::All,
+                    exclude: vec![".backup".to_string(), ".tmp".to_string()],
+                    options: ResolvedOptions {
+                        mode: ActionMode::Symlink,
+                        to: "~".to_string(),
+                        mkdir: true,
+                        conflict_policy: ConflictPolicy::Skip,
+                    },
+                })],
             }],
         };
 
@@ -2551,7 +2662,7 @@ mod tests {
                 to: None,
                 guard: None,
                 configs: vec![ConfigItem::Select(SelectConfig {
-                    dotfiles: true,
+                    selection_type: SelectionType::Dot,
                     exclude: vec![],
                     mode: Some(ActionMode::Copy),
                     to: Some("~/config".to_string()),
@@ -2573,7 +2684,7 @@ mod tests {
             expected_plan(vec![IntentSource {
                 from: ".".to_string(),
                 actions: vec![IntentAction::Select(IntentSelectAction {
-                    dotfiles: true,
+                    selection_type: SelectionType::Dot,
                     exclude: vec![],
                     options: ResolvedOptions {
                         mode: ActionMode::Copy,
@@ -2636,7 +2747,7 @@ mod tests {
                 to: None,
                 guard: None,
                 configs: vec![ConfigItem::Select(SelectConfig {
-                    dotfiles: true,
+                    selection_type: SelectionType::Dot,
                     exclude: vec![],
                     mode: None,
                     to: None,

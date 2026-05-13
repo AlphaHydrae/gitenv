@@ -167,7 +167,7 @@ fn invoke_the_info_command() {
             "    to: \".local/share/gitenv-info/profiles\"\n",
             "    configs:\n",
             "      - select:\n",
-            "          dotfiles: true\n",
+            "          type: non-dot\n",
             "          exclude:\n",
             "            - .ignored\n",
             "  - from: \".\"\n",
@@ -235,6 +235,13 @@ fn invoke_the_info_command() {
         .join("gitenv-info")
         .join("profiles")
         .join(".profile");
+    let selected_readme_target = home
+        .path()
+        .join(".local")
+        .join("share")
+        .join("gitenv-info")
+        .join("profiles")
+        .join("README");
     let shared_config_target = home
         .path()
         .join(".local")
@@ -277,6 +284,13 @@ fn invoke_the_info_command() {
         &selected_profile_target,
     )
     .expect("selected profile target should be created");
+    fs::create_dir_all(
+        selected_readme_target
+            .parent()
+            .expect("selected readme target should have a parent"),
+    )
+    .expect("selected readme target parent should be created");
+    // README doesn't exist in home yet; gitenv should show it as "not yet set up"
 
     let home_snapshot_before =
         snapshot_directory_contents(home.path()).expect("home directory should be readable");
@@ -297,7 +311,6 @@ fn invoke_the_info_command() {
                 "{} <- {}   differs from source\n",
                 "{} <- {}   not a file\n",
                 "{} -> {}   not yet set up\n",
-                "{} -> {}   ok\n",
                 "{} -> {}   not yet set up\n",
                 "{} <- {}   not yet set up\n",
             ),
@@ -353,19 +366,9 @@ fn invoke_the_info_command() {
                 .join("share")
                 .join("gitenv-info")
                 .join("profiles")
-                .join(".aliases")
+                .join("README")
                 .display(),
-            repository
-                .path()
-                .join("profiles")
-                .join(".aliases")
-                .display(),
-            selected_profile_target.display(),
-            repository
-                .path()
-                .join("profiles")
-                .join(".profile")
-                .display(),
+            repository.path().join("profiles").join("README").display(),
             custom_to_target.display(),
             repository
                 .path()
@@ -499,7 +502,7 @@ fn invoke_the_apply_command() {
             "    to: \".local/share/gitenv-apply/profiles\"\n",
             "    configs:\n",
             "      - select:\n",
-            "          dotfiles: true\n",
+            "          type: dot\n",
             "          exclude:\n",
             "            - .ignored\n",
             "  - from: $GITENV_TEST_SOURCE_DIR\n",

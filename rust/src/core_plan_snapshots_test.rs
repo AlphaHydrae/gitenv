@@ -17,7 +17,7 @@ use crate::intent::{
 use crate::operation::{OperationContext, derive_operation_plan};
 use crate::{
     ActionMode, FileOperation, LoadedConfig, OperationAction, OperationPlan, ProgramError,
-    parse_config,
+    SelectionType, parse_config,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -141,7 +141,7 @@ sources:
         overwrite: true
         backup_on_overwrite: false
       - select:
-          dotfiles: true
+          type: dot
           exclude: [".gitignore"]
           to: "dot-targets"
           mkdir: false
@@ -190,7 +190,7 @@ sources:
         overwrite: true
         backup_on_overwrite: false
       - select:
-          dotfiles: true
+          type: dot
           exclude:
             - ".gitignore"
           to: "dot-targets"
@@ -273,7 +273,7 @@ fn create_rich_intent_and_operation_plans() {
                         },
                     }),
                     IntentAction::Select(IntentSelectAction {
-                        dotfiles: true,
+                        selection_type: SelectionType::Dot,
                         exclude: vec![".gitignore".to_string()],
                         options: ResolvedOptions {
                             mode: ActionMode::Symlink,

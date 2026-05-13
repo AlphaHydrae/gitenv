@@ -296,7 +296,8 @@ pub struct FileConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SelectConfig {
-    pub dotfiles: bool,
+    #[serde(rename = "type")]
+    pub selection_type: SelectionType,
     #[serde(default)]
     pub exclude: Vec<String>,
     #[serde(default)]
@@ -309,6 +310,15 @@ pub struct SelectConfig {
     pub overwrite: Option<bool>,
     #[serde(default)]
     pub backup_on_overwrite: Option<bool>,
+}
+
+/// Selection scope for `select` config items.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SelectionType {
+    Dot,
+    NonDot,
+    All,
 }
 
 /// Parses YAML text into the strongly typed configuration model.
@@ -413,7 +423,7 @@ pub fn load_config(path: &Path) -> Result<LoadedConfig, ProgramError> {
 mod tests {
     use super::{
         ActionMode, Config, ConfigItem, Defaults, FileConfig, Guard, Include, LoadedConfig,
-        SelectConfig, Source, SourceRoot, load_config, parse_config,
+        SelectConfig, SelectionType, Source, SourceRoot, load_config, parse_config,
     };
     use crate::ProgramError;
     use std::path::PathBuf;
@@ -638,7 +648,7 @@ sources:
   - from: "."
     configs:
       - select:
-          dotfiles: true
+          type: dot
           exclude:
             - .DS_Store
             - .git
@@ -662,7 +672,7 @@ sources:
                 to: None,
                 guard: None,
                 configs: vec![ConfigItem::Select(SelectConfig {
-                    dotfiles: true,
+                    selection_type: SelectionType::Dot,
                     exclude: vec![".DS_Store".to_string(), ".git".to_string()],
                     mode: None,
                     to: None,
@@ -670,6 +680,71 @@ sources:
                     overwrite: None,
                     backup_on_overwrite: None,
                 })],
+            }],
+        };
+
+        assert_eq!(config, expected);
+    }
+
+    #[test]
+    fn accept_each_selection_type_value_in_select_configs() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - select:
+          type: dot
+      - select:
+          type: non-dot
+      - select:
+          type: all
+          exclude:
+            - .DS_Store
+"#;
+
+        let config = parse_config(yaml)
+            .expect("config should parse with dot, non-dot, and all selection types");
+
+        let expected = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![
+                    ConfigItem::Select(SelectConfig {
+                        selection_type: SelectionType::Dot,
+                        exclude: vec![],
+                        mode: None,
+                        to: None,
+                        mkdir: None,
+                        overwrite: None,
+                        backup_on_overwrite: None,
+                    }),
+                    ConfigItem::Select(SelectConfig {
+                        selection_type: SelectionType::NonDot,
+                        exclude: vec![],
+                        mode: None,
+                        to: None,
+                        mkdir: None,
+                        overwrite: None,
+                        backup_on_overwrite: None,
+                    }),
+                    ConfigItem::Select(SelectConfig {
+                        selection_type: SelectionType::All,
+                        exclude: vec![".DS_Store".to_string()],
+                        mode: None,
+                        to: None,
+                        mkdir: None,
+                        overwrite: None,
+                        backup_on_overwrite: None,
+                    }),
+                ],
             }],
         };
 
@@ -725,7 +800,7 @@ sources:
       - file: .tmux
         as: .tmux.conf
       - select:
-          dotfiles: true
+          type: dot
 "#;
         let canonical_yaml = r#"
 version: 1
@@ -737,7 +812,7 @@ sources:
       - file: .tmux
         as: .tmux.conf
       - select:
-          dotfiles: true
+          type: dot
           exclude: []
 "#;
 
@@ -1392,7 +1467,7 @@ sources:
       - from: "."
         configs:
           - select:
-              dotfiles: true
+              type: dot
               mode: copy
               to: ~/dest
               mkdir: false
@@ -1413,7 +1488,7 @@ sources:
                 to: None,
                 guard: None,
                 configs: vec![ConfigItem::Select(SelectConfig {
-                    dotfiles: true,
+                    selection_type: SelectionType::Dot,
                     exclude: vec![],
                     mode: Some(ActionMode::Copy),
                     to: Some("~/dest".to_string()),

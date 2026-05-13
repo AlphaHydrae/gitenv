@@ -165,13 +165,16 @@ sources:
     to: ".local/share/profiles"
     configs:
       - select:
-          dotfiles: true
+          type: dot
           exclude:
             - .ignored
 ```
 
-`select` expands a set of files from one source directory. With `dotfiles:
-true`, only entries whose names start with `.` are included.
+`select` expands a set of files from one source directory. Set `type` to:
+
+- `dot` for names that start with `.`
+- `non-dot` for names that do not start with `.`
+- `all` for both dot and non-dot names
 
 On macOS, `.DS_Store` is excluded automatically during selector expansion.
 Add it to `exclude` if you want to make the rule explicit for a source.

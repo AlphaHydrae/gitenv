@@ -61,7 +61,7 @@ sources:
       - file: .tmux
         as: .tmux.conf
       - select:
-          dotfiles: true
+          type: dot
           exclude:
             - .DS_Store
 ```

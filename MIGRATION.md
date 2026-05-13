@@ -178,7 +178,7 @@ sources:
       - file: .tmux
         as: .tmux.conf
       - select:
-          dotfiles: true
+          type: dot
           exclude:
             - .DS_Store
 
@@ -200,7 +200,7 @@ sources:
       - file: .tmux
         as: .tmux.conf
       - select:
-          dotfiles: true
+          type: dot
 ```
 
 The parser will normalize shorthand into one canonical internal model.

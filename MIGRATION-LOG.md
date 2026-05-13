@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-13: Replace select dotfiles boolean with selector type enum - Replace
+  `select.dotfiles` with `select.type` (`dot`, `non-dot`, `all`) across config
+  parsing, intent and operation models, selector expansion logic, tests, and
+  docs.
 - 2026-05-12: Auto-exclude `.DS_Store` through operation context - Add a global
   exclusion list to `OperationContext`, resolve the platform-specific default in
   `lib.rs`, and keep selector expansion independent of OS logic while preserving

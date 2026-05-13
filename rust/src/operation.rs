@@ -9,6 +9,7 @@
 //! boundary into an [`OperationContext`]. Tests supply a lightweight local
 //! double that returns pre-built directory listings without touching the disk.
 
+use crate::config::SelectionType;
 use crate::{
     ActionMode, ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction,
     ProgramError, ResolvedOptions, boundary::DirectoryEntriesReader, logging, path_resolution,
@@ -219,13 +220,13 @@ fn should_include_selection_entry(
     global_selection_excludes: &[String],
 ) -> bool {
     let has_dot_prefix = entry.starts_with('.');
-    let selected_by_dotfiles = if select_action.dotfiles {
-        has_dot_prefix
-    } else {
-        !has_dot_prefix
+    let selected_by_type = match select_action.selection_type {
+        SelectionType::Dot => has_dot_prefix,
+        SelectionType::NonDot => !has_dot_prefix,
+        SelectionType::All => true,
     };
 
-    selected_by_dotfiles
+    selected_by_type
         && !global_selection_excludes
             .iter()
             .any(|excluded| excluded == entry)
@@ -242,7 +243,7 @@ mod tests {
     };
     use crate::{
         ActionMode, ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction,
-        IntentSource, ProgramError, ResolvedOptions,
+        IntentSource, ProgramError, ResolvedOptions, SelectionType,
         boundary::{DirectoryEntriesReader, test_doubles::FnDirectoryReader},
         derive_operation_plan as derive_operation_plan_entrypoint,
     };
@@ -279,12 +280,12 @@ mod tests {
     }
 
     fn make_select_action(
-        dotfiles: bool,
+        selection_type: SelectionType,
         exclude: Vec<&str>,
         options: ResolvedOptions,
     ) -> IntentAction {
         IntentAction::Select(IntentSelectAction {
-            dotfiles,
+            selection_type,
             exclude: exclude.into_iter().map(str::to_string).collect(),
             options,
         })
@@ -346,7 +347,7 @@ mod tests {
     // ---------------------------------------------------------------------------
 
     #[test]
-    fn expand_selected_dotfiles_into_concrete_file_actions() {
+    fn expand_dot_selection_entries_into_concrete_file_actions() {
         let home = TempDir::new().expect("temporary home directory should be created");
         let repository = TempDir::new().expect("temporary repository should be created");
         fs::write(repository.path().join(".zshrc"), "export TEST=1\n")
@@ -363,7 +364,7 @@ mod tests {
             vec![make_intent_source(
                 ".",
                 vec![make_select_action(
-                    true,
+                    SelectionType::Dot,
                     vec![".gitconfig"],
                     default_options(),
                 )],
@@ -412,7 +413,7 @@ mod tests {
     }
 
     #[test]
-    fn expand_selected_dotfiles_into_sorted_actions() {
+    fn expand_dot_selection_entries_into_sorted_actions() {
         let home = TempDir::new().expect("temporary home directory should be created");
         let repository = TempDir::new().expect("temporary repository should be created");
         fs::write(repository.path().join(".z-last"), "a\n").expect("dotfile should be written");
@@ -423,7 +424,11 @@ mod tests {
             repository.path(),
             vec![make_intent_source(
                 ".",
-                vec![make_select_action(true, vec![], default_options())],
+                vec![make_select_action(
+                    SelectionType::Dot,
+                    vec![],
+                    default_options(),
+                )],
             )],
         );
 
@@ -471,7 +476,11 @@ mod tests {
             repository.path(),
             vec![make_intent_source(
                 ".",
-                vec![make_select_action(true, vec![], default_options())],
+                vec![make_select_action(
+                    SelectionType::Dot,
+                    vec![],
+                    default_options(),
+                )],
             )],
         );
 
@@ -493,7 +502,7 @@ mod tests {
     }
 
     #[test]
-    fn expand_non_dotfiles_when_dotfiles_selector_is_disabled() {
+    fn expand_non_dot_selection_entries_when_type_is_non_dot() {
         let home = TempDir::new().expect("temporary home directory should be created");
         let repository = PathBuf::from("/repo-root");
 
@@ -502,7 +511,7 @@ mod tests {
             vec![make_intent_source(
                 "configs",
                 vec![make_select_action(
-                    false,
+                    SelectionType::NonDot,
                     vec!["notes.txt"],
                     default_options(),
                 )],
@@ -530,6 +539,49 @@ mod tests {
     }
 
     #[test]
+    fn expand_all_selection_entries_when_type_is_all() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = PathBuf::from("/repo-root");
+
+        let intent_plan = make_intent_plan(
+            &repository,
+            vec![make_intent_source(
+                "configs",
+                vec![make_select_action(
+                    SelectionType::All,
+                    vec!["notes.txt"],
+                    default_options(),
+                )],
+            )],
+        );
+
+        let dir_reader = FnDirectoryReader(|_| {
+            Ok(vec![
+                ".zshrc".to_string(),
+                "notes.txt".to_string(),
+                "tmux.conf".to_string(),
+            ])
+        });
+        let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
+            .expect("operation planning should expand all selection entries");
+
+        assert_eq!(
+            operation_plan,
+            expected_operation_plan(vec![
+                expected_symlink(
+                    repository.join("configs").join(".zshrc"),
+                    home.path().join(".zshrc")
+                ),
+                expected_symlink(
+                    repository.join("configs").join("tmux.conf"),
+                    home.path().join("tmux.conf"),
+                ),
+            ])
+        );
+    }
+
+    #[test]
     fn cannot_derive_operation_plan_when_directory_listing_fails() {
         let home = TempDir::new().expect("temporary home directory should be created");
         let repository = PathBuf::from("/repo-root");
@@ -538,7 +590,11 @@ mod tests {
             &repository,
             vec![make_intent_source(
                 "configs",
-                vec![make_select_action(true, vec![], default_options())],
+                vec![make_select_action(
+                    SelectionType::Dot,
+                    vec![],
+                    default_options(),
+                )],
             )],
         );
 
@@ -637,7 +693,11 @@ mod tests {
                 ),
                 make_intent_source(
                     "config",
-                    vec![make_select_action(true, vec![], config_options)],
+                    vec![make_select_action(
+                        SelectionType::Dot,
+                        vec![],
+                        config_options,
+                    )],
                 ),
             ],
         );
@@ -704,7 +764,11 @@ mod tests {
             repository.path(),
             vec![make_intent_source(
                 "missing",
-                vec![make_select_action(true, vec![], default_options())],
+                vec![make_select_action(
+                    SelectionType::Dot,
+                    vec![],
+                    default_options(),
+                )],
             )],
         );
 
@@ -736,7 +800,11 @@ mod tests {
             repository.path(),
             vec![make_intent_source(
                 ".",
-                vec![make_select_action(true, vec![], default_options())],
+                vec![make_select_action(
+                    SelectionType::Dot,
+                    vec![],
+                    default_options(),
+                )],
             )],
         );
 
@@ -773,7 +841,11 @@ mod tests {
             repository.path(),
             vec![make_intent_source(
                 ".",
-                vec![make_select_action(true, vec![], default_options())],
+                vec![make_select_action(
+                    SelectionType::Dot,
+                    vec![],
+                    default_options(),
+                )],
             )],
         );
 

@@ -68,25 +68,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 58: Replace `dotfiles` selector boolean with `type` scope enum
-
-Why this increment exists:
-
-- Ruby's `AllFiles` matcher returns every file in the source directory
-  regardless of whether the name starts with a dot. The Rust `select` only
-  supports a `dotfiles: true|false` split, which makes "all files" behavior
-  awkward and does not provide an explicit selector scope model.
-
-Review target:
-
-- The `select` item replaces `dotfiles` with `type: dot|non-dot|all`.
-- The canonical internal models (`SelectConfig` and `IntentSelectAction`) carry
-  the new selector-scope enum instead of a boolean.
-- `should_include_selection_entry` in `operation.rs` is updated to branch on
-  `type` (`dot`, `non-dot`, `all`) and still applies `exclude` filtering.
-- Parser tests and operation-expansion tests cover all three selector modes.
-- `rust/README.md` documents `type: dot|non-dot|all` with concise examples.
-
 ### Increment 59: Pre-flight source existence check before apply
 
 Why this increment exists:
