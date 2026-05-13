@@ -393,6 +393,17 @@ implemented in a future increment.
 - [x] Do not copy files when the target file already matches (hash).
 - [x] Improve action tests by reading the whole temporary test directory state.
 
+## Future Work
+
+### Pattern-based selector includes/excludes
+
+- Add optional pattern matching for selector filters after the `type:
+  dot|non-dot|all` migration increment is complete and stable.
+- Prefer simple glob-style patterns first; evaluate regexp support only if glob
+  matching proves insufficient for real migration cases.
+- Keep deterministic selector behavior and clear precedence rules between
+  selector scope (`type`) and pattern filters.
+
 ## Test Strategy
 
 - Use unit tests for parser, schema validation, normalization, and utilities.

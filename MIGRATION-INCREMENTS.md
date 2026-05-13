@@ -68,27 +68,24 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 58: Add "select all files" mode to cover dotfiles and non-dotfiles
+### Increment 58: Replace `dotfiles` selector boolean with `type` scope enum
 
 Why this increment exists:
 
 - Ruby's `AllFiles` matcher returns every file in the source directory
   regardless of whether the name starts with a dot. The Rust `select` only
-  supports `dotfiles: true` (names starting with `.`) and `dotfiles: false`
-  (names not starting with `.`). A user migrating a `symlink all_files` call
-  must currently write two separate `select` items, which is unintuitive and
-  not documented.
+  supports a `dotfiles: true|false` split, which makes "all files" behavior
+  awkward and does not provide an explicit selector scope model.
 
 Review target:
 
-- The `select` item gains an `all_files: true` option that includes every entry
-  regardless of dot-prefix, subject to `exclude` filtering as normal.
-- The canonical internal model (`IntentSelectAction`) carries the new field.
-- `should_include_selection_entry` in `operation.rs` is updated accordingly.
-- Existing `dotfiles: true` and `dotfiles: false` behavior is unchanged (no
-  regression).
-- Parser tests and at least one operation-expansion test cover the new mode.
-- `rust/README.md` documents `all_files: true` with a short example.
+- The `select` item replaces `dotfiles` with `type: dot|non-dot|all`.
+- The canonical internal models (`SelectConfig` and `IntentSelectAction`) carry
+  the new selector-scope enum instead of a boolean.
+- `should_include_selection_entry` in `operation.rs` is updated to branch on
+  `type` (`dot`, `non-dot`, `all`) and still applies `exclude` filtering.
+- Parser tests and operation-expansion tests cover all three selector modes.
+- `rust/README.md` documents `type: dot|non-dot|all` with concise examples.
 
 ### Increment 59: Pre-flight source existence check before apply
 
