@@ -395,14 +395,23 @@ implemented in a future increment.
 
 ## Future Work
 
-### Pattern-based selector includes/excludes
+### Selector pattern includes (after glob excludes)
 
-- Add optional pattern matching for selector filters after the `type:
-  dot|non-dot|all` migration increment is complete and stable.
+- Glob-pattern excludes are tracked as near-term migration increments and should
+  be treated as planned baseline selector behavior rather than open-ended
+  future exploration.
+- Add selector include patterns on top of glob excludes, with deterministic
+  precedence rules between selector scope (`type`), include patterns, and
+  exclude patterns.
 - Prefer simple glob-style patterns first; evaluate regexp support only if glob
   matching proves insufficient for real migration cases.
-- Keep deterministic selector behavior and clear precedence rules between
-  selector scope (`type`) and pattern filters.
+
+### Recursive selector traversal limits
+
+- Add optional configuration to cap recursive selector traversal depth.
+- Keep the default behavior unbounded when depth is not specified.
+- Validate that depth settings remain deterministic and composable with selector
+  type filtering and glob pattern filters.
 
 ## Test Strategy
 

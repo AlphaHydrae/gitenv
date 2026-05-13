@@ -68,29 +68,108 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 59: Pre-flight source existence check before apply
+### Increment 59: Carry source availability on operation plans
 
 Why this increment exists:
 
-- Ruby's `check_files!` iterates all configured actions before any filesystem
-  mutation and aborts with a grouped diagnostic if any source file is missing
-  or unreadable. The Rust port surfaces missing source files as individual
-  operation errors at apply time — one per operation with no pre-flight summary
-  gate. A user with a misconfigured `file:` entry only discovers it mid-apply.
+- The Rust port needs source availability information for both `info` and
+  `apply`. Ruby's `check_files!` grouped missing or unreadable sources before
+  apply; in the Rust model, operation planning can surface the same facts once
+  and let downstream stages interpret them differently.
+- Operation planning already touches the filesystem for selector expansion, so
+  carrying source availability in the planning result keeps the increment
+  cohesive without introducing a separate validation pass.
+- The operation-planning result must preserve deterministic configuration order
+  so `info` can present successful and failing entries in the same order users
+  declared them.
 
 Review target:
 
-- A new function (for example `preflight_check_operation_plan` in `status.rs`
-  or a new `preflight.rs` module) iterates all `OperationAction` entries and
-  collects source paths that do not exist or are not readable.
-- When problems are found, a new `ProgramError` variant (e.g.
-  `MissingSourceFiles { paths: Vec<PathBuf> }`) is returned with all problem
-  paths grouped.
-- `run_apply` in `app/apply.rs` calls the pre-flight check before executing any
-  operations.
-- `run_info` is not required to run the pre-flight check (Ruby's `check_files!`
-  was apply-side only); a comment in `run_info` notes the intentional omission.
-- A unit test asserts that a plan containing a missing source file is rejected
-  with the new error before any apply work begins.
-- An integration test verifies the grouped error message against the compiled
-  binary.
+- Replace the operation-plan `actions`-only shape with an ordered list of
+  operation entries that can represent either:
+  1. a concrete executable action with source availability metadata, or
+  2. a planning issue emitted at the same position in config order (for
+     example, selector root missing/unreadable so expansion cannot proceed).
+- Source availability metadata and planning issues must distinguish:
+  1. source exists and is readable,
+  2. source or source root is missing,
+  3. source or source root is unreadable because of permissions,
+  4. source or source root is unreadable because of unexpected I/O failure.
+- Operation planning populates ordered entries for direct file actions and
+  selector expansion outcomes while preserving deterministic config order.
+- `run_info` renders the ordered mixed entries without failing so successful
+  actions and failures appear in declaration order.
+- `run_apply` scans the same ordered entries and returns a grouped
+  `ProgramError` for unavailable sources/planning issues before filesystem
+  mutation begins.
+- A unit test asserts ordered entry output (good + bad entries interleaved),
+  including both permission-denied and unexpected-I/O unreadable cases.
+- An integration test verifies grouped apply diagnostics and ordered info
+  rendering for mixed success/failure scenarios.
+
+### Increment 60: Add `recursive` to `select` with default `false` (planning-only slice)
+
+Why this increment exists:
+
+- We want recursive selector expansion, but to keep review size small this first
+  slice only introduces the config and intent shape. Operation expansion remains
+  unchanged in this step so the behavior is intentionally incomplete.
+- This increment is an intentional intermediate step toward recursive selector
+  behavior. Baseline coverage must be captured and documented before editing,
+  and that recorded value is the explicit target coverage to recover in the
+  follow-up increments below.
+
+Review target:
+
+- Extend `SelectConfig` and `IntentSelectAction` with `recursive: bool`.
+- Omitted `recursive` defaults to `false`.
+- Keep current operation-stage behavior unchanged in this increment (still
+  direct-entry expansion only).
+- Add parser and intent-unit tests asserting both omitted and explicit
+  `recursive: false` normalize to the same output, plus `recursive: true`
+  intent propagation.
+- Add a TODO comment in operation expansion noting that recursive traversal is
+  intentionally deferred to the next increment and naming the closure condition.
+
+### Increment 61: Implement recursive `select` operation expansion
+
+Why this increment exists:
+
+- This slice completes recursive selector behavior while preserving the current
+  selector type semantics (`dot`, `non-dot`, `all`) and one-operation-per-file
+  execution model.
+
+Review target:
+
+- In operation planning, when `select.recursive` is `true`, traverse the source
+  directory tree and collect file paths recursively as source-relative paths.
+- Preserve descendant-relative target mapping for recursive entries (for
+  example, `a/b.txt` remains `a/b.txt` under the target directory).
+- Keep `recursive: false` behavior identical to current direct-entry expansion.
+- Reuse existing `mkdir` behavior so intermediate target directories are
+  created through normal apply execution.
+- Add unit tests for direct vs recursive selector expansion parity and ordering.
+- Add an integration test showing nested source files map to nested target
+  files under `apply`.
+
+### Increment 62: Make `select.exclude` use glob patterns
+
+Why this increment exists:
+
+- Recursive selection is most useful with path-aware filtering. Moving from
+  exact-name exclusion to glob patterns enables practical recursive workflows
+  without adding includes yet.
+
+Review target:
+
+- Replace exact-string exclusion checks with glob-pattern matching for
+  `select.exclude`.
+- Match recursive candidates using source-relative paths (for example
+  `**/*.tmp`, `private/**`, `**/.DS_Store`).
+- Keep deterministic behavior and define stable precedence between selector
+  type filtering and glob excludes.
+- Add unit tests for representative glob cases in both direct and recursive
+  modes.
+- Add one integration test validating glob excludes in recursive apply output.
+- Preferred library: `globset` (widely used in Rust tooling, deterministic,
+  supports `**` and efficient compiled pattern sets).
