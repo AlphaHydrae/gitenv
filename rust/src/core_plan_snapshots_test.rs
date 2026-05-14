@@ -71,6 +71,7 @@ fn available_operation_plan(actions: Vec<OperationAction>) -> OperationPlan {
                 OperationEntry::Action(PlannedOperationAction {
                     action,
                     source_availability: SourceAvailability::Available,
+                    skip_reason: None,
                 })
             })
             .collect(),
@@ -302,6 +303,7 @@ fn create_rich_intent_and_operation_plans() {
                     IntentAction::Select(IntentSelectAction {
                         selection_type: SelectionType::Dot,
                         recursive: false,
+                        existing_directories_only: false,
                         exclude: vec![".gitignore".to_string()],
                         options: ResolvedOptions {
                             mode: ActionMode::Symlink,

@@ -31,6 +31,7 @@ pub struct ApplyOperationReport {
 pub enum ApplyOperationOutcome {
     Applied(OperationAction),
     SkippedExistingTarget(OperationAction),
+    SkippedMissingTargetDirectory(OperationAction),
     UnsupportedOperation(OperationAction),
 }
 
@@ -68,6 +69,15 @@ pub(crate) fn apply_operation_plan(
         };
 
         let action = &action_entry.action;
+        if let Some(crate::operation::OperationSkipReason::MissingTargetDirectory) =
+            action_entry.skip_reason
+        {
+            outcomes.push(ApplyOperationOutcome::SkippedMissingTargetDirectory(
+                action.clone(),
+            ));
+            continue;
+        }
+
         let outcome = match action {
             OperationAction::Symlink(operation) => apply_symlink_operation(operation, context)?,
             OperationAction::Copy(operation) => {
@@ -97,9 +107,11 @@ fn action_kind_from_outcome(outcome: &ApplyOperationOutcome) -> &'static str {
     match outcome {
         ApplyOperationOutcome::Applied(OperationAction::Symlink(_))
         | ApplyOperationOutcome::SkippedExistingTarget(OperationAction::Symlink(_))
+        | ApplyOperationOutcome::SkippedMissingTargetDirectory(OperationAction::Symlink(_))
         | ApplyOperationOutcome::UnsupportedOperation(OperationAction::Symlink(_)) => "symlink",
         ApplyOperationOutcome::Applied(OperationAction::Copy(_))
         | ApplyOperationOutcome::SkippedExistingTarget(OperationAction::Copy(_))
+        | ApplyOperationOutcome::SkippedMissingTargetDirectory(OperationAction::Copy(_))
         | ApplyOperationOutcome::UnsupportedOperation(OperationAction::Copy(_)) => "copy",
     }
 }
@@ -385,6 +397,7 @@ mod tests {
                     conflict_policy,
                 }),
                 source_availability: SourceAvailability::Available,
+                skip_reason: None,
             })],
         }
     }
@@ -678,6 +691,7 @@ mod tests {
                     conflict_policy: ConflictPolicy::Skip,
                 }),
                 source_availability: SourceAvailability::Available,
+                skip_reason: None,
             })],
         };
         let target_probe = FnTargetProbe(|_| Ok(false));
@@ -712,6 +726,7 @@ mod tests {
                     kind: crate::SourceUnreadableKind::PermissionDenied,
                     message: "permission denied".to_string(),
                 },
+                skip_reason: None,
             })],
         };
         let target_probe = FnTargetProbe(|_| Ok(false));
@@ -731,6 +746,45 @@ mod tests {
                     "source /repo/private/.secret for /home/.secret is unreadable (permission denied)"
                         .to_string(),
                 ],
+            }
+        );
+    }
+
+    #[test]
+    fn skip_apply_work_when_a_planned_action_requires_a_missing_target_directory() {
+        let operation_plan = OperationPlan {
+            entries: vec![OperationEntry::Action(PlannedOperationAction {
+                action: OperationAction::Symlink(FileOperation {
+                    source: PathBuf::from("/repo/nested/tool.conf"),
+                    target: PathBuf::from("/home/profiles/nested/tool.conf"),
+                    mkdir: true,
+                    conflict_policy: ConflictPolicy::Skip,
+                }),
+                source_availability: SourceAvailability::Available,
+                skip_reason: Some(crate::operation::OperationSkipReason::MissingTargetDirectory),
+            })],
+        };
+        let target_probe = FnTargetProbe(|_| Ok(false));
+        let symlink_creator = FnSymlinkCreator(super::create_symlink_on_filesystem);
+        let context = ApplyContext {
+            target_probe: &target_probe,
+            symlink_creator: &symlink_creator,
+        };
+
+        let report = apply_operation_plan(&operation_plan, &context)
+            .expect("apply should skip planned actions with missing target directories");
+
+        assert_eq!(
+            report,
+            crate::ApplyOperationReport {
+                outcomes: vec![ApplyOperationOutcome::SkippedMissingTargetDirectory(
+                    OperationAction::Symlink(FileOperation {
+                        source: PathBuf::from("/repo/nested/tool.conf"),
+                        target: PathBuf::from("/home/profiles/nested/tool.conf"),
+                        mkdir: true,
+                        conflict_policy: ConflictPolicy::Skip,
+                    })
+                )],
             }
         );
     }
@@ -777,6 +831,7 @@ mod tests {
                         conflict_policy: ConflictPolicy::Skip,
                     }),
                     source_availability: SourceAvailability::Available,
+                    skip_reason: None,
                 }),
             ],
         };

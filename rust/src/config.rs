@@ -301,6 +301,8 @@ pub struct SelectConfig {
     #[serde(default)]
     pub recursive: bool,
     #[serde(default)]
+    pub existing_directories_only: bool,
+    #[serde(default)]
     pub exclude: Vec<String>,
     #[serde(default)]
     pub mode: Option<ActionMode>,
@@ -676,6 +678,7 @@ sources:
                 configs: vec![ConfigItem::Select(SelectConfig {
                     selection_type: SelectionType::Dot,
                     recursive: false,
+                    existing_directories_only: false,
                     exclude: vec![".DS_Store".to_string(), ".git".to_string()],
                     mode: None,
                     to: None,
@@ -747,6 +750,7 @@ sources:
                     selection_type: SelectionType::Dot,
                     exclude: vec![],
                     recursive: true,
+                    existing_directories_only: false,
                     mode: None,
                     to: None,
                     mkdir: None,
@@ -757,6 +761,38 @@ sources:
         };
 
         assert_eq!(config, expected);
+    }
+
+    #[test]
+    fn normalize_omitted_and_explicit_false_existing_directories_only_select_settings() {
+        let omitted_flag_yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - select:
+          type: dot
+          recursive: true
+"#;
+        let explicit_false_flag_yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - select:
+          type: dot
+          recursive: true
+          existing_directories_only: false
+"#;
+
+        let omitted_flag = parse_config(omitted_flag_yaml)
+            .expect("config should parse when existing_directories_only is omitted");
+        let explicit_false_flag = parse_config(explicit_false_flag_yaml)
+            .expect("config should parse when existing_directories_only is explicitly false");
+
+        assert_eq!(omitted_flag, explicit_false_flag);
     }
 
     #[test]
@@ -794,6 +830,7 @@ sources:
                         selection_type: SelectionType::Dot,
                         exclude: vec![],
                         recursive: false,
+                        existing_directories_only: false,
                         mode: None,
                         to: None,
                         mkdir: None,
@@ -804,6 +841,7 @@ sources:
                         selection_type: SelectionType::NonDot,
                         exclude: vec![],
                         recursive: false,
+                        existing_directories_only: false,
                         mode: None,
                         to: None,
                         mkdir: None,
@@ -814,6 +852,7 @@ sources:
                         selection_type: SelectionType::All,
                         exclude: vec![".DS_Store".to_string()],
                         recursive: false,
+                        existing_directories_only: false,
                         mode: None,
                         to: None,
                         mkdir: None,
@@ -1567,6 +1606,7 @@ sources:
                     selection_type: SelectionType::Dot,
                     exclude: vec![],
                     recursive: false,
+                    existing_directories_only: false,
                     mode: Some(ActionMode::Copy),
                     to: Some("~/dest".to_string()),
                     mkdir: Some(false),

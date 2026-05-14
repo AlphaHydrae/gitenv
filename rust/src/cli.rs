@@ -12,6 +12,7 @@ const ANSI_RESET: &str = "\x1b[0m";
 const ANSI_GREEN: &str = "\x1b[32m";
 const ANSI_YELLOW: &str = "\x1b[33m";
 const ANSI_RED: &str = "\x1b[31m";
+const ANSI_GRAY: &str = "\x1b[90m";
 
 /// Display a path, replacing the home directory prefix with `~` for readability.
 ///
@@ -160,11 +161,15 @@ fn render_unavailable_action_line_with_color(
     home: &Path,
     use_color: bool,
 ) -> String {
-    let state = colorize(
-        &availability_state_text(&action_entry.source_availability, "source"),
-        ANSI_RED,
-        use_color,
-    );
+    let (state, color) = if action_entry.skip_reason.is_some() {
+        ("target directory is missing".to_string(), ANSI_GRAY)
+    } else {
+        (
+            availability_state_text(&action_entry.source_availability, "source"),
+            ANSI_RED,
+        )
+    };
+    let state = colorize(&state, color, use_color);
 
     match &action_entry.action {
         OperationAction::Symlink(operation) => format!(
@@ -292,6 +297,22 @@ fn render_apply_outcome_line_with_color(
                 )
             }
         },
+        ApplyOperationOutcome::SkippedMissingTargetDirectory(action) => match action {
+            OperationAction::Symlink(op) => {
+                format!(
+                    "{} {} (target directory is missing)",
+                    colorize("skipped symlink", ANSI_GRAY, use_color),
+                    display_path_with_home(&op.target, home)
+                )
+            }
+            OperationAction::Copy(op) => {
+                format!(
+                    "{} {} (target directory is missing)",
+                    colorize("skipped copy", ANSI_GRAY, use_color),
+                    display_path_with_home(&op.target, home)
+                )
+            }
+        },
         ApplyOperationOutcome::UnsupportedOperation(action) => match action {
             OperationAction::Symlink(op) => {
                 format!(
@@ -349,6 +370,7 @@ mod tests {
                     OperationEntry::Action(PlannedOperationAction {
                         action,
                         source_availability: SourceAvailability::Available,
+                        skip_reason: None,
                     })
                 })
                 .collect(),
@@ -422,6 +444,7 @@ mod tests {
                             kind: SourceUnreadableKind::PermissionDenied,
                             message: "permission denied".to_string(),
                         },
+                        skip_reason: None,
                     }),
                     OperationEntry::Action(PlannedOperationAction {
                         action: OperationAction::Copy(FileOperation {
@@ -434,6 +457,7 @@ mod tests {
                             kind: SourceUnreadableKind::UnexpectedIo,
                             message: "input/output error".to_string(),
                         },
+                        skip_reason: None,
                     }),
                     OperationEntry::Issue(OperationPlanningIssue {
                         path: PathBuf::from("/repo/profiles"),
@@ -471,6 +495,64 @@ mod tests {
                 "source root"
             ),
             "source root is unreadable (boom)"
+        );
+    }
+
+    #[test]
+    fn render_recursive_entries_skipped_for_missing_target_directories() {
+        let symlink_operation = FileOperation {
+            source: PathBuf::from("/repo/nested/tool.conf"),
+            target: PathBuf::from("/home/profiles/nested/tool.conf"),
+            mkdir: true,
+            conflict_policy: ConflictPolicy::Skip,
+        };
+        let copy_operation = FileOperation {
+            source: PathBuf::from("/repo/nested/tool-copy.conf"),
+            target: PathBuf::from("/home/profiles/nested/tool-copy.conf"),
+            mkdir: true,
+            conflict_policy: ConflictPolicy::Skip,
+        };
+
+        let info_output = render_default_inspection_output(
+            &OperationPlan {
+                entries: vec![OperationEntry::Action(PlannedOperationAction {
+                    action: OperationAction::Symlink(symlink_operation.clone()),
+                    source_availability: SourceAvailability::Available,
+                    skip_reason: Some(
+                        crate::operation::OperationSkipReason::MissingTargetDirectory,
+                    ),
+                })],
+            },
+            Path::new(NON_MATCHING_HOME),
+            false,
+        )
+        .expect("status rendering should preserve skipped recursive entries");
+
+        let apply_output = render_apply_output(
+            &ApplyOperationReport {
+                outcomes: vec![
+                    ApplyOperationOutcome::SkippedMissingTargetDirectory(OperationAction::Symlink(
+                        symlink_operation,
+                    )),
+                    ApplyOperationOutcome::SkippedMissingTargetDirectory(OperationAction::Copy(
+                        copy_operation,
+                    )),
+                ],
+            },
+            Path::new(NON_MATCHING_HOME),
+            false,
+        );
+
+        assert_eq!(
+            info_output,
+            "/home/profiles/nested/tool.conf -> /repo/nested/tool.conf   target directory is missing"
+        );
+        assert_eq!(
+            apply_output,
+            concat!(
+                "skipped symlink /home/profiles/nested/tool.conf (target directory is missing)\n",
+                "skipped copy /home/profiles/nested/tool-copy.conf (target directory is missing)"
+            )
         );
     }
 

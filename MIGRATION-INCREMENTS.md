@@ -68,35 +68,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 62: Add `existing_directories_only` for recursive `select`
-
-Why this increment exists:
-
-- Recursive selection needs a way to keep planned actions visible without
-  creating missing target directories. This slice adds a select-scoped policy
-  for workflows that only want recursive entries whose target directories are
-  already present.
-- `existing_directories_only` is the chosen name for this policy. It means the
-  planner keeps nested entries in the plan, marks entries whose target
-  directory is absent as grayed out with their prospective source and target
-  paths, and lets apply skip those actions instead of creating directories.
-
-Review target:
-
-- Add `existing_directories_only: bool` to `SelectConfig` and
-  `IntentSelectAction`, defaulting to `false`.
-- Keep recursive selection as the only mode affected by this policy; direct
-  file actions and non-recursive selection keep their current mkdir behavior.
-- In operation planning, mark recursive selector entries whose target
-  directory does not already exist as unavailable-or-skipped entries that still
-  carry their prospective source and target paths for rendering.
-- In info rendering, show those entries grayed out with the same path pair the
-  eventual operation would use.
-- In apply execution, skip the concrete filesystem operation for those entries
-  instead of treating the missing target directory as an error.
-- Add focused tests for config parsing, intent propagation, info rendering, and
-  apply skipping behavior.
-
 ### Increment 63: Make `select.exclude` use glob patterns
 
 Why this increment exists:

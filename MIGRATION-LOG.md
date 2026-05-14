@@ -11,6 +11,11 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-14: Add existing-directories-only recursive select policy - Extend
+  select config and intent models with `existing_directories_only`, keep
+  recursive selector entries visible when their target directory chain is
+  missing, render those entries as skipped in `info`, and skip their concrete
+  filesystem work during `apply`.
 - 2026-05-14: Implement recursive select operation expansion - Expand selector
   planning through one depth-parameterized directory traversal path.
 - 2026-05-14: Add recursive select intent shape with default false - Extend

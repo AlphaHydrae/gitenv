@@ -73,6 +73,13 @@ pub enum OperationEntry {
 pub struct PlannedOperationAction {
     pub action: OperationAction,
     pub source_availability: SourceAvailability,
+    pub skip_reason: Option<OperationSkipReason>,
+}
+
+/// Reason an otherwise-planned concrete operation should be skipped at apply time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OperationSkipReason {
+    MissingTargetDirectory,
 }
 
 /// Planning issue that blocks selector expansion at a specific config position.
@@ -231,6 +238,7 @@ fn expand_file_action(
         source_availability: source_availability_from_result(
             source_reader.ensure_source_path_readable(action.source(), SourcePathRequirement::File),
         ),
+        skip_reason: None,
         action,
     })
 }
@@ -299,11 +307,23 @@ fn expand_select_action(
                 home_directory,
             );
 
+            let source_availability = source_availability_from_result(
+                source_reader
+                    .ensure_source_path_readable(action.source(), SourcePathRequirement::File),
+            );
+            let skip_reason = if select_action.recursive
+                && select_action.existing_directories_only
+                && source_availability == SourceAvailability::Available
+                && !target_directory_exists(action.target())
+            {
+                Some(OperationSkipReason::MissingTargetDirectory)
+            } else {
+                None
+            };
+
             OperationEntry::Action(PlannedOperationAction {
-                source_availability: source_availability_from_result(
-                    source_reader
-                        .ensure_source_path_readable(action.source(), SourcePathRequirement::File),
-                ),
+                source_availability,
+                skip_reason,
                 action,
             })
         })
@@ -329,6 +349,10 @@ fn source_availability_from_error(error: &SourceReadError) -> SourceAvailability
             message: error.message.clone(),
         },
     }
+}
+
+fn target_directory_exists(path: &Path) -> bool {
+    path.parent().is_none_or(|parent| parent.is_dir())
 }
 
 fn list_directory_entries(
@@ -502,7 +526,8 @@ fn should_include_selection_entry(
 mod tests {
     use super::{
         FileOperation, OperationAction, OperationContext, OperationEntry, OperationPlan,
-        OperationPlanningIssue, PlannedOperationAction, SourceReadErrorKind, derive_operation_plan,
+        OperationPlanningIssue, OperationSkipReason, PlannedOperationAction, SourceReadErrorKind,
+        derive_operation_plan,
     };
     use crate::{
         ActionMode, ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction,
@@ -564,6 +589,23 @@ mod tests {
         IntentAction::Select(IntentSelectAction {
             selection_type,
             recursive,
+            existing_directories_only: false,
+            exclude: exclude.into_iter().map(str::to_string).collect(),
+            options,
+        })
+    }
+
+    fn make_select_action_with_recursive_directory_policy(
+        selection_type: SelectionType,
+        recursive: bool,
+        existing_directories_only: bool,
+        exclude: Vec<&str>,
+        options: ResolvedOptions,
+    ) -> IntentAction {
+        IntentAction::Select(IntentSelectAction {
+            selection_type,
+            recursive,
+            existing_directories_only,
             exclude: exclude.into_iter().map(str::to_string).collect(),
             options,
         })
@@ -611,6 +653,7 @@ mod tests {
                     OperationEntry::Action(PlannedOperationAction {
                         action,
                         source_availability: SourceAvailability::Available,
+                        skip_reason: None,
                     })
                 })
                 .collect(),
@@ -998,6 +1041,58 @@ mod tests {
         );
     }
 
+    #[test]
+    fn mark_recursive_entries_as_skipped_when_target_directories_are_missing() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::create_dir_all(repository.path().join("nested"))
+            .expect("nested source directory should be created");
+        fs::write(repository.path().join("nested").join("tool.conf"), "tool\n")
+            .expect("nested source file should be written");
+        fs::create_dir_all(home.path().join("profiles"))
+            .expect("top-level target directory should be created");
+
+        let intent_plan = make_intent_plan(
+            repository.path(),
+            vec![make_intent_source(
+                ".",
+                vec![make_select_action_with_recursive_directory_policy(
+                    SelectionType::All,
+                    true,
+                    true,
+                    vec![],
+                    ResolvedOptions {
+                        mode: ActionMode::Symlink,
+                        to: "profiles".to_string(),
+                        mkdir: true,
+                        conflict_policy: ConflictPolicy::Skip,
+                    },
+                )],
+            )],
+        );
+        let context = make_operation_context(home.path().to_path_buf(), None);
+
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
+            .expect("recursive selection should keep skipped entries in the plan");
+
+        assert_eq!(
+            operation_plan,
+            OperationPlan {
+                entries: vec![OperationEntry::Action(PlannedOperationAction {
+                    action: expected_symlink(
+                        repository.path().join("nested").join("tool.conf"),
+                        home.path()
+                            .join("profiles")
+                            .join("nested")
+                            .join("tool.conf"),
+                    ),
+                    source_availability: SourceAvailability::Available,
+                    skip_reason: Some(OperationSkipReason::MissingTargetDirectory),
+                })],
+            }
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn preserve_a_planning_issue_when_recursive_selection_cannot_read_a_nested_directory() {
@@ -1300,6 +1395,7 @@ mod tests {
                         kind: SourceUnreadableKind::PermissionDenied,
                         message: "denied".to_string(),
                     },
+                    skip_reason: None,
                 })],
             }
         );

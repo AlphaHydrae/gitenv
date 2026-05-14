@@ -111,6 +111,7 @@ mod tests {
                     OperationEntry::Action(PlannedOperationAction {
                         action,
                         source_availability: SourceAvailability::Available,
+                        skip_reason: None,
                     })
                 })
                 .collect(),

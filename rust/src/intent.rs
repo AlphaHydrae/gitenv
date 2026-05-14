@@ -79,6 +79,8 @@ pub struct IntentSelectAction {
     pub selection_type: SelectionType,
     /// Enables recursive directory traversal during operation-stage expansion.
     pub recursive: bool,
+    /// Keeps recursive entries only when their target directory already exists.
+    pub existing_directories_only: bool,
     /// Filenames explicitly excluded from selection.
     pub exclude: Vec<String>,
     pub options: ResolvedOptions,
@@ -285,6 +287,7 @@ fn plan_sources_recursively(
                     Ok(IntentAction::Select(IntentSelectAction {
                         selection_type: select_config.selection_type.clone(),
                         recursive: select_config.recursive,
+                        existing_directories_only: select_config.existing_directories_only,
                         exclude: select_config.exclude.clone(),
                         options,
                     }))
@@ -701,6 +704,7 @@ mod tests {
                     ConfigItem::Select(SelectConfig {
                         selection_type: SelectionType::Dot,
                         recursive: false,
+                        existing_directories_only: false,
                         exclude: vec![".git".to_string()],
                         mode: None,
                         to: None,
@@ -746,6 +750,7 @@ mod tests {
                     IntentAction::Select(IntentSelectAction {
                         selection_type: SelectionType::Dot,
                         recursive: false,
+                        existing_directories_only: false,
                         exclude: vec![".git".to_string()],
                         options: ResolvedOptions {
                             mode: ActionMode::Copy,
@@ -781,6 +786,7 @@ mod tests {
                 configs: vec![ConfigItem::Select(SelectConfig {
                     selection_type: SelectionType::NonDot,
                     recursive: false,
+                    existing_directories_only: false,
                     exclude: vec!["Makefile".to_string()],
                     mode: None,
                     to: None,
@@ -804,6 +810,7 @@ mod tests {
                 actions: vec![IntentAction::Select(IntentSelectAction {
                     selection_type: SelectionType::NonDot,
                     recursive: false,
+                    existing_directories_only: false,
                     exclude: vec!["Makefile".to_string()],
                     options: ResolvedOptions {
                         mode: ActionMode::Copy,
@@ -838,6 +845,7 @@ mod tests {
                 configs: vec![ConfigItem::Select(SelectConfig {
                     selection_type: SelectionType::All,
                     recursive: false,
+                    existing_directories_only: false,
                     exclude: vec![".backup".to_string(), ".tmp".to_string()],
                     mode: None,
                     to: None,
@@ -861,6 +869,7 @@ mod tests {
                 actions: vec![IntentAction::Select(IntentSelectAction {
                     selection_type: SelectionType::All,
                     recursive: false,
+                    existing_directories_only: false,
                     exclude: vec![".backup".to_string(), ".tmp".to_string()],
                     options: ResolvedOptions {
                         mode: ActionMode::Symlink,
@@ -889,6 +898,7 @@ mod tests {
                 configs: vec![ConfigItem::Select(SelectConfig {
                     selection_type: SelectionType::Dot,
                     recursive: true,
+                    existing_directories_only: false,
                     exclude: vec![".git".to_string()],
                     mode: None,
                     to: None,
@@ -912,6 +922,7 @@ mod tests {
                 actions: vec![IntentAction::Select(IntentSelectAction {
                     selection_type: SelectionType::Dot,
                     recursive: true,
+                    existing_directories_only: false,
                     exclude: vec![".git".to_string()],
                     options: ResolvedOptions {
                         mode: ActionMode::Symlink,
@@ -2746,6 +2757,7 @@ mod tests {
                 configs: vec![ConfigItem::Select(SelectConfig {
                     selection_type: SelectionType::Dot,
                     recursive: false,
+                    existing_directories_only: false,
                     exclude: vec![],
                     mode: Some(ActionMode::Copy),
                     to: Some("~/config".to_string()),
@@ -2769,6 +2781,7 @@ mod tests {
                 actions: vec![IntentAction::Select(IntentSelectAction {
                     selection_type: SelectionType::Dot,
                     recursive: false,
+                    existing_directories_only: false,
                     exclude: vec![],
                     options: ResolvedOptions {
                         mode: ActionMode::Copy,
@@ -2833,6 +2846,7 @@ mod tests {
                 configs: vec![ConfigItem::Select(SelectConfig {
                     selection_type: SelectionType::Dot,
                     recursive: false,
+                    existing_directories_only: false,
                     exclude: vec![],
                     mode: None,
                     to: None,

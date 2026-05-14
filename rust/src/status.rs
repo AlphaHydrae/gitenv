@@ -86,14 +86,16 @@ pub fn inspect_operation_plan_status(
     for entry in &operation_plan.entries {
         let outcome = match entry {
             OperationEntry::Action(action_entry) => match &action_entry.source_availability {
-                SourceAvailability::Available => match &action_entry.action {
-                    OperationAction::Symlink(operation) => OperationInspectionOutcome::Symlink(
-                        inspect_symlink_operation_status(operation)?,
-                    ),
-                    OperationAction::Copy(operation) => {
-                        OperationInspectionOutcome::Copy(inspect_copy_operation_status(operation)?)
+                SourceAvailability::Available if action_entry.skip_reason.is_none() => {
+                    match &action_entry.action {
+                        OperationAction::Symlink(operation) => OperationInspectionOutcome::Symlink(
+                            inspect_symlink_operation_status(operation)?,
+                        ),
+                        OperationAction::Copy(operation) => OperationInspectionOutcome::Copy(
+                            inspect_copy_operation_status(operation)?,
+                        ),
                     }
-                },
+                }
                 _ => OperationInspectionOutcome::Unavailable(action_entry.clone()),
             },
             OperationEntry::Issue(issue) => {
@@ -342,6 +344,7 @@ mod tests {
                     OperationEntry::Action(PlannedOperationAction {
                         action,
                         source_availability: SourceAvailability::Available,
+                        skip_reason: None,
                     })
                 })
                 .collect(),
@@ -640,6 +643,7 @@ mod tests {
                         kind: SourceUnreadableKind::PermissionDenied,
                         message: "permission denied".to_string(),
                     },
+                    skip_reason: None,
                 }),
                 OperationEntry::Issue(OperationPlanningIssue {
                     path: issue_path.clone(),
@@ -662,6 +666,7 @@ mod tests {
                             kind: SourceUnreadableKind::PermissionDenied,
                             message: "permission denied".to_string(),
                         },
+                        skip_reason: None,
                     }),
                     OperationInspectionOutcome::PlanningIssue(OperationPlanningIssue {
                         path: issue_path,
