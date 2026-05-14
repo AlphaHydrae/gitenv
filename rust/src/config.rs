@@ -376,6 +376,17 @@ fn validate_config(config: &Config) -> Result<(), ProgramError> {
                 ),
             });
         }
+
+        for item in &source.configs {
+            if let ConfigItem::Select(select) = item
+                && select.existing_directories_only
+                && !select.recursive
+            {
+                return Err(ProgramError::InvalidConfiguration {
+                    message: "existing_directories_only requires recursive to be true".to_string(),
+                });
+            }
+        }
     }
 
     Ok(())
@@ -761,6 +772,87 @@ sources:
         };
 
         assert_eq!(config, expected);
+    }
+
+    #[test]
+    fn parse_true_existing_directories_only_select_setting() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - select:
+          type: dot
+          recursive: true
+          existing_directories_only: true
+"#;
+
+        let config = parse_config(yaml)
+            .expect("config should parse when existing_directories_only is true with recursive");
+
+        let expected = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::Select(SelectConfig {
+                    selection_type: SelectionType::Dot,
+                    recursive: true,
+                    existing_directories_only: true,
+                    exclude: vec![],
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        assert_eq!(config, expected);
+    }
+
+    #[test]
+    fn reject_existing_directories_only_when_recursive_is_not_enabled() {
+        let omitted_recursive_yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - select:
+          type: dot
+          existing_directories_only: true
+"#;
+        let explicit_false_recursive_yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - select:
+          type: dot
+          recursive: false
+          existing_directories_only: true
+"#;
+
+        let error_omitted = parse_config(omitted_recursive_yaml)
+            .expect_err("existing_directories_only should be rejected without recursive");
+        let error_explicit_false = parse_config(explicit_false_recursive_yaml)
+            .expect_err("existing_directories_only should be rejected when recursive is false");
+
+        assert_eq!(
+            error_omitted,
+            ProgramError::InvalidConfiguration {
+                message: "existing_directories_only requires recursive to be true".to_string(),
+            }
+        );
+        assert_eq!(error_omitted, error_explicit_false);
     }
 
     #[test]
