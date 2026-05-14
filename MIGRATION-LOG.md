@@ -11,6 +11,11 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-14: Add recursive select intent shape with default false - Extend
+  select configuration and intent models with `recursive: bool` defaulting to
+  `false`, add parser and intent tests for omitted vs explicit `recursive:
+false` normalization and `recursive: true` propagation, and document deferred
+  recursive operation traversal in operation expansion.
 - 2026-05-14: Carry source availability on operation plans - Replace the
   operation-plan `actions` shape with ordered operation entries that preserve
   declaration order for concrete actions and planning issues, carry typed

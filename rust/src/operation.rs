@@ -252,6 +252,10 @@ fn expand_select_action(
         })];
     }
 
+    // TODO(increment-61): when `select.recursive` is true, traverse nested
+    // source directories and keep descendant-relative target mapping.
+    // Closure condition: remove this TODO once recursive operation expansion and
+    // its integration coverage are implemented.
     let entries = match list_directory(source_root) {
         Ok(entries) => entries,
         Err(error) => {
@@ -433,6 +437,7 @@ mod tests {
     ) -> IntentAction {
         IntentAction::Select(IntentSelectAction {
             selection_type,
+            recursive: false,
             exclude: exclude.into_iter().map(str::to_string).collect(),
             options,
         })

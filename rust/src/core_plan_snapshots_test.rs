@@ -302,6 +302,7 @@ fn create_rich_intent_and_operation_plans() {
                     }),
                     IntentAction::Select(IntentSelectAction {
                         selection_type: SelectionType::Dot,
+                        recursive: false,
                         exclude: vec![".gitignore".to_string()],
                         options: ResolvedOptions {
                             mode: ActionMode::Symlink,

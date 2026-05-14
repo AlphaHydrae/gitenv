@@ -299,6 +299,8 @@ pub struct SelectConfig {
     #[serde(rename = "type")]
     pub selection_type: SelectionType,
     #[serde(default)]
+    pub recursive: bool,
+    #[serde(default)]
     pub exclude: Vec<String>,
     #[serde(default)]
     pub mode: Option<ActionMode>,
@@ -673,7 +675,78 @@ sources:
                 guard: None,
                 configs: vec![ConfigItem::Select(SelectConfig {
                     selection_type: SelectionType::Dot,
+                    recursive: false,
                     exclude: vec![".DS_Store".to_string(), ".git".to_string()],
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        assert_eq!(config, expected);
+    }
+
+    #[test]
+    fn normalize_omitted_and_explicit_false_recursive_select_settings() {
+        let omitted_recursive_yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - select:
+          type: dot
+"#;
+        let explicit_false_recursive_yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - select:
+          type: dot
+          recursive: false
+"#;
+
+        let omitted_recursive = parse_config(omitted_recursive_yaml)
+            .expect("config should parse when select recursive is omitted");
+        let explicit_false_recursive = parse_config(explicit_false_recursive_yaml)
+            .expect("config should parse when select recursive is explicitly false");
+
+        assert_eq!(omitted_recursive, explicit_false_recursive);
+    }
+
+    #[test]
+    fn parse_true_recursive_select_setting() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - select:
+          type: dot
+          recursive: true
+"#;
+
+        let config = parse_config(yaml).expect("config should parse when select recursive is true");
+
+        let expected = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::Select(SelectConfig {
+                    selection_type: SelectionType::Dot,
+                    exclude: vec![],
+                    recursive: true,
                     mode: None,
                     to: None,
                     mkdir: None,
@@ -720,6 +793,7 @@ sources:
                     ConfigItem::Select(SelectConfig {
                         selection_type: SelectionType::Dot,
                         exclude: vec![],
+                        recursive: false,
                         mode: None,
                         to: None,
                         mkdir: None,
@@ -729,6 +803,7 @@ sources:
                     ConfigItem::Select(SelectConfig {
                         selection_type: SelectionType::NonDot,
                         exclude: vec![],
+                        recursive: false,
                         mode: None,
                         to: None,
                         mkdir: None,
@@ -738,6 +813,7 @@ sources:
                     ConfigItem::Select(SelectConfig {
                         selection_type: SelectionType::All,
                         exclude: vec![".DS_Store".to_string()],
+                        recursive: false,
                         mode: None,
                         to: None,
                         mkdir: None,
@@ -1490,6 +1566,7 @@ sources:
                 configs: vec![ConfigItem::Select(SelectConfig {
                     selection_type: SelectionType::Dot,
                     exclude: vec![],
+                    recursive: false,
                     mode: Some(ActionMode::Copy),
                     to: Some("~/dest".to_string()),
                     mkdir: Some(false),

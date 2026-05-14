@@ -77,6 +77,8 @@ pub struct IntentFileAction {
 pub struct IntentSelectAction {
     /// Selection scope used by operation-stage selector expansion.
     pub selection_type: SelectionType,
+    /// Enables recursive directory traversal during operation-stage expansion.
+    pub recursive: bool,
     /// Filenames explicitly excluded from selection.
     pub exclude: Vec<String>,
     pub options: ResolvedOptions,
@@ -282,6 +284,7 @@ fn plan_sources_recursively(
                     )?;
                     Ok(IntentAction::Select(IntentSelectAction {
                         selection_type: select_config.selection_type.clone(),
+                        recursive: select_config.recursive,
                         exclude: select_config.exclude.clone(),
                         options,
                     }))
@@ -697,6 +700,7 @@ mod tests {
                     }),
                     ConfigItem::Select(SelectConfig {
                         selection_type: SelectionType::Dot,
+                        recursive: false,
                         exclude: vec![".git".to_string()],
                         mode: None,
                         to: None,
@@ -741,6 +745,7 @@ mod tests {
                     }),
                     IntentAction::Select(IntentSelectAction {
                         selection_type: SelectionType::Dot,
+                        recursive: false,
                         exclude: vec![".git".to_string()],
                         options: ResolvedOptions {
                             mode: ActionMode::Copy,
@@ -775,6 +780,7 @@ mod tests {
                 guard: None,
                 configs: vec![ConfigItem::Select(SelectConfig {
                     selection_type: SelectionType::NonDot,
+                    recursive: false,
                     exclude: vec!["Makefile".to_string()],
                     mode: None,
                     to: None,
@@ -797,6 +803,7 @@ mod tests {
                 from: ".".to_string(),
                 actions: vec![IntentAction::Select(IntentSelectAction {
                     selection_type: SelectionType::NonDot,
+                    recursive: false,
                     exclude: vec!["Makefile".to_string()],
                     options: ResolvedOptions {
                         mode: ActionMode::Copy,
@@ -830,6 +837,7 @@ mod tests {
                 guard: None,
                 configs: vec![ConfigItem::Select(SelectConfig {
                     selection_type: SelectionType::All,
+                    recursive: false,
                     exclude: vec![".backup".to_string(), ".tmp".to_string()],
                     mode: None,
                     to: None,
@@ -852,6 +860,7 @@ mod tests {
                 from: "config".to_string(),
                 actions: vec![IntentAction::Select(IntentSelectAction {
                     selection_type: SelectionType::All,
+                    recursive: false,
                     exclude: vec![".backup".to_string(), ".tmp".to_string()],
                     options: ResolvedOptions {
                         mode: ActionMode::Symlink,
@@ -864,6 +873,55 @@ mod tests {
         };
 
         assert_eq!(plan, expected);
+    }
+
+    #[test]
+    fn propagate_true_recursive_select_setting_to_intent_actions() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::Select(SelectConfig {
+                    selection_type: SelectionType::Dot,
+                    recursive: true,
+                    exclude: vec![".git".to_string()],
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        let plan = derive_intent_plan(
+            &root_loaded_config(&config),
+            &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
+        )
+        .expect("planning should propagate recursive select settings");
+
+        assert_eq!(
+            plan,
+            expected_plan(vec![IntentSource {
+                from: ".".to_string(),
+                actions: vec![IntentAction::Select(IntentSelectAction {
+                    selection_type: SelectionType::Dot,
+                    recursive: true,
+                    exclude: vec![".git".to_string()],
+                    options: ResolvedOptions {
+                        mode: ActionMode::Symlink,
+                        to: "~".to_string(),
+                        mkdir: true,
+                        conflict_policy: ConflictPolicy::Skip,
+                    },
+                })],
+            }])
+        );
     }
 
     #[test]
@@ -2687,6 +2745,7 @@ mod tests {
                 guard: None,
                 configs: vec![ConfigItem::Select(SelectConfig {
                     selection_type: SelectionType::Dot,
+                    recursive: false,
                     exclude: vec![],
                     mode: Some(ActionMode::Copy),
                     to: Some("~/config".to_string()),
@@ -2709,6 +2768,7 @@ mod tests {
                 from: ".".to_string(),
                 actions: vec![IntentAction::Select(IntentSelectAction {
                     selection_type: SelectionType::Dot,
+                    recursive: false,
                     exclude: vec![],
                     options: ResolvedOptions {
                         mode: ActionMode::Copy,
@@ -2772,6 +2832,7 @@ mod tests {
                 guard: None,
                 configs: vec![ConfigItem::Select(SelectConfig {
                     selection_type: SelectionType::Dot,
+                    recursive: false,
                     exclude: vec![],
                     mode: None,
                     to: None,

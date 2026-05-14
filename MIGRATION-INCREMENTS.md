@@ -68,30 +68,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 60: Add `recursive` to `select` with default `false` (planning-only slice)
-
-Why this increment exists:
-
-- We want recursive selector expansion, but to keep review size small this first
-  slice only introduces the config and intent shape. Operation expansion remains
-  unchanged in this step so the behavior is intentionally incomplete.
-- This increment is an intentional intermediate step toward recursive selector
-  behavior. Baseline coverage must be captured and documented before editing,
-  and that recorded value is the explicit target coverage to recover in the
-  follow-up increments below.
-
-Review target:
-
-- Extend `SelectConfig` and `IntentSelectAction` with `recursive: bool`.
-- Omitted `recursive` defaults to `false`.
-- Keep current operation-stage behavior unchanged in this increment (still
-  direct-entry expansion only).
-- Add parser and intent-unit tests asserting both omitted and explicit
-  `recursive: false` normalize to the same output, plus `recursive: true`
-  intent propagation.
-- Add a TODO comment in operation expansion noting that recursive traversal is
-  intentionally deferred to the next increment and naming the closure condition.
-
 ### Increment 61: Implement recursive `select` operation expansion
 
 Why this increment exists:
