@@ -10,8 +10,8 @@
 // operation planning compose correctly end-to-end.
 
 use crate::boundary::{
-    ConfigReader, DirectoryEntriesReader, DirectoryProbe, EnvironmentReader, SourcePathRequirement,
-    SourceReadError, test_doubles::FnSourceAvailabilityReader,
+    ConfigReader, DirectoryProbe, EnvironmentReader, SourcePathRequirement, SourceReadError,
+    test_doubles::FnSourceAvailabilityReader,
 };
 use crate::intent::{
     ConflictPolicy, IntentAction, IntentContext, IntentFileAction, IntentPlan, IntentSelectAction,
@@ -25,7 +25,9 @@ use crate::{
     SelectionType, SourceAvailability, parse_config,
 };
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::path::{Path, PathBuf};
+use tempfile::TempDir;
 
 // --- Test doubles -----------------------------------------------------------
 
@@ -51,15 +53,6 @@ impl ConfigReader for AssertConfigReader {
     fn read_config_file(&self, path: &Path) -> Result<LoadedConfig, ProgramError> {
         assert_eq!(path, self.expected_path);
         Ok(self.loaded_config.clone())
-    }
-}
-
-struct FnDirectoryReader<F: Fn(&Path) -> Result<Vec<String>, SourceReadError>>(F);
-impl<F: Fn(&Path) -> Result<Vec<String>, SourceReadError>> DirectoryEntriesReader
-    for FnDirectoryReader<F>
-{
-    fn list_directory_entries(&self, path: &Path) -> Result<Vec<String>, SourceReadError> {
-        self.0(path)
     }
 }
 
@@ -89,6 +82,7 @@ fn available_operation_plan(actions: Vec<OperationAction>) -> OperationPlan {
 fn derive_representative_plans(
     root_yaml: &str,
     include_yaml: &str,
+    dots_root: &Path,
 ) -> Result<(IntentPlan, OperationPlan), ProgramError> {
     let root = parse_config(root_yaml)?;
     let include = parse_config(include_yaml)?;
@@ -101,9 +95,11 @@ fn derive_representative_plans(
         config: include,
     };
 
+    seed_dots_repository(dots_root);
+
     let env_reader = MapEnvReader(BTreeMap::from([(
         "DOTS".to_string(),
-        "/repo/dots".to_string(),
+        dots_root.to_string_lossy().into_owned(),
     )]));
     // Guard paths are checked after home expansion; use absolute paths here.
     let dir_probe = SetDirProbe(BTreeSet::from([
@@ -124,25 +120,24 @@ fn derive_representative_plans(
 
     let intent_plan = derive_intent_plan(&loaded_root, &context)?;
 
-    let dir_reader = FnDirectoryReader(|path| {
-        assert_eq!(path, Path::new("/repo/dots"));
-        Ok(vec![
-            ".gitignore".to_string(),
-            ".zshrc".to_string(),
-            ".vimrc".to_string(),
-            "notes.txt".to_string(),
-        ])
-    });
     let source_reader = FnSourceAvailabilityReader(readable_source_path);
     let operation_context = OperationContext {
         home_directory: PathBuf::from("/home/tester"),
-        dir_reader: &dir_reader,
         source_reader: &source_reader,
         global_selection_excludes: vec![],
     };
     let operation_plan = derive_operation_plan(&intent_plan, &operation_context)?;
 
     Ok((intent_plan, operation_plan))
+}
+
+fn seed_dots_repository(dots_root: &Path) {
+    fs::create_dir_all(dots_root).expect("dots repository should be created");
+    fs::write(dots_root.join(".gitignore"), "target/\n")
+        .expect("dot ignore file should be written");
+    fs::write(dots_root.join(".zshrc"), "export TEST=1\n").expect("zshrc should be written");
+    fs::write(dots_root.join(".vimrc"), "set number\n").expect("vimrc should be written");
+    fs::write(dots_root.join("notes.txt"), "notes\n").expect("notes should be written");
 }
 
 fn shorthand_root_config() -> &'static str {
@@ -280,15 +275,19 @@ sources:
 
 #[test]
 fn create_rich_intent_and_operation_plans() {
-    let (intent_plan, operation_plan) =
-        derive_representative_plans(canonical_root_config(), canonical_include_config())
-            .expect("representative config should derive both plans");
+    let dots_root = TempDir::new().expect("temporary dots repository should be created");
+    let (intent_plan, operation_plan) = derive_representative_plans(
+        canonical_root_config(),
+        canonical_include_config(),
+        dots_root.path(),
+    )
+    .expect("representative config should derive both plans");
 
     let expected_intent_plan = IntentPlan {
         repository: "/repo".to_string(),
         sources: vec![
             IntentSource {
-                from: "/repo/dots".to_string(),
+                from: dots_root.path().to_string_lossy().into_owned(),
                 actions: vec![
                     IntentAction::File(IntentFileAction {
                         file: ".zshrc".to_string(),
@@ -344,20 +343,20 @@ fn create_rich_intent_and_operation_plans() {
 
     let expected_operation_plan = available_operation_plan(vec![
         OperationAction::Copy(FileOperation {
-            source: PathBuf::from("/repo/dots/.zshrc"),
+            source: dots_root.path().join(".zshrc"),
             target: PathBuf::from("/home/tester/shell-private/.zshrc"),
             mkdir: false,
             conflict_policy: ConflictPolicy::Overwrite,
         }),
         OperationAction::Symlink(FileOperation {
-            source: PathBuf::from("/repo/dots/.zshrc"),
-            target: PathBuf::from("/home/tester/dot-targets/.zshrc"),
+            source: dots_root.path().join(".vimrc"),
+            target: PathBuf::from("/home/tester/dot-targets/.vimrc"),
             mkdir: false,
             conflict_policy: ConflictPolicy::OverwriteWithBackup,
         }),
         OperationAction::Symlink(FileOperation {
-            source: PathBuf::from("/repo/dots/.vimrc"),
-            target: PathBuf::from("/home/tester/dot-targets/.vimrc"),
+            source: dots_root.path().join(".zshrc"),
+            target: PathBuf::from("/home/tester/dot-targets/.zshrc"),
             mkdir: false,
             conflict_policy: ConflictPolicy::OverwriteWithBackup,
         }),
@@ -381,12 +380,19 @@ fn create_rich_intent_and_operation_plans() {
 
 #[test]
 fn shorthand_and_canonical_plans_are_identical() {
-    let shorthand =
-        derive_representative_plans(shorthand_root_config(), shorthand_include_config())
-            .expect("shorthand representative config should derive both plans");
-    let canonical =
-        derive_representative_plans(canonical_root_config(), canonical_include_config())
-            .expect("canonical representative config should derive both plans");
+    let dots_root = TempDir::new().expect("temporary dots repository should be created");
+    let shorthand = derive_representative_plans(
+        shorthand_root_config(),
+        shorthand_include_config(),
+        dots_root.path(),
+    )
+    .expect("shorthand representative config should derive both plans");
+    let canonical = derive_representative_plans(
+        canonical_root_config(),
+        canonical_include_config(),
+        dots_root.path(),
+    )
+    .expect("canonical representative config should derive both plans");
 
     assert_eq!(shorthand, canonical);
 }

@@ -70,33 +70,10 @@ pub(crate) fn ensure_source_path_readable(
     }
 }
 
-pub(crate) fn list_directory_entries(path: &Path) -> Result<Vec<String>, SourceReadError> {
-    logging::system(Level::Trace, "read_dir", format!("path={}", path.display()));
-
-    let read_dir = std::fs::read_dir(path).map_err(|error| source_read_error(path, error))?;
-
-    let mut entries = Vec::new();
-    for entry in read_dir {
-        let entry = entry.map_err(|error| source_read_error(path, error))?;
-
-        let file_type = entry
-            .file_type()
-            .map_err(|error| source_read_error(path, error))?;
-
-        if file_type.is_file() || file_type.is_symlink() {
-            entries.push(entry.file_name().to_string_lossy().into_owned());
-        }
-    }
-
-    entries.sort();
-    Ok(entries)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_source_path_readable, list_directory_entries, resolve_home_directory,
-        source_read_error, source_shape_error,
+        ensure_source_path_readable, resolve_home_directory, source_read_error, source_shape_error,
     };
     use crate::ProgramError;
     use crate::boundary::{SourcePathRequirement, SourceReadErrorKind};
@@ -104,6 +81,8 @@ mod tests {
 
     use std::fs;
     use std::io::ErrorKind;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
     use tempfile::TempDir;
 
@@ -126,30 +105,6 @@ mod tests {
             .expect_err("expected resolver to fail when HOME is missing");
 
         assert_eq!(error, ProgramError::HomeDirectoryUnavailable);
-    }
-
-    #[test]
-    fn list_directory_entries_include_files_only_in_sorted_order() {
-        let directory = TempDir::new().expect("temporary directory should be created");
-        fs::write(directory.path().join("z-last"), "z\n").expect("file should be written");
-        fs::write(directory.path().join("a-first"), "a\n").expect("file should be written");
-        fs::create_dir(directory.path().join("folder")).expect("directory should be written");
-
-        let entries = list_directory_entries(directory.path())
-            .expect("directory listing should succeed for readable directories");
-
-        assert_eq!(entries, vec!["a-first".to_string(), "z-last".to_string()]);
-    }
-
-    #[test]
-    fn report_read_source_directory_error_when_directory_cannot_be_read() {
-        let missing_directory = PathBuf::from("/tmp/definitely-missing-gitenv-fs-adapter");
-
-        let error = list_directory_entries(&missing_directory)
-            .expect_err("listing should fail for a missing source directory");
-
-        assert_eq!(error.path, missing_directory);
-        assert_eq!(error.kind, SourceReadErrorKind::Missing);
     }
 
     #[test]
@@ -202,5 +157,40 @@ mod tests {
             source_shape_error(&file_path, "shape error").kind,
             SourceReadErrorKind::UnexpectedIo
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn report_file_open_permission_errors_when_source_file_is_unreadable() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let file_path = temp.path().join("private-file");
+        fs::write(&file_path, "secret\n").expect("private file should be written");
+        fs::set_permissions(&file_path, fs::Permissions::from_mode(0o000))
+            .expect("file permissions should be updated");
+
+        let error = ensure_source_path_readable(&file_path, SourcePathRequirement::File)
+            .expect_err("unreadable files should report permission failures");
+
+        assert_eq!(error.path, file_path);
+        assert_eq!(error.kind, SourceReadErrorKind::PermissionDenied);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn report_directory_read_permission_errors_when_source_directory_is_unreadable() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let directory_path = temp.path().join("private-directory");
+        fs::create_dir_all(&directory_path).expect("private directory should be created");
+        fs::set_permissions(&directory_path, fs::Permissions::from_mode(0o000))
+            .expect("directory permissions should be updated");
+
+        let error = ensure_source_path_readable(&directory_path, SourcePathRequirement::Directory)
+            .expect_err("unreadable directories should report permission failures");
+
+        fs::set_permissions(&directory_path, fs::Permissions::from_mode(0o700))
+            .expect("directory permissions should be restored");
+
+        assert_eq!(error.path, directory_path);
+        assert_eq!(error.kind, SourceReadErrorKind::PermissionDenied);
     }
 }

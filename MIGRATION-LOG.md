@@ -11,6 +11,8 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-14: Implement recursive select operation expansion - Expand selector
+  planning through one depth-parameterized directory traversal path.
 - 2026-05-14: Add recursive select intent shape with default false - Extend
   select configuration and intent models with `recursive: bool` defaulting to
   `false`, add parser and intent tests for omitted vs explicit `recursive:

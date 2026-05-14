@@ -5,22 +5,27 @@
 //! filesystem operations. This stage only plans — no filesystem writes happen
 //! here.
 //!
-//! The composition root in `lib.rs` wires a real [`DirectoryEntriesReader`]
-//! boundary into an [`OperationContext`]. Tests supply a lightweight local
-//! double that returns pre-built directory listings without touching the disk.
+//! The composition root in `lib.rs` wires a real source-availability boundary
+//! into an [`OperationContext`]. Directory traversal stays in this module so
+//! operation planning owns selection expansion semantics.
 
 use crate::config::SelectionType;
 use crate::{
     ActionMode, ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction,
     ProgramError, ResolvedOptions, SourceAvailability, SourceUnreadableKind,
     boundary::{
-        DirectoryEntriesReader, SourceAvailabilityReader, SourcePathRequirement, SourceReadError,
-        SourceReadErrorKind,
+        SourceAvailabilityReader, SourcePathRequirement, SourceReadError, SourceReadErrorKind,
     },
     logging, path_resolution,
 };
 use log::Level;
 use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecursiveDirectoryEntryKind {
+    File,
+    Directory,
+}
 
 /// Concrete, execution-shaped planning output.
 ///
@@ -121,8 +126,6 @@ pub(crate) struct OperationContext<'a> {
     /// Carried as data rather than as a trait method so helper signatures
     /// stay small and the context fully represents stage runtime inputs.
     pub(crate) home_directory: PathBuf,
-    /// Boundary adapter for listing directory entries (used for selector expansion).
-    pub(crate) dir_reader: &'a dyn DirectoryEntriesReader,
     /// Boundary adapter for probing direct source path availability.
     pub(crate) source_reader: &'a dyn SourceAvailabilityReader,
     /// Platform- or configuration-derived exclusions applied to every selector.
@@ -169,7 +172,6 @@ pub(crate) fn derive_operation_plan(
                         &context.home_directory,
                         &context.global_selection_excludes,
                         context.source_reader,
-                        &|path| context.dir_reader.list_directory_entries(path),
                     ));
                 }
             }
@@ -239,7 +241,6 @@ fn expand_select_action(
     home_directory: &Path,
     global_selection_excludes: &[String],
     source_reader: &dyn SourceAvailabilityReader,
-    list_directory: &impl Fn(&Path) -> Result<Vec<String>, SourceReadError>,
 ) -> Vec<OperationEntry> {
     let source_root_availability = source_availability_from_result(
         source_reader.ensure_source_path_readable(source_root, SourcePathRequirement::Directory),
@@ -252,11 +253,12 @@ fn expand_select_action(
         })];
     }
 
-    // TODO(increment-61): when `select.recursive` is true, traverse nested
-    // source directories and keep descendant-relative target mapping.
-    // Closure condition: remove this TODO once recursive operation expansion and
-    // its integration coverage are implemented.
-    let entries = match list_directory(source_root) {
+    let max_depth = if select_action.recursive {
+        None
+    } else {
+        Some(0)
+    };
+    let entries = match list_directory_entries(source_root, max_depth) {
         Ok(entries) => entries,
         Err(error) => {
             let source_availability = source_availability_from_error(&error);
@@ -329,6 +331,115 @@ fn source_availability_from_error(error: &SourceReadError) -> SourceAvailability
     }
 }
 
+fn list_directory_entries(
+    path: &Path,
+    max_depth: Option<usize>,
+) -> Result<Vec<String>, SourceReadError> {
+    let mut entries = Vec::new();
+    collect_directory_entries(path, Path::new(""), max_depth, &mut entries)?;
+    Ok(entries)
+}
+
+fn collect_directory_entries(
+    directory: &Path,
+    relative_prefix: &Path,
+    remaining_depth: Option<usize>,
+    entries: &mut Vec<String>,
+) -> Result<(), SourceReadError> {
+    let mut children = list_directory_children(directory)?;
+    children.sort_by(|left, right| left.0.cmp(&right.0));
+
+    for (name, kind) in children {
+        let relative_path = relative_prefix.join(&name);
+        let child_path = directory.join(&name);
+
+        match kind {
+            RecursiveDirectoryEntryKind::File => {
+                entries.push(relative_path.to_string_lossy().into_owned());
+            }
+            RecursiveDirectoryEntryKind::Directory => {
+                if can_descend(remaining_depth) {
+                    let next_depth = decrement_depth(remaining_depth);
+                    collect_directory_entries(&child_path, &relative_path, next_depth, entries)?;
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn list_directory_children(
+    path: &Path,
+) -> Result<Vec<(String, RecursiveDirectoryEntryKind)>, SourceReadError> {
+    let read_dir = read_directory(path)?;
+
+    let mut entries = Vec::new();
+    for entry in read_dir {
+        let entry = read_dir_entry(path, entry)?;
+        let file_type = read_entry_type(path, &entry)?;
+        let kind = if file_type.is_dir() {
+            RecursiveDirectoryEntryKind::Directory
+        } else {
+            RecursiveDirectoryEntryKind::File
+        };
+
+        entries.push((entry.file_name().to_string_lossy().into_owned(), kind));
+    }
+
+    Ok(entries)
+}
+
+fn can_descend(remaining_depth: Option<usize>) -> bool {
+    match remaining_depth {
+        None => true,
+        Some(depth) => depth > 0,
+    }
+}
+
+fn decrement_depth(remaining_depth: Option<usize>) -> Option<usize> {
+    remaining_depth.map(|depth| depth.saturating_sub(1))
+}
+
+fn read_dir_entry(
+    path: &Path,
+    entry: Result<std::fs::DirEntry, std::io::Error>,
+) -> Result<std::fs::DirEntry, SourceReadError> {
+    entry.map_err(|error| source_read_error(path, error))
+}
+
+fn read_directory(path: &Path) -> Result<std::fs::ReadDir, SourceReadError> {
+    std::fs::read_dir(path).map_err(|error| source_read_error(path, error))
+}
+
+fn read_entry_type(
+    path: &Path,
+    entry: &std::fs::DirEntry,
+) -> Result<std::fs::FileType, SourceReadError> {
+    map_entry_type_result(path, entry.file_type())
+}
+
+fn map_entry_type_result(
+    path: &Path,
+    file_type: Result<std::fs::FileType, std::io::Error>,
+) -> Result<std::fs::FileType, SourceReadError> {
+    file_type.map_err(|error| source_read_error(path, error))
+}
+
+fn source_read_error(path: &Path, error: std::io::Error) -> SourceReadError {
+    let kind = match error.kind() {
+        std::io::ErrorKind::NotFound => SourceReadErrorKind::Missing,
+        std::io::ErrorKind::PermissionDenied => SourceReadErrorKind::PermissionDenied,
+        _ => SourceReadErrorKind::UnexpectedIo,
+    };
+
+    SourceReadError {
+        path: path.to_path_buf(),
+        kind,
+        message: error.to_string(),
+    }
+}
+
 impl SourceAvailability {
     pub(crate) fn diagnostic_suffix(&self) -> Option<String> {
         match self {
@@ -366,7 +477,11 @@ fn should_include_selection_entry(
     select_action: &IntentSelectAction,
     global_selection_excludes: &[String],
 ) -> bool {
-    let has_dot_prefix = entry.starts_with('.');
+    let entry_name = Path::new(entry)
+        .file_name()
+        .and_then(|segment| segment.to_str())
+        .unwrap_or(entry);
+    let has_dot_prefix = entry_name.starts_with('.');
     let selected_by_type = match select_action.selection_type {
         SelectionType::Dot => has_dot_prefix,
         SelectionType::NonDot => !has_dot_prefix,
@@ -393,12 +508,14 @@ mod tests {
         ActionMode, ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction,
         IntentSource, ResolvedOptions, SelectionType, SourceAvailability, SourceUnreadableKind,
         boundary::{
-            DirectoryEntriesReader, SourcePathRequirement, SourceReadError,
-            test_doubles::{FnDirectoryReader, FnSourceAvailabilityReader},
+            SourcePathRequirement, SourceReadError, test_doubles::FnSourceAvailabilityReader,
         },
         derive_operation_plan as derive_operation_plan_entrypoint,
     };
     use std::fs;
+    use std::io::ErrorKind;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     #[cfg(unix)]
     use std::os::unix::fs::symlink;
     use std::path::{Path, PathBuf};
@@ -435,9 +552,18 @@ mod tests {
         exclude: Vec<&str>,
         options: ResolvedOptions,
     ) -> IntentAction {
+        make_select_action_with_recursive(selection_type, false, exclude, options)
+    }
+
+    fn make_select_action_with_recursive(
+        selection_type: SelectionType,
+        recursive: bool,
+        exclude: Vec<&str>,
+        options: ResolvedOptions,
+    ) -> IntentAction {
         IntentAction::Select(IntentSelectAction {
             selection_type,
-            recursive: false,
+            recursive,
             exclude: exclude.into_iter().map(str::to_string).collect(),
             options,
         })
@@ -460,12 +586,10 @@ mod tests {
 
     fn make_operation_context<'a>(
         home_directory: PathBuf,
-        dir_reader: &'a dyn DirectoryEntriesReader,
         global_selection_excludes: Option<Vec<&str>>,
     ) -> OperationContext<'a> {
         OperationContext {
             home_directory,
-            dir_reader,
             source_reader: &READABLE_SOURCE_READER,
             global_selection_excludes: global_selection_excludes
                 .unwrap_or_default()
@@ -546,9 +670,7 @@ mod tests {
                 )],
             )],
         );
-
-        let dir_reader = FnDirectoryReader(crate::fs_adapter::list_directory_entries);
-        let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
+        let context = make_operation_context(home.path().to_path_buf(), None);
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should expand selected files");
 
@@ -573,9 +695,7 @@ mod tests {
                 vec![make_file_action(".zshrc", ".zshrc", default_options())],
             )],
         );
-
-        let dir_reader = FnDirectoryReader(crate::fs_adapter::list_directory_entries);
-        let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
+        let context = make_operation_context(home.path().to_path_buf(), None);
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should keep explicit file actions");
 
@@ -608,11 +728,7 @@ mod tests {
             )],
         );
 
-        let dir_reader = FnDirectoryReader(|path| {
-            let path = path.to_path_buf();
-            crate::fs_adapter::list_directory_entries(&path)
-        });
-        let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
+        let context = make_operation_context(home.path().to_path_buf(), None);
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should expand selected files");
 
@@ -660,11 +776,7 @@ mod tests {
             )],
         );
 
-        let dir_reader = FnDirectoryReader(|path| {
-            let path = path.to_path_buf();
-            crate::fs_adapter::list_directory_entries(&path)
-        });
-        let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
+        let context = make_operation_context(home.path().to_path_buf(), None);
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should expand selected symlink entries");
 
@@ -680,10 +792,27 @@ mod tests {
     #[test]
     fn expand_non_dot_selection_entries_when_type_is_non_dot() {
         let home = TempDir::new().expect("temporary home directory should be created");
-        let repository = PathBuf::from("/repo-root");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::create_dir_all(repository.path().join("configs"))
+            .expect("configs directory should be created");
+        fs::write(
+            repository.path().join("configs").join(".zshrc"),
+            "export TEST=1\n",
+        )
+        .expect("dotfile should be written");
+        fs::write(
+            repository.path().join("configs").join("notes.txt"),
+            "notes\n",
+        )
+        .expect("excluded file should be written");
+        fs::write(
+            repository.path().join("configs").join("tmux.conf"),
+            "set -g mouse on\n",
+        )
+        .expect("selected non-dotfile should be written");
 
         let intent_plan = make_intent_plan(
-            &repository,
+            repository.path(),
             vec![make_intent_source(
                 "configs",
                 vec![make_select_action(
@@ -694,21 +823,14 @@ mod tests {
             )],
         );
 
-        let dir_reader = FnDirectoryReader(|_| {
-            Ok(vec![
-                ".zshrc".to_string(),
-                "notes.txt".to_string(),
-                "tmux.conf".to_string(),
-            ])
-        });
-        let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
+        let context = make_operation_context(home.path().to_path_buf(), None);
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should expand non-dotfile selection");
 
         assert_eq!(
             operation_plan,
             expected_operation_plan(vec![expected_symlink(
-                repository.join("configs").join("tmux.conf"),
+                repository.path().join("configs").join("tmux.conf"),
                 home.path().join("tmux.conf"),
             )])
         );
@@ -717,10 +839,27 @@ mod tests {
     #[test]
     fn expand_all_selection_entries_when_type_is_all() {
         let home = TempDir::new().expect("temporary home directory should be created");
-        let repository = PathBuf::from("/repo-root");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::create_dir_all(repository.path().join("configs"))
+            .expect("configs directory should be created");
+        fs::write(
+            repository.path().join("configs").join(".zshrc"),
+            "export TEST=1\n",
+        )
+        .expect("dotfile should be written");
+        fs::write(
+            repository.path().join("configs").join("notes.txt"),
+            "notes\n",
+        )
+        .expect("excluded file should be written");
+        fs::write(
+            repository.path().join("configs").join("tmux.conf"),
+            "set -g mouse on\n",
+        )
+        .expect("selected file should be written");
 
         let intent_plan = make_intent_plan(
-            &repository,
+            repository.path(),
             vec![make_intent_source(
                 "configs",
                 vec![make_select_action(
@@ -731,14 +870,7 @@ mod tests {
             )],
         );
 
-        let dir_reader = FnDirectoryReader(|_| {
-            Ok(vec![
-                ".zshrc".to_string(),
-                "notes.txt".to_string(),
-                "tmux.conf".to_string(),
-            ])
-        });
-        let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
+        let context = make_operation_context(home.path().to_path_buf(), None);
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should expand all selection entries");
 
@@ -746,11 +878,11 @@ mod tests {
             operation_plan,
             expected_operation_plan(vec![
                 expected_symlink(
-                    repository.join("configs").join(".zshrc"),
+                    repository.path().join("configs").join(".zshrc"),
                     home.path().join(".zshrc")
                 ),
                 expected_symlink(
-                    repository.join("configs").join("tmux.conf"),
+                    repository.path().join("configs").join("tmux.conf"),
                     home.path().join("tmux.conf"),
                 ),
             ])
@@ -758,12 +890,237 @@ mod tests {
     }
 
     #[test]
-    fn cannot_derive_operation_plan_when_directory_listing_fails() {
+    fn keep_recursive_selection_flat_on_shallow_directories() {
         let home = TempDir::new().expect("temporary home directory should be created");
-        let repository = PathBuf::from("/repo-root");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::write(repository.path().join(".zshrc"), "export TEST=1\n")
+            .expect("dotfile should be written");
+        fs::write(repository.path().join("notes.txt"), "plain file\n")
+            .expect("file should be written");
 
         let intent_plan = make_intent_plan(
-            &repository,
+            repository.path(),
+            vec![make_intent_source(
+                ".",
+                vec![make_select_action_with_recursive(
+                    SelectionType::All,
+                    true,
+                    vec![],
+                    default_options(),
+                )],
+            )],
+        );
+        let context = make_operation_context(home.path().to_path_buf(), None);
+
+        let recursive_plan = derive_operation_plan(&intent_plan, &context)
+            .expect("recursive selection should expand shallow entries");
+        let direct_plan = derive_operation_plan(
+            &make_intent_plan(
+                repository.path(),
+                vec![make_intent_source(
+                    ".",
+                    vec![make_select_action(
+                        SelectionType::All,
+                        vec![],
+                        default_options(),
+                    )],
+                )],
+            ),
+            &context,
+        )
+        .expect("direct selection should expand the same shallow entries");
+
+        assert_eq!(recursive_plan, direct_plan);
+    }
+
+    #[test]
+    fn expand_recursive_selection_entries_in_depth_first_order() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::write(repository.path().join("z-last.txt"), "z\n")
+            .expect("top-level file should be written");
+        fs::write(repository.path().join("a-first.txt"), "a\n")
+            .expect("top-level file should be written");
+        fs::create_dir_all(repository.path().join("nested").join("inner"))
+            .expect("nested directories should be created");
+        fs::write(repository.path().join("nested").join("b-middle.txt"), "b\n")
+            .expect("nested file should be written");
+        fs::write(
+            repository
+                .path()
+                .join("nested")
+                .join("inner")
+                .join("c-deep.txt"),
+            "c\n",
+        )
+        .expect("deeply nested file should be written");
+
+        let intent_plan = make_intent_plan(
+            repository.path(),
+            vec![make_intent_source(
+                ".",
+                vec![make_select_action_with_recursive(
+                    SelectionType::All,
+                    true,
+                    vec![],
+                    default_options(),
+                )],
+            )],
+        );
+        let context = make_operation_context(home.path().to_path_buf(), None);
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
+            .expect("recursive selection should expand nested files");
+
+        assert_eq!(
+            operation_plan,
+            expected_operation_plan(vec![
+                expected_symlink(
+                    repository.path().join("a-first.txt"),
+                    home.path().join("a-first.txt"),
+                ),
+                expected_symlink(
+                    repository.path().join("nested").join("b-middle.txt"),
+                    home.path().join("nested").join("b-middle.txt"),
+                ),
+                expected_symlink(
+                    repository
+                        .path()
+                        .join("nested")
+                        .join("inner")
+                        .join("c-deep.txt"),
+                    home.path().join("nested").join("inner").join("c-deep.txt"),
+                ),
+                expected_symlink(
+                    repository.path().join("z-last.txt"),
+                    home.path().join("z-last.txt"),
+                ),
+            ])
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preserve_a_planning_issue_when_recursive_selection_cannot_read_a_nested_directory() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+
+        fs::create_dir_all(repository.path().join("nested"))
+            .expect("nested directory should be created");
+        fs::write(
+            repository.path().join("nested").join("visible.txt"),
+            "visible\n",
+        )
+        .expect("visible file should be written");
+        let unreadable_directory = repository.path().join("nested").join("private");
+        fs::create_dir_all(&unreadable_directory).expect("private directory should be created");
+        fs::write(unreadable_directory.join("hidden.txt"), "hidden\n")
+            .expect("hidden file should be written");
+        fs::set_permissions(&unreadable_directory, fs::Permissions::from_mode(0o0))
+            .expect("private directory permissions should be updated");
+
+        let permission_error_message = fs::read_dir(&unreadable_directory)
+            .expect_err("unreadable directory should fail to read")
+            .to_string();
+
+        let intent_plan = make_intent_plan(
+            repository.path(),
+            vec![make_intent_source(
+                "nested",
+                vec![make_select_action_with_recursive(
+                    SelectionType::All,
+                    true,
+                    vec![],
+                    default_options(),
+                )],
+            )],
+        );
+        let context = make_operation_context(home.path().to_path_buf(), None);
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
+            .expect("recursive selection should preserve nested read failures");
+
+        assert_eq!(
+            operation_plan,
+            OperationPlan {
+                entries: vec![OperationEntry::Issue(OperationPlanningIssue {
+                    path: unreadable_directory,
+                    source_availability: SourceAvailability::Unreadable {
+                        kind: SourceUnreadableKind::PermissionDenied,
+                        message: permission_error_message,
+                    },
+                })],
+            }
+        );
+    }
+
+    #[test]
+    fn map_recursive_source_read_errors_to_the_expected_availability_kinds() {
+        let path = PathBuf::from("/repo-root/nested");
+
+        let missing = super::source_read_error(
+            &path,
+            std::io::Error::new(ErrorKind::NotFound, "missing directory"),
+        );
+        let unexpected = super::source_read_error(&path, std::io::Error::other("boom"));
+
+        assert_eq!(missing.path, path);
+        assert_eq!(missing.kind, SourceReadErrorKind::Missing);
+        assert_eq!(unexpected.path, path);
+        assert_eq!(unexpected.kind, SourceReadErrorKind::UnexpectedIo);
+    }
+
+    #[test]
+    fn preserve_directory_open_errors_as_source_read_errors() {
+        let root = TempDir::new().expect("temporary root should be created");
+        let missing_directory = root.path().join("missing");
+
+        let error = super::read_directory(&missing_directory)
+            .expect_err("missing directory reads should be reported as errors");
+
+        assert_eq!(error.path, missing_directory);
+        assert_eq!(error.kind, SourceReadErrorKind::Missing);
+    }
+
+    #[test]
+    fn preserve_directory_iteration_errors_as_source_read_errors() {
+        let directory = PathBuf::from("/repo-root/configs");
+
+        let error = super::read_dir_entry(
+            &directory,
+            Err(std::io::Error::new(
+                ErrorKind::PermissionDenied,
+                "cannot iterate",
+            )),
+        )
+        .expect_err("directory iteration failures should be preserved");
+
+        assert_eq!(error.path, directory);
+        assert_eq!(error.kind, SourceReadErrorKind::PermissionDenied);
+        assert_eq!(error.message, "cannot iterate");
+    }
+
+    #[test]
+    fn preserve_directory_entry_type_errors_as_source_read_errors() {
+        let directory = PathBuf::from("/repo-root/configs");
+
+        let error = super::map_entry_type_result(
+            &directory,
+            Err(std::io::Error::other("file type is unavailable")),
+        )
+        .expect_err("entry type failures should be preserved");
+
+        assert_eq!(error.path, directory);
+        assert_eq!(error.kind, SourceReadErrorKind::UnexpectedIo);
+        assert_eq!(error.message, "file type is unavailable");
+    }
+
+    #[test]
+    fn preserve_a_missing_directory_listing_as_a_planning_issue() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        let missing_source = repository.path().join("configs");
+
+        let intent_plan = make_intent_plan(
+            repository.path(),
             vec![make_intent_source(
                 "configs",
                 vec![make_select_action(
@@ -774,14 +1131,7 @@ mod tests {
             )],
         );
 
-        let dir_reader = FnDirectoryReader(|path| {
-            Err(SourceReadError {
-                path: path.to_path_buf(),
-                kind: crate::boundary::SourceReadErrorKind::UnexpectedIo,
-                message: "boom".to_string(),
-            })
-        });
-        let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
+        let context = make_operation_context(home.path().to_path_buf(), None);
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("selector expansion should preserve planning issues");
 
@@ -789,10 +1139,49 @@ mod tests {
             operation_plan,
             OperationPlan {
                 entries: vec![OperationEntry::Issue(OperationPlanningIssue {
-                    path: PathBuf::from("/repo-root/configs"),
+                    path: missing_source,
+                    source_availability: SourceAvailability::Missing,
+                })],
+            }
+        );
+    }
+
+    #[test]
+    fn preserve_an_unexpected_directory_listing_error_as_a_planning_issue() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        let non_directory_source = repository.path().join("configs");
+        fs::write(&non_directory_source, "not a directory\n")
+            .expect("non-directory source should be created");
+
+        let unexpected_message = fs::read_dir(&non_directory_source)
+            .expect_err("reading a regular file as a directory should fail")
+            .to_string();
+
+        let intent_plan = make_intent_plan(
+            repository.path(),
+            vec![make_intent_source(
+                "configs",
+                vec![make_select_action(
+                    SelectionType::Dot,
+                    vec![],
+                    default_options(),
+                )],
+            )],
+        );
+
+        let context = make_operation_context(home.path().to_path_buf(), None);
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
+            .expect("selector expansion should preserve planning issues");
+
+        assert_eq!(
+            operation_plan,
+            OperationPlan {
+                entries: vec![OperationEntry::Issue(OperationPlanningIssue {
+                    path: non_directory_source,
                     source_availability: SourceAvailability::Unreadable {
                         kind: SourceUnreadableKind::UnexpectedIo,
-                        message: "boom".to_string(),
+                        message: unexpected_message,
                     },
                 })],
             }
@@ -816,7 +1205,6 @@ mod tests {
             )],
         );
 
-        let dir_reader = FnDirectoryReader(|_| Ok(vec![]));
         let source_reader = FnSourceAvailabilityReader(|path, _| {
             Err(SourceReadError {
                 path: path.to_path_buf(),
@@ -826,7 +1214,6 @@ mod tests {
         });
         let context = OperationContext {
             home_directory: home.path().to_path_buf(),
-            dir_reader: &dir_reader,
             source_reader: &source_reader,
             global_selection_excludes: vec![],
         };
@@ -843,12 +1230,9 @@ mod tests {
                 })],
             }
         );
-
-        let dir_reader = FnDirectoryReader(crate::fs_adapter::list_directory_entries);
         let source_reader = FnSourceAvailabilityReader(|_, _| Ok(()));
         let available_context = OperationContext {
             home_directory: home.path().to_path_buf(),
-            dir_reader: &dir_reader,
             source_reader: &source_reader,
             global_selection_excludes: vec![],
         };
@@ -888,8 +1272,6 @@ mod tests {
                 vec![make_file_action(".zshrc", ".zshrc", default_options())],
             )],
         );
-
-        let dir_reader = FnDirectoryReader(crate::fs_adapter::list_directory_entries);
         let source_reader = FnSourceAvailabilityReader(|path, _| {
             Err(SourceReadError {
                 path: path.to_path_buf(),
@@ -899,7 +1281,6 @@ mod tests {
         });
         let context = OperationContext {
             home_directory: home.path().to_path_buf(),
-            dir_reader: &dir_reader,
             source_reader: &source_reader,
             global_selection_excludes: vec![],
         };
@@ -923,7 +1304,6 @@ mod tests {
             }
         );
 
-        let dir_reader = FnDirectoryReader(|_| Ok(vec![".zshrc".to_string()]));
         let readable_source_reader =
             FnSourceAvailabilityReader(|_, requirement| match requirement {
                 SourcePathRequirement::Directory => Ok(()),
@@ -931,7 +1311,6 @@ mod tests {
             });
         let readable_context = OperationContext {
             home_directory: home.path().to_path_buf(),
-            dir_reader: &dir_reader,
             source_reader: &readable_source_reader,
             global_selection_excludes: vec![],
         };
@@ -1033,9 +1412,7 @@ mod tests {
                 vec![make_file_action(".zshrc", "shell/zshrc", options)],
             )],
         );
-
-        let dir_reader = FnDirectoryReader(crate::fs_adapter::list_directory_entries);
-        let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
+        let context = make_operation_context(home.path().to_path_buf(), None);
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should anchor relative targets to the home directory");
 
@@ -1063,9 +1440,7 @@ mod tests {
                 vec![make_file_action(".zshrc", ".zshrc", options)],
             )],
         );
-
-        let dir_reader = FnDirectoryReader(crate::fs_adapter::list_directory_entries);
-        let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
+        let context = make_operation_context(home.path().to_path_buf(), None);
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should resolve ~/ paths for copy operations");
 
@@ -1081,13 +1456,31 @@ mod tests {
     #[test]
     fn expand_multiple_sources_into_flat_concrete_actions() {
         let home = TempDir::new().expect("temporary home directory should be created");
-        let repository = PathBuf::from("/repo-root");
+        let repository = TempDir::new().expect("temporary repository should be created");
         let mut config_options = default_options();
         config_options.to = "~/.config".to_string();
-        let config_source = repository.join("config");
+        fs::create_dir_all(repository.path().join("home-files"))
+            .expect("home-files directory should be created");
+        fs::write(
+            repository.path().join("home-files").join(".zshrc"),
+            "export TEST=1\n",
+        )
+        .expect("home source file should be written");
+        fs::create_dir_all(repository.path().join("config"))
+            .expect("config directory should be created");
+        fs::write(
+            repository.path().join("config").join(".nvim"),
+            "set number\n",
+        )
+        .expect("first config file should be written");
+        fs::write(
+            repository.path().join("config").join(".tmux"),
+            "set -g mouse on\n",
+        )
+        .expect("second config file should be written");
 
         let intent_plan = make_intent_plan(
-            &repository,
+            repository.path(),
             vec![
                 make_intent_source(
                     "home-files",
@@ -1103,12 +1496,7 @@ mod tests {
                 ),
             ],
         );
-
-        let dir_reader = FnDirectoryReader(|path| {
-            assert_eq!(path, config_source.as_path());
-            Ok(vec![".nvim".to_string(), ".tmux".to_string()])
-        });
-        let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
+        let context = make_operation_context(home.path().to_path_buf(), None);
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should combine actions from multiple sources");
 
@@ -1116,15 +1504,15 @@ mod tests {
             operation_plan,
             expected_operation_plan(vec![
                 expected_symlink(
-                    repository.join("home-files").join(".zshrc"),
+                    repository.path().join("home-files").join(".zshrc"),
                     home.path().join(".zshrc"),
                 ),
                 expected_symlink(
-                    repository.join("config").join(".nvim"),
+                    repository.path().join("config").join(".nvim"),
                     home.path().join(".config").join(".nvim"),
                 ),
                 expected_symlink(
-                    repository.join("config").join(".tmux"),
+                    repository.path().join("config").join(".tmux"),
                     home.path().join(".config").join(".tmux"),
                 ),
             ])
@@ -1176,11 +1564,7 @@ mod tests {
             )],
         );
 
-        let dir_reader = FnDirectoryReader(|path| {
-            let path = path.to_path_buf();
-            crate::fs_adapter::list_directory_entries(&path)
-        });
-        let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
+        let context = make_operation_context(home.path().to_path_buf(), None);
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("missing source directories should be preserved as planning issues");
 
@@ -1215,13 +1599,7 @@ mod tests {
                 )],
             )],
         );
-
-        let dir_reader = FnDirectoryReader(crate::fs_adapter::list_directory_entries);
-        let context = make_operation_context(
-            home.path().to_path_buf(),
-            &dir_reader,
-            Some(vec![".DS_Store"]),
-        );
+        let context = make_operation_context(home.path().to_path_buf(), Some(vec![".DS_Store"]));
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should honor global excludes");
 
@@ -1256,13 +1634,8 @@ mod tests {
                 )],
             )],
         );
-
-        let dir_reader = FnDirectoryReader(crate::fs_adapter::list_directory_entries);
-        let context = make_operation_context(
-            home.path().to_path_buf(),
-            &dir_reader,
-            Some(vec![".DS_Store", ".git"]),
-        );
+        let context =
+            make_operation_context(home.path().to_path_buf(), Some(vec![".DS_Store", ".git"]));
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should honor multiple global excludes");
 

@@ -827,3 +827,131 @@ fn show_info_output_when_config_uses_relative_include_paths() {
         snapshot_directory_contents(home.path()).expect("home directory should be readable");
     assert_eq!(home_snapshot_after, home_snapshot_before);
 }
+
+#[cfg(unix)]
+#[test]
+fn apply_recursive_select_entries_into_nested_targets() {
+    let home = TempDir::new().expect("temporary home directory should be created");
+    let repository = TempDir::new().expect("temporary repository should be created");
+
+    write_file(
+        &repository.path().join("bundle").join("a-root.conf"),
+        "root\n",
+    );
+    write_file(
+        &repository
+            .path()
+            .join("bundle")
+            .join("nested")
+            .join("deep.conf"),
+        "deep\n",
+    );
+    write_file(
+        &repository.path().join("bundle").join("z-last.conf"),
+        "last\n",
+    );
+
+    let config = format!(
+        concat!(
+            "version: 1\n",
+            "repository: \"{}\"\n",
+            "defaults:\n",
+            "  mkdir: true\n",
+            "sources:\n",
+            "  - from: bundle\n",
+            "    to: \".config/gitenv-recursive\"\n",
+            "    configs:\n",
+            "      - select:\n",
+            "          type: all\n",
+            "          recursive: true\n"
+        ),
+        repository.path().display()
+    );
+    let config_path = home
+        .path()
+        .join(".config")
+        .join("gitenv")
+        .join("config.yml");
+    write_file(&config_path, &config);
+
+    let output = gitenv_command_for_home(&home)
+        .arg("apply")
+        .output()
+        .expect("binary should run");
+
+    let expected_stdout = replace_home_prefix_with_tilde(
+        format!(
+            concat!(
+                "created symlink {} -> {}\n",
+                "created symlink {} -> {}\n",
+                "created symlink {} -> {}\n",
+            ),
+            home.path()
+                .join(".config")
+                .join("gitenv-recursive")
+                .join("a-root.conf")
+                .display(),
+            repository
+                .path()
+                .join("bundle")
+                .join("a-root.conf")
+                .display(),
+            home.path()
+                .join(".config")
+                .join("gitenv-recursive")
+                .join("nested")
+                .join("deep.conf")
+                .display(),
+            repository
+                .path()
+                .join("bundle")
+                .join("nested")
+                .join("deep.conf")
+                .display(),
+            home.path()
+                .join(".config")
+                .join("gitenv-recursive")
+                .join("z-last.conf")
+                .display(),
+            repository
+                .path()
+                .join("bundle")
+                .join("z-last.conf")
+                .display(),
+        ),
+        home.path(),
+    );
+
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), expected_stdout);
+    assert!(output.stderr.is_empty());
+
+    let home_snapshot = snapshot_directory_contents(home.path())
+        .expect("home directory should be readable after recursive apply");
+    assert_eq!(
+        home_snapshot,
+        vec![
+            directory(".config"),
+            directory(".config/gitenv"),
+            file(".config/gitenv/config.yml", &config),
+            directory(".config/gitenv-recursive"),
+            symlink_entry(
+                ".config/gitenv-recursive/a-root.conf",
+                &repository.path().join("bundle").join("a-root.conf"),
+            ),
+            directory(".config/gitenv-recursive/nested"),
+            symlink_entry(
+                ".config/gitenv-recursive/nested/deep.conf",
+                &repository
+                    .path()
+                    .join("bundle")
+                    .join("nested")
+                    .join("deep.conf"),
+            ),
+            symlink_entry(
+                ".config/gitenv-recursive/z-last.conf",
+                &repository.path().join("bundle").join("z-last.conf"),
+            ),
+        ]
+    );
+}

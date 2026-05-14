@@ -56,11 +56,6 @@ pub(crate) trait ConfigReader {
     fn read_config_file(&self, path: &Path) -> Result<LoadedConfig, ProgramError>;
 }
 
-/// Shared boundary for enumerating file entries in a directory.
-pub(crate) trait DirectoryEntriesReader {
-    fn list_directory_entries(&self, path: &Path) -> Result<Vec<String>, SourceReadError>;
-}
-
 /// Shared boundary for checking whether a source path exists and is readable.
 pub(crate) trait SourceAvailabilityReader {
     fn ensure_source_path_readable(
@@ -106,12 +101,6 @@ impl ConfigReader for RealBoundary {
     }
 }
 
-impl DirectoryEntriesReader for RealBoundary {
-    fn list_directory_entries(&self, path: &Path) -> Result<Vec<String>, SourceReadError> {
-        fs_adapter::list_directory_entries(path)
-    }
-}
-
 impl SourceAvailabilityReader for RealBoundary {
     fn ensure_source_path_readable(
         &self,
@@ -137,8 +126,8 @@ impl SymlinkCreator for RealBoundary {
 #[cfg(test)]
 pub(crate) mod test_doubles {
     use super::{
-        DirectoryEntriesReader, EnvironmentReader, SourceAvailabilityReader, SourcePathRequirement,
-        SourceReadError, SymlinkCreator, TargetProbe,
+        EnvironmentReader, SourceAvailabilityReader, SourcePathRequirement, SourceReadError,
+        SymlinkCreator, TargetProbe,
     };
     use crate::ProgramError;
     use std::collections::BTreeMap;
@@ -175,19 +164,6 @@ pub(crate) mod test_doubles {
     impl EnvironmentReader for MapEnvReader {
         fn get_env_var(&self, name: &str) -> Option<String> {
             self.0.get(name).cloned()
-        }
-    }
-
-    /// Test double: wraps a closure for directory listing operations.
-    pub(crate) struct FnDirectoryReader<F: Fn(&Path) -> Result<Vec<String>, SourceReadError>>(
-        pub(crate) F,
-    );
-
-    impl<F: Fn(&Path) -> Result<Vec<String>, SourceReadError>> DirectoryEntriesReader
-        for FnDirectoryReader<F>
-    {
-        fn list_directory_entries(&self, path: &Path) -> Result<Vec<String>, SourceReadError> {
-            self.0(path)
         }
     }
 

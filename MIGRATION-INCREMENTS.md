@@ -68,27 +68,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 61: Implement recursive `select` operation expansion
-
-Why this increment exists:
-
-- This slice completes recursive selector behavior while preserving the current
-  selector type semantics (`dot`, `non-dot`, `all`) and one-operation-per-file
-  execution model.
-
-Review target:
-
-- In operation planning, when `select.recursive` is `true`, traverse the source
-  directory tree and collect file paths recursively as source-relative paths.
-- Preserve descendant-relative target mapping for recursive entries (for
-  example, `a/b.txt` remains `a/b.txt` under the target directory).
-- Keep `recursive: false` behavior identical to current direct-entry expansion.
-- Reuse existing `mkdir` behavior so intermediate target directories are
-  created through normal apply execution.
-- Add unit tests for direct vs recursive selector expansion parity and ordering.
-- Add an integration test showing nested source files map to nested target
-  files under `apply`.
-
 ### Increment 62: Add `existing_directories_only` for recursive `select`
 
 Why this increment exists:

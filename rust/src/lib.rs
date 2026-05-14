@@ -162,7 +162,6 @@ pub fn derive_operation_plan(
     let boundary = boundary::RealBoundary;
     let context = operation::OperationContext {
         home_directory: home_directory.to_path_buf(),
-        dir_reader: &boundary,
         source_reader: &boundary,
         global_selection_excludes: default_global_selection_excludes(std::env::consts::OS),
     };
