@@ -68,6 +68,21 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
+### Increment 62b: Finish the work
+
+Why this increment exists:
+
+- The implement of the existing_directories_only flag raised two issues that
+  must be fixed.
+
+Review target:
+
+- There must be a configuration parsing test that proves the flag is correctly
+  parsed from YAML when true.
+- Configuration parsing must validate that the flag cannot be set to true unless
+  the recursive flag is also true, and that an appropriate error is returned if
+  this validation fails.
+
 ### Increment 63: Make `select.exclude` use glob patterns
 
 Why this increment exists:
