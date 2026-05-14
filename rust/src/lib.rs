@@ -17,7 +17,7 @@ mod core_plan_snapshots_test;
 
 pub use cli::{Cli, Command, LogLevel};
 pub use color::{ColorMode, RuntimeConfig};
-pub use errors::ProgramError;
+pub use errors::{ProgramError, SourceAvailability, SourceUnreadableKind};
 pub use logging::init as init_logging;
 
 pub use actions::{ApplyOperationOutcome, ApplyOperationReport};
@@ -29,7 +29,10 @@ pub use intent::{
     ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction, IntentSource,
     ResolvedOptions,
 };
-pub use operation::{FileOperation, OperationAction, OperationPlan};
+pub use operation::{
+    FileOperation, OperationAction, OperationEntry, OperationPlan, OperationPlanningIssue,
+    PlannedOperationAction,
+};
 pub use status::{
     CopyInspection, CopyInspectionState, OperationInspectionOutcome, OperationInspectionReport,
     SymlinkInspection, SymlinkInspectionState, inspect_operation_plan_status,
@@ -160,6 +163,7 @@ pub fn derive_operation_plan(
     let context = operation::OperationContext {
         home_directory: home_directory.to_path_buf(),
         dir_reader: &boundary,
+        source_reader: &boundary,
         global_selection_excludes: default_global_selection_excludes(std::env::consts::OS),
     };
     operation::derive_operation_plan(intent_plan, &context)

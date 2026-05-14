@@ -2,6 +2,22 @@ use std::fmt;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SourceUnreadableKind {
+    PermissionDenied,
+    UnexpectedIo,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SourceAvailability {
+    Available,
+    Missing,
+    Unreadable {
+        kind: SourceUnreadableKind,
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProgramError {
     /// Parsed configuration content is structurally invalid.
     InvalidConfiguration { message: String },
@@ -49,6 +65,8 @@ pub enum ProgramError {
     BackupAlreadyExists { path: PathBuf },
     /// The current home directory is required to resolve home-relative paths.
     HomeDirectoryUnavailable,
+    /// Apply cannot proceed because one or more planned sources are unavailable.
+    OperationPlanBlocked { diagnostics: Vec<String> },
 }
 
 impl fmt::Display for ProgramError {
@@ -177,6 +195,13 @@ impl fmt::Display for ProgramError {
             ProgramError::HomeDirectoryUnavailable => {
                 write!(f, "cannot resolve home directory from $HOME")
             }
+            ProgramError::OperationPlanBlocked { diagnostics } => {
+                write!(
+                    f,
+                    "cannot apply because planned sources are unavailable\n  - {}",
+                    diagnostics.join("\n  - ")
+                )
+            }
         }
     }
 }
@@ -207,6 +232,7 @@ mod tests {
                 ProgramError::TargetBackupFailed { .. } => "TargetBackupFailed",
                 ProgramError::BackupAlreadyExists { .. } => "BackupAlreadyExists",
                 ProgramError::HomeDirectoryUnavailable => "HomeDirectoryUnavailable",
+                ProgramError::OperationPlanBlocked { .. } => "OperationPlanBlocked",
             );
         };
     }
@@ -358,6 +384,19 @@ mod tests {
             (
                 ProgramError::HomeDirectoryUnavailable,
                 "cannot resolve home directory from $HOME",
+            ),
+            (
+                ProgramError::OperationPlanBlocked {
+                    diagnostics: vec![
+                        "source /repo/private/.secret for /home/.secret is unreadable (permission denied)".to_string(),
+                        "source root /repo/profiles is unreadable (input/output error)".to_string(),
+                    ],
+                },
+                concat!(
+                    "cannot apply because planned sources are unavailable\n",
+                    "  - source /repo/private/.secret for /home/.secret is unreadable (permission denied)\n",
+                    "  - source root /repo/profiles is unreadable (input/output error)"
+                ),
             ),
         ]
     }

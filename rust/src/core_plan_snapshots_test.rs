@@ -9,15 +9,20 @@
 // pipeline with controlled in-memory inputs, verifying that intent and
 // operation planning compose correctly end-to-end.
 
-use crate::boundary::{ConfigReader, DirectoryEntriesReader, DirectoryProbe, EnvironmentReader};
+use crate::boundary::{
+    ConfigReader, DirectoryEntriesReader, DirectoryProbe, EnvironmentReader, SourcePathRequirement,
+    SourceReadError, test_doubles::FnSourceAvailabilityReader,
+};
 use crate::intent::{
     ConflictPolicy, IntentAction, IntentContext, IntentFileAction, IntentPlan, IntentSelectAction,
     IntentSource, ResolvedOptions, derive_intent_plan,
 };
-use crate::operation::{OperationContext, derive_operation_plan};
+use crate::operation::{
+    OperationContext, OperationEntry, PlannedOperationAction, derive_operation_plan,
+};
 use crate::{
     ActionMode, FileOperation, LoadedConfig, OperationAction, OperationPlan, ProgramError,
-    SelectionType, parse_config,
+    SelectionType, SourceAvailability, parse_config,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -49,12 +54,33 @@ impl ConfigReader for AssertConfigReader {
     }
 }
 
-struct FnDirectoryReader<F: Fn(&Path) -> Result<Vec<String>, ProgramError>>(F);
-impl<F: Fn(&Path) -> Result<Vec<String>, ProgramError>> DirectoryEntriesReader
+struct FnDirectoryReader<F: Fn(&Path) -> Result<Vec<String>, SourceReadError>>(F);
+impl<F: Fn(&Path) -> Result<Vec<String>, SourceReadError>> DirectoryEntriesReader
     for FnDirectoryReader<F>
 {
-    fn list_directory_entries(&self, path: &Path) -> Result<Vec<String>, ProgramError> {
+    fn list_directory_entries(&self, path: &Path) -> Result<Vec<String>, SourceReadError> {
         self.0(path)
+    }
+}
+
+fn readable_source_path(
+    _path: &Path,
+    _requirement: SourcePathRequirement,
+) -> Result<(), SourceReadError> {
+    Ok(())
+}
+
+fn available_operation_plan(actions: Vec<OperationAction>) -> OperationPlan {
+    OperationPlan {
+        entries: actions
+            .into_iter()
+            .map(|action| {
+                OperationEntry::Action(PlannedOperationAction {
+                    action,
+                    source_availability: SourceAvailability::Available,
+                })
+            })
+            .collect(),
     }
 }
 
@@ -107,9 +133,11 @@ fn derive_representative_plans(
             "notes.txt".to_string(),
         ])
     });
+    let source_reader = FnSourceAvailabilityReader(readable_source_path);
     let operation_context = OperationContext {
         home_directory: PathBuf::from("/home/tester"),
         dir_reader: &dir_reader,
+        source_reader: &source_reader,
         global_selection_excludes: vec![],
     };
     let operation_plan = derive_operation_plan(&intent_plan, &operation_context)?;
@@ -313,40 +341,38 @@ fn create_rich_intent_and_operation_plans() {
         ],
     };
 
-    let expected_operation_plan = OperationPlan {
-        actions: vec![
-            OperationAction::Copy(FileOperation {
-                source: PathBuf::from("/repo/dots/.zshrc"),
-                target: PathBuf::from("/home/tester/shell-private/.zshrc"),
-                mkdir: false,
-                conflict_policy: ConflictPolicy::Overwrite,
-            }),
-            OperationAction::Symlink(FileOperation {
-                source: PathBuf::from("/repo/dots/.zshrc"),
-                target: PathBuf::from("/home/tester/dot-targets/.zshrc"),
-                mkdir: false,
-                conflict_policy: ConflictPolicy::OverwriteWithBackup,
-            }),
-            OperationAction::Symlink(FileOperation {
-                source: PathBuf::from("/repo/dots/.vimrc"),
-                target: PathBuf::from("/home/tester/dot-targets/.vimrc"),
-                mkdir: false,
-                conflict_policy: ConflictPolicy::OverwriteWithBackup,
-            }),
-            OperationAction::Symlink(FileOperation {
-                source: PathBuf::from("/repo/extras/git/config"),
-                target: PathBuf::from("/home/tester/extras-target/.gitconfig"),
-                mkdir: true,
-                conflict_policy: ConflictPolicy::Skip,
-            }),
-            OperationAction::Copy(FileOperation {
-                source: PathBuf::from("/repo/shared/.vimrc"),
-                target: PathBuf::from("/home/tester/include-target/.vimrc"),
-                mkdir: false,
-                conflict_policy: ConflictPolicy::Overwrite,
-            }),
-        ],
-    };
+    let expected_operation_plan = available_operation_plan(vec![
+        OperationAction::Copy(FileOperation {
+            source: PathBuf::from("/repo/dots/.zshrc"),
+            target: PathBuf::from("/home/tester/shell-private/.zshrc"),
+            mkdir: false,
+            conflict_policy: ConflictPolicy::Overwrite,
+        }),
+        OperationAction::Symlink(FileOperation {
+            source: PathBuf::from("/repo/dots/.zshrc"),
+            target: PathBuf::from("/home/tester/dot-targets/.zshrc"),
+            mkdir: false,
+            conflict_policy: ConflictPolicy::OverwriteWithBackup,
+        }),
+        OperationAction::Symlink(FileOperation {
+            source: PathBuf::from("/repo/dots/.vimrc"),
+            target: PathBuf::from("/home/tester/dot-targets/.vimrc"),
+            mkdir: false,
+            conflict_policy: ConflictPolicy::OverwriteWithBackup,
+        }),
+        OperationAction::Symlink(FileOperation {
+            source: PathBuf::from("/repo/extras/git/config"),
+            target: PathBuf::from("/home/tester/extras-target/.gitconfig"),
+            mkdir: true,
+            conflict_policy: ConflictPolicy::Skip,
+        }),
+        OperationAction::Copy(FileOperation {
+            source: PathBuf::from("/repo/shared/.vimrc"),
+            target: PathBuf::from("/home/tester/include-target/.vimrc"),
+            mkdir: false,
+            conflict_policy: ConflictPolicy::Overwrite,
+        }),
+    ]);
 
     assert_eq!(intent_plan, expected_intent_plan);
     assert_eq!(operation_plan, expected_operation_plan);

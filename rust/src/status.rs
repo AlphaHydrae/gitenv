@@ -1,4 +1,7 @@
-use crate::{FileOperation, OperationAction, OperationPlan, ProgramError, logging};
+use crate::{
+    FileOperation, OperationAction, OperationEntry, OperationPlan, OperationPlanningIssue,
+    PlannedOperationAction, ProgramError, SourceAvailability, logging,
+};
 use log::Level;
 use std::hash::Hasher;
 use std::io::Read;
@@ -29,6 +32,8 @@ pub struct OperationInspectionReport {
 pub enum OperationInspectionOutcome {
     Symlink(SymlinkInspection),
     Copy(CopyInspection),
+    Unavailable(PlannedOperationAction),
+    PlanningIssue(OperationPlanningIssue),
 }
 
 /// Structured status for a single concrete symlink operation.
@@ -73,18 +78,26 @@ pub fn inspect_operation_plan_status(
     logging::status(
         Level::Debug,
         "inspect_operation_plan_status_start",
-        format!("actions={}", operation_plan.actions.len()),
+        format!("entries={}", operation_plan.entries.len()),
     );
 
     let mut outcomes = Vec::new();
 
-    for action in &operation_plan.actions {
-        let outcome = match action {
-            OperationAction::Symlink(operation) => {
-                OperationInspectionOutcome::Symlink(inspect_symlink_operation_status(operation)?)
-            }
-            OperationAction::Copy(operation) => {
-                OperationInspectionOutcome::Copy(inspect_copy_operation_status(operation)?)
+    for entry in &operation_plan.entries {
+        let outcome = match entry {
+            OperationEntry::Action(action_entry) => match &action_entry.source_availability {
+                SourceAvailability::Available => match &action_entry.action {
+                    OperationAction::Symlink(operation) => OperationInspectionOutcome::Symlink(
+                        inspect_symlink_operation_status(operation)?,
+                    ),
+                    OperationAction::Copy(operation) => {
+                        OperationInspectionOutcome::Copy(inspect_copy_operation_status(operation)?)
+                    }
+                },
+                _ => OperationInspectionOutcome::Unavailable(action_entry.clone()),
+            },
+            OperationEntry::Issue(issue) => {
+                OperationInspectionOutcome::PlanningIssue(issue.clone())
             }
         };
         outcomes.push(outcome);
@@ -299,7 +312,11 @@ mod tests {
         inspect_symlink_operation_status_with_injectables, read_symlink_target_from_filesystem,
         target_kind_from_filesystem,
     };
-    use crate::{ConflictPolicy, FileOperation, OperationAction, OperationPlan, ProgramError};
+    use crate::{
+        ConflictPolicy, FileOperation, OperationAction, OperationEntry, OperationPlan,
+        OperationPlanningIssue, PlannedOperationAction, ProgramError, SourceAvailability,
+        SourceUnreadableKind,
+    };
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
@@ -318,7 +335,17 @@ mod tests {
     }
 
     fn make_operation_plan(actions: Vec<OperationAction>) -> OperationPlan {
-        OperationPlan { actions }
+        OperationPlan {
+            entries: actions
+                .into_iter()
+                .map(|action| {
+                    OperationEntry::Action(PlannedOperationAction {
+                        action,
+                        source_availability: SourceAvailability::Available,
+                    })
+                })
+                .collect(),
+        }
     }
 
     #[cfg(unix)]
@@ -590,6 +617,58 @@ mod tests {
                         source: PathBuf::from("/repo/.zshrc"),
                         target: PathBuf::from("/home/.zshrc"),
                         state: CopyInspectionState::Missing,
+                    }),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn preserve_unavailable_entries_in_operation_order() {
+        let source = PathBuf::from("/repo/private/.secret");
+        let target = PathBuf::from("/home/.secret");
+        let issue_path = PathBuf::from("/repo/profiles");
+
+        let report = inspect_operation_plan_status(&OperationPlan {
+            entries: vec![
+                OperationEntry::Action(PlannedOperationAction {
+                    action: OperationAction::Symlink(make_operation(
+                        source.clone(),
+                        target.clone(),
+                    )),
+                    source_availability: SourceAvailability::Unreadable {
+                        kind: SourceUnreadableKind::PermissionDenied,
+                        message: "permission denied".to_string(),
+                    },
+                }),
+                OperationEntry::Issue(OperationPlanningIssue {
+                    path: issue_path.clone(),
+                    source_availability: SourceAvailability::Unreadable {
+                        kind: SourceUnreadableKind::UnexpectedIo,
+                        message: "input/output error".to_string(),
+                    },
+                }),
+            ],
+        })
+        .expect("unavailable entries should be reported without failing inspection");
+
+        assert_eq!(
+            report,
+            OperationInspectionReport {
+                outcomes: vec![
+                    OperationInspectionOutcome::Unavailable(PlannedOperationAction {
+                        action: OperationAction::Symlink(make_operation(source, target)),
+                        source_availability: SourceAvailability::Unreadable {
+                            kind: SourceUnreadableKind::PermissionDenied,
+                            message: "permission denied".to_string(),
+                        },
+                    }),
+                    OperationInspectionOutcome::PlanningIssue(OperationPlanningIssue {
+                        path: issue_path,
+                        source_availability: SourceAvailability::Unreadable {
+                            kind: SourceUnreadableKind::UnexpectedIo,
+                            message: "input/output error".to_string(),
+                        },
                     }),
                 ],
             }

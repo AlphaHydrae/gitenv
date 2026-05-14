@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 
 use crate::{
     ApplyOperationOutcome, ApplyOperationReport, ColorMode, CopyInspection, CopyInspectionState,
-    OperationAction, OperationInspectionOutcome, OperationPlan, ProgramError, SymlinkInspection,
-    SymlinkInspectionState, inspect_operation_plan_status,
+    OperationAction, OperationInspectionOutcome, OperationPlan, PlannedOperationAction,
+    ProgramError, SourceAvailability, SymlinkInspection, SymlinkInspectionState,
+    inspect_operation_plan_status,
 };
 
 const ANSI_RESET: &str = "\x1b[0m";
@@ -145,6 +146,65 @@ fn render_operation_inspection_line_with_color(
         OperationInspectionOutcome::Copy(inspection) => {
             render_copy_inspection_line_with_color(inspection, home, use_color)
         }
+        OperationInspectionOutcome::Unavailable(action_entry) => {
+            render_unavailable_action_line_with_color(action_entry, home, use_color)
+        }
+        OperationInspectionOutcome::PlanningIssue(issue) => {
+            render_planning_issue_line_with_color(issue, home, use_color)
+        }
+    }
+}
+
+fn render_unavailable_action_line_with_color(
+    action_entry: &PlannedOperationAction,
+    home: &Path,
+    use_color: bool,
+) -> String {
+    let state = colorize(
+        &availability_state_text(&action_entry.source_availability, "source"),
+        ANSI_RED,
+        use_color,
+    );
+
+    match &action_entry.action {
+        OperationAction::Symlink(operation) => format!(
+            "{} -> {}   {}",
+            display_path_with_home(&operation.target, home),
+            display_path_with_home(&operation.source, home),
+            state,
+        ),
+        OperationAction::Copy(operation) => format!(
+            "{} <- {}   {}",
+            display_path_with_home(&operation.target, home),
+            display_path_with_home(&operation.source, home),
+            state,
+        ),
+    }
+}
+
+fn render_planning_issue_line_with_color(
+    issue: &crate::OperationPlanningIssue,
+    home: &Path,
+    use_color: bool,
+) -> String {
+    format!(
+        "{}   {}",
+        display_path_with_home(&issue.path, home),
+        colorize(
+            &availability_state_text(&issue.source_availability, "source root"),
+            ANSI_RED,
+            use_color,
+        )
+    )
+}
+
+fn availability_state_text(availability: &SourceAvailability, label: &str) -> String {
+    match availability {
+        SourceAvailability::Available => format!("{label} is available"),
+        SourceAvailability::Missing => format!("{label} is missing"),
+        SourceAvailability::Unreadable { message, .. } => {
+            format!("{label} is unreadable ({message})")
+        }
     }
 }
 
@@ -264,11 +324,13 @@ fn colorize(text: &str, color: &str, use_color: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        Cli, display_path_with_home, render_apply_output, render_default_inspection_output,
+        Cli, availability_state_text, display_path_with_home, render_apply_output,
+        render_default_inspection_output,
     };
     use crate::{
         ApplyOperationOutcome, ApplyOperationReport, ColorMode, ConflictPolicy, FileOperation,
-        OperationAction, OperationPlan,
+        OperationAction, OperationEntry, OperationPlan, OperationPlanningIssue,
+        PlannedOperationAction, SourceAvailability, SourceUnreadableKind,
     };
     use clap::{CommandFactory, Parser};
     use std::ffi::OsStr;
@@ -279,17 +341,29 @@ mod tests {
 
     const NON_MATCHING_HOME: &str = "/nonexistent/home";
 
+    fn available_operation_plan(actions: Vec<OperationAction>) -> OperationPlan {
+        OperationPlan {
+            entries: actions
+                .into_iter()
+                .map(|action| {
+                    OperationEntry::Action(PlannedOperationAction {
+                        action,
+                        source_availability: SourceAvailability::Available,
+                    })
+                })
+                .collect(),
+        }
+    }
+
     #[test]
     fn render_a_missing_symlink_status_line() {
         let output = render_default_inspection_output(
-            &OperationPlan {
-                actions: vec![OperationAction::Symlink(FileOperation {
-                    source: PathBuf::from("/repo/.gitconfig"),
-                    target: PathBuf::from("/home/.gitconfig"),
-                    mkdir: false,
-                    conflict_policy: ConflictPolicy::Skip,
-                })],
-            },
+            &available_operation_plan(vec![OperationAction::Symlink(FileOperation {
+                source: PathBuf::from("/repo/.gitconfig"),
+                target: PathBuf::from("/home/.gitconfig"),
+                mkdir: false,
+                conflict_policy: ConflictPolicy::Skip,
+            })]),
             Path::new(NON_MATCHING_HOME),
             false,
         )
@@ -304,22 +378,20 @@ mod tests {
     #[test]
     fn render_operation_lines_for_each_inspection_state() {
         let output = render_default_inspection_output(
-            &OperationPlan {
-                actions: vec![
-                    OperationAction::Symlink(FileOperation {
-                        source: PathBuf::from("/repo/.zshrc"),
-                        target: PathBuf::from("/home/.zshrc"),
-                        mkdir: false,
-                        conflict_policy: ConflictPolicy::Skip,
-                    }),
-                    OperationAction::Copy(FileOperation {
-                        source: PathBuf::from("/repo/.gitconfig"),
-                        target: PathBuf::from("/home/.gitconfig"),
-                        mkdir: false,
-                        conflict_policy: ConflictPolicy::Skip,
-                    }),
-                ],
-            },
+            &available_operation_plan(vec![
+                OperationAction::Symlink(FileOperation {
+                    source: PathBuf::from("/repo/.zshrc"),
+                    target: PathBuf::from("/home/.zshrc"),
+                    mkdir: false,
+                    conflict_policy: ConflictPolicy::Skip,
+                }),
+                OperationAction::Copy(FileOperation {
+                    source: PathBuf::from("/repo/.gitconfig"),
+                    target: PathBuf::from("/home/.gitconfig"),
+                    mkdir: false,
+                    conflict_policy: ConflictPolicy::Skip,
+                }),
+            ]),
             Path::new(NON_MATCHING_HOME),
             false,
         )
@@ -331,6 +403,74 @@ mod tests {
                 "/home/.zshrc -> /repo/.zshrc   not yet set up\n",
                 "/home/.gitconfig <- /repo/.gitconfig   not yet set up"
             )
+        );
+    }
+
+    #[test]
+    fn render_unavailable_actions_and_planning_issues_in_order() {
+        let output = render_default_inspection_output(
+            &OperationPlan {
+                entries: vec![
+                    OperationEntry::Action(PlannedOperationAction {
+                        action: OperationAction::Symlink(FileOperation {
+                            source: PathBuf::from("/repo/private/.zshrc"),
+                            target: PathBuf::from("/home/.zshrc"),
+                            mkdir: false,
+                            conflict_policy: ConflictPolicy::Skip,
+                        }),
+                        source_availability: SourceAvailability::Unreadable {
+                            kind: SourceUnreadableKind::PermissionDenied,
+                            message: "permission denied".to_string(),
+                        },
+                    }),
+                    OperationEntry::Action(PlannedOperationAction {
+                        action: OperationAction::Copy(FileOperation {
+                            source: PathBuf::from("/repo/private/.gitconfig"),
+                            target: PathBuf::from("/home/.gitconfig"),
+                            mkdir: false,
+                            conflict_policy: ConflictPolicy::Skip,
+                        }),
+                        source_availability: SourceAvailability::Unreadable {
+                            kind: SourceUnreadableKind::UnexpectedIo,
+                            message: "input/output error".to_string(),
+                        },
+                    }),
+                    OperationEntry::Issue(OperationPlanningIssue {
+                        path: PathBuf::from("/repo/profiles"),
+                        source_availability: SourceAvailability::Missing,
+                    }),
+                ],
+            },
+            Path::new(NON_MATCHING_HOME),
+            false,
+        )
+        .expect("status rendering should support unavailable entries");
+
+        assert_eq!(
+            output,
+            concat!(
+                "/home/.zshrc -> /repo/private/.zshrc   source is unreadable (permission denied)\n",
+                "/home/.gitconfig <- /repo/private/.gitconfig   source is unreadable (input/output error)\n",
+                "/repo/profiles   source root is missing"
+            )
+        );
+        assert_eq!(
+            availability_state_text(&SourceAvailability::Available, "source"),
+            "source is available"
+        );
+        assert_eq!(
+            availability_state_text(&SourceAvailability::Missing, "source"),
+            "source is missing"
+        );
+        assert_eq!(
+            availability_state_text(
+                &SourceAvailability::Unreadable {
+                    kind: SourceUnreadableKind::UnexpectedIo,
+                    message: "boom".to_string(),
+                },
+                "source root"
+            ),
+            "source root is unreadable (boom)"
         );
     }
 
@@ -361,34 +501,32 @@ mod tests {
         fs::create_dir(&copy_target_not_a_file).expect("copy target directory should be created");
 
         let output = render_default_inspection_output(
-            &OperationPlan {
-                actions: vec![
-                    OperationAction::Symlink(FileOperation {
-                        source: symlink_source.clone(),
-                        target: symlink_target.clone(),
-                        mkdir: false,
-                        conflict_policy: ConflictPolicy::Skip,
-                    }),
-                    OperationAction::Copy(FileOperation {
-                        source: copy_source_ok.clone(),
-                        target: copy_target_ok,
-                        mkdir: false,
-                        conflict_policy: ConflictPolicy::Skip,
-                    }),
-                    OperationAction::Copy(FileOperation {
-                        source: copy_source_differs,
-                        target: copy_target_differs,
-                        mkdir: false,
-                        conflict_policy: ConflictPolicy::Skip,
-                    }),
-                    OperationAction::Copy(FileOperation {
-                        source: copy_source_not_a_file,
-                        target: copy_target_not_a_file,
-                        mkdir: false,
-                        conflict_policy: ConflictPolicy::Skip,
-                    }),
-                ],
-            },
+            &available_operation_plan(vec![
+                OperationAction::Symlink(FileOperation {
+                    source: symlink_source.clone(),
+                    target: symlink_target.clone(),
+                    mkdir: false,
+                    conflict_policy: ConflictPolicy::Skip,
+                }),
+                OperationAction::Copy(FileOperation {
+                    source: copy_source_ok.clone(),
+                    target: copy_target_ok,
+                    mkdir: false,
+                    conflict_policy: ConflictPolicy::Skip,
+                }),
+                OperationAction::Copy(FileOperation {
+                    source: copy_source_differs,
+                    target: copy_target_differs,
+                    mkdir: false,
+                    conflict_policy: ConflictPolicy::Skip,
+                }),
+                OperationAction::Copy(FileOperation {
+                    source: copy_source_not_a_file,
+                    target: copy_target_not_a_file,
+                    mkdir: false,
+                    conflict_policy: ConflictPolicy::Skip,
+                }),
+            ]),
             Path::new(NON_MATCHING_HOME),
             false,
         )
@@ -408,7 +546,7 @@ mod tests {
     #[test]
     fn render_no_operation_message_when_nothing_is_planned() {
         let output = render_default_inspection_output(
-            &OperationPlan { actions: vec![] },
+            &available_operation_plan(vec![]),
             Path::new(NON_MATCHING_HOME),
             false,
         )
@@ -550,28 +688,26 @@ mod tests {
         fs::write(&target_not_a_symlink, "plain file\n").expect("target file should be written");
 
         let output = render_default_inspection_output(
-            &OperationPlan {
-                actions: vec![
-                    OperationAction::Symlink(FileOperation {
-                        source: source_ok,
-                        target: target_ok,
-                        mkdir: false,
-                        conflict_policy: ConflictPolicy::Skip,
-                    }),
-                    OperationAction::Symlink(FileOperation {
-                        source: source_missing,
-                        target: target_missing,
-                        mkdir: false,
-                        conflict_policy: ConflictPolicy::Skip,
-                    }),
-                    OperationAction::Symlink(FileOperation {
-                        source: source_not_a_symlink,
-                        target: target_not_a_symlink,
-                        mkdir: false,
-                        conflict_policy: ConflictPolicy::Skip,
-                    }),
-                ],
-            },
+            &available_operation_plan(vec![
+                OperationAction::Symlink(FileOperation {
+                    source: source_ok,
+                    target: target_ok,
+                    mkdir: false,
+                    conflict_policy: ConflictPolicy::Skip,
+                }),
+                OperationAction::Symlink(FileOperation {
+                    source: source_missing,
+                    target: target_missing,
+                    mkdir: false,
+                    conflict_policy: ConflictPolicy::Skip,
+                }),
+                OperationAction::Symlink(FileOperation {
+                    source: source_not_a_symlink,
+                    target: target_not_a_symlink,
+                    mkdir: false,
+                    conflict_policy: ConflictPolicy::Skip,
+                }),
+            ]),
             Path::new(NON_MATCHING_HOME),
             true,
         )
@@ -673,14 +809,12 @@ mod tests {
     fn render_operation_line_with_home_relative_paths() {
         let home = Path::new("/home/user");
         let output = render_default_inspection_output(
-            &OperationPlan {
-                actions: vec![OperationAction::Symlink(FileOperation {
-                    source: PathBuf::from("/home/user/.dotfiles/.gitconfig"),
-                    target: PathBuf::from("/home/user/.gitconfig"),
-                    mkdir: false,
-                    conflict_policy: ConflictPolicy::Skip,
-                })],
-            },
+            &available_operation_plan(vec![OperationAction::Symlink(FileOperation {
+                source: PathBuf::from("/home/user/.dotfiles/.gitconfig"),
+                target: PathBuf::from("/home/user/.gitconfig"),
+                mkdir: false,
+                conflict_policy: ConflictPolicy::Skip,
+            })]),
             home,
             false,
         )

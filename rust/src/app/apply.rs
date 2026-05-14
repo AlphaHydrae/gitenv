@@ -67,8 +67,9 @@ mod tests {
     use crate::{
         ActionMode, ApplyOperationOutcome, ApplyOperationReport, ColorMode, Config, ConfigItem,
         ConflictPolicy, Defaults, FileConfig, FileOperation, Guard, IntentAction, IntentFileAction,
-        IntentPlan, IntentSource, LoadedConfig, OperationAction, OperationPlan, ProgramError,
-        ResolvedOptions, RuntimeConfig, Source, SourceRoot,
+        IntentPlan, IntentSource, LoadedConfig, OperationAction, OperationEntry, OperationPlan,
+        PlannedOperationAction, ProgramError, ResolvedOptions, RuntimeConfig, Source,
+        SourceAvailability, SourceRoot,
     };
     use std::path::{Path, PathBuf};
     fn make_config(repository: &Path, sources: Vec<Source>) -> Config {
@@ -106,6 +107,20 @@ mod tests {
         LoadedConfig {
             path: PathBuf::from("/tmp/gitenv-test-config.yml"),
             config,
+        }
+    }
+
+    fn available_operation_plan(actions: Vec<OperationAction>) -> OperationPlan {
+        OperationPlan {
+            entries: actions
+                .into_iter()
+                .map(|action| {
+                    OperationEntry::Action(PlannedOperationAction {
+                        action,
+                        source_availability: SourceAvailability::Available,
+                    })
+                })
+                .collect(),
         }
     }
 
@@ -153,14 +168,13 @@ mod tests {
             }],
         };
 
-        let operation_plan = OperationPlan {
-            actions: vec![OperationAction::Symlink(FileOperation {
+        let operation_plan =
+            available_operation_plan(vec![OperationAction::Symlink(FileOperation {
                 source: PathBuf::from("/repo/guarded.conf"),
                 target: home_path.join("guarded.conf"),
                 mkdir: true,
                 conflict_policy: ConflictPolicy::Skip,
-            })],
-        };
+            })]);
 
         let apply_report = ApplyOperationReport {
             outcomes: vec![ApplyOperationOutcome::Applied(OperationAction::Symlink(
@@ -215,7 +229,7 @@ mod tests {
                 path: PathBuf::from("missing-dir"),
                 message: "not found".to_string(),
             }),
-            Ok(OperationPlan { actions: vec![] }),
+            Ok(available_operation_plan(vec![])),
             Ok(ApplyOperationReport { outcomes: vec![] }),
         )
         .expect_err("error from intent planner should propagate");
@@ -250,14 +264,13 @@ mod tests {
             }],
         };
 
-        let operation_plan = OperationPlan {
-            actions: vec![OperationAction::Symlink(FileOperation {
+        let operation_plan =
+            available_operation_plan(vec![OperationAction::Symlink(FileOperation {
                 source: PathBuf::from("/repo/.gitconfig"),
                 target: home_path.join(".gitconfig"),
                 mkdir: true,
                 conflict_policy: ConflictPolicy::Skip,
-            })],
-        };
+            })]);
 
         let apply_report = ApplyOperationReport {
             outcomes: vec![ApplyOperationOutcome::Applied(OperationAction::Symlink(
@@ -314,7 +327,7 @@ mod tests {
             Err(ProgramError::MissingEnvironment {
                 vars: vec!["MISSING_SOURCE_ROOT".to_string()],
             }),
-            Ok(OperationPlan { actions: vec![] }),
+            Ok(available_operation_plan(vec![])),
             Ok(ApplyOperationReport { outcomes: vec![] }),
         )
         .expect_err("error from intent planner should propagate");
@@ -346,7 +359,7 @@ mod tests {
                 repository: "/repo".to_string(),
                 sources: vec![],
             }),
-            Ok(OperationPlan { actions: vec![] }),
+            Ok(available_operation_plan(vec![])),
             Ok(ApplyOperationReport { outcomes: vec![] }),
         )
         .expect("orchestration should run with empty operations");
@@ -376,14 +389,13 @@ mod tests {
             }],
         };
 
-        let operation_plan = OperationPlan {
-            actions: vec![OperationAction::Symlink(FileOperation {
+        let operation_plan =
+            available_operation_plan(vec![OperationAction::Symlink(FileOperation {
                 source: PathBuf::from("/repo/.profile"),
                 target: home_path.join(".profile"),
                 mkdir: true,
                 conflict_policy: ConflictPolicy::Skip,
-            })],
-        };
+            })]);
 
         let apply_report = ApplyOperationReport {
             outcomes: vec![ApplyOperationOutcome::Applied(OperationAction::Symlink(

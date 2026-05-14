@@ -530,6 +530,33 @@ mod tests {
         }
     }
 
+    #[test]
+    fn reject_config_reader_reports_invalid_configuration() {
+        let error = RejectConfigRead
+            .read_config_file(Path::new("/tmp/unused.yml"))
+            .expect_err("reject config reader should always fail");
+
+        assert_eq!(
+            error,
+            ProgramError::InvalidConfiguration {
+                message: "includes not tested here".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn fn_config_reader_forwards_to_the_wrapped_closure() {
+        let reader = FnConfigReader(|path: &Path| crate::load_config(path));
+
+        assert!(
+            reader
+                .read_config_file(Path::new(
+                    "/tmp/definitely-missing-intent-config-reader-test.yml",
+                ))
+                .is_err()
+        );
+    }
+
     fn home_directory_for_test() -> &'static Path {
         Path::new("/home/tester")
     }
@@ -2166,14 +2193,11 @@ mod tests {
                 vec![make_file_config_item(".zshrc")],
             )])
         };
+        let config_reader = FnConfigReader(|path: &Path| crate::load_config(path));
 
         let error = derive_intent_plan(
             &loaded_config_for_path(&root, Some(root_path)),
-            &make_context(
-                &NoEnvVars,
-                &NoDirectories,
-                &FnConfigReader(|path: &Path| crate::load_config(path)),
-            ),
+            &make_context(&NoEnvVars, &NoDirectories, &config_reader),
         )
         .expect_err("planning should fail when the root config includes itself");
 

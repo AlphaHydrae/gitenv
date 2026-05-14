@@ -12,7 +12,12 @@
 use crate::config::SelectionType;
 use crate::{
     ActionMode, ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction,
-    ProgramError, ResolvedOptions, boundary::DirectoryEntriesReader, logging, path_resolution,
+    ProgramError, ResolvedOptions, SourceAvailability, SourceUnreadableKind,
+    boundary::{
+        DirectoryEntriesReader, SourceAvailabilityReader, SourcePathRequirement, SourceReadError,
+        SourceReadErrorKind,
+    },
+    logging, path_resolution,
 };
 use log::Level;
 use std::path::{Path, PathBuf};
@@ -23,8 +28,53 @@ use std::path::{Path, PathBuf};
 /// and home-relative target directories into explicit filesystem operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperationPlan {
-    /// Ordered list of concrete operations to inspect or execute.
-    pub actions: Vec<OperationAction>,
+    /// Ordered list of concrete operations and planning issues.
+    pub entries: Vec<OperationEntry>,
+}
+
+impl OperationPlan {
+    pub(crate) fn apply_blocking_diagnostics(&self) -> Vec<String> {
+        self.entries
+            .iter()
+            .filter_map(|entry| match entry {
+                OperationEntry::Action(action) => action
+                    .source_availability
+                    .diagnostic_suffix()
+                    .map(|suffix| {
+                        format!(
+                            "source {} for {} {suffix}",
+                            action.action.source().display(),
+                            action.action.target().display(),
+                        )
+                    }),
+                OperationEntry::Issue(issue) => issue
+                    .source_availability
+                    .diagnostic_suffix()
+                    .map(|suffix| format!("source root {} {suffix}", issue.path.display())),
+            })
+            .collect()
+    }
+}
+
+/// Ordered operation-plan entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OperationEntry {
+    Action(PlannedOperationAction),
+    Issue(OperationPlanningIssue),
+}
+
+/// Concrete action entry plus the resolved readability of its source path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlannedOperationAction {
+    pub action: OperationAction,
+    pub source_availability: SourceAvailability,
+}
+
+/// Planning issue that blocks selector expansion at a specific config position.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationPlanningIssue {
+    pub path: PathBuf,
+    pub source_availability: SourceAvailability,
 }
 
 /// A concrete operation ready for status inspection or filesystem execution.
@@ -32,6 +82,24 @@ pub struct OperationPlan {
 pub enum OperationAction {
     Copy(FileOperation),
     Symlink(FileOperation),
+}
+
+impl OperationAction {
+    pub(crate) fn source(&self) -> &Path {
+        match self {
+            OperationAction::Copy(operation) | OperationAction::Symlink(operation) => {
+                operation.source.as_path()
+            }
+        }
+    }
+
+    pub(crate) fn target(&self) -> &Path {
+        match self {
+            OperationAction::Copy(operation) | OperationAction::Symlink(operation) => {
+                operation.target.as_path()
+            }
+        }
+    }
 }
 
 /// A concrete file operation with fully resolved source and target paths.
@@ -55,6 +123,8 @@ pub(crate) struct OperationContext<'a> {
     pub(crate) home_directory: PathBuf,
     /// Boundary adapter for listing directory entries (used for selector expansion).
     pub(crate) dir_reader: &'a dyn DirectoryEntriesReader,
+    /// Boundary adapter for probing direct source path availability.
+    pub(crate) source_reader: &'a dyn SourceAvailabilityReader,
     /// Platform- or configuration-derived exclusions applied to every selector.
     pub(crate) global_selection_excludes: Vec<String>,
 }
@@ -76,7 +146,7 @@ pub(crate) fn derive_operation_plan(
     );
 
     let repository_root = resolve_repository_root(&intent_plan.repository, &context.home_directory);
-    let mut actions = Vec::new();
+    let mut entries = Vec::new();
 
     for source in &intent_plan.sources {
         let source_root =
@@ -85,20 +155,22 @@ pub(crate) fn derive_operation_plan(
         for action in &source.actions {
             match action {
                 IntentAction::File(file_action) => {
-                    actions.push(expand_file_action(
+                    entries.push(expand_file_action(
                         &source_root,
                         file_action,
                         &context.home_directory,
+                        context.source_reader,
                     ));
                 }
                 IntentAction::Select(select_action) => {
-                    actions.extend(expand_select_action(
+                    entries.extend(expand_select_action(
                         &source_root,
                         select_action,
                         &context.home_directory,
                         &context.global_selection_excludes,
+                        context.source_reader,
                         &|path| context.dir_reader.list_directory_entries(path),
-                    )?);
+                    ));
                 }
             }
         }
@@ -107,10 +179,10 @@ pub(crate) fn derive_operation_plan(
     logging::operation(
         Level::Info,
         "operation_plan_success",
-        format!("actions={}", actions.len()),
+        format!("entries={}", entries.len()),
     );
 
-    Ok(OperationPlan { actions })
+    Ok(OperationPlan { entries })
 }
 
 fn resolve_repository_root(repository: &str, home_directory: &Path) -> PathBuf {
@@ -143,14 +215,22 @@ fn expand_file_action(
     source_root: &Path,
     file_action: &IntentFileAction,
     home_directory: &Path,
-) -> OperationAction {
-    operation_action(
+    source_reader: &dyn SourceAvailabilityReader,
+) -> OperationEntry {
+    let action = operation_action(
         source_root,
         &file_action.file,
         &file_action.as_name,
         &file_action.options,
         home_directory,
-    )
+    );
+
+    OperationEntry::Action(PlannedOperationAction {
+        source_availability: source_availability_from_result(
+            source_reader.ensure_source_path_readable(action.source(), SourcePathRequirement::File),
+        ),
+        action,
+    })
 }
 
 fn expand_select_action(
@@ -158,9 +238,31 @@ fn expand_select_action(
     select_action: &IntentSelectAction,
     home_directory: &Path,
     global_selection_excludes: &[String],
-    list_directory: &impl Fn(&Path) -> Result<Vec<String>, ProgramError>,
-) -> Result<Vec<OperationAction>, ProgramError> {
-    let entries = list_directory(source_root)?;
+    source_reader: &dyn SourceAvailabilityReader,
+    list_directory: &impl Fn(&Path) -> Result<Vec<String>, SourceReadError>,
+) -> Vec<OperationEntry> {
+    let source_root_availability = source_availability_from_result(
+        source_reader.ensure_source_path_readable(source_root, SourcePathRequirement::Directory),
+    );
+
+    if source_root_availability != SourceAvailability::Available {
+        return vec![OperationEntry::Issue(OperationPlanningIssue {
+            path: source_root.to_path_buf(),
+            source_availability: source_root_availability,
+        })];
+    }
+
+    let entries = match list_directory(source_root) {
+        Ok(entries) => entries,
+        Err(error) => {
+            let source_availability = source_availability_from_error(&error);
+            let path = error.path;
+            return vec![OperationEntry::Issue(OperationPlanningIssue {
+                path,
+                source_availability,
+            })];
+        }
+    };
     let total_entries = entries.len();
     let selected_entries = entries
         .into_iter()
@@ -180,18 +282,59 @@ fn expand_select_action(
         ),
     );
 
-    Ok(selected_entries
+    selected_entries
         .into_iter()
         .map(|entry| {
-            operation_action(
+            let action = operation_action(
                 source_root,
                 &entry,
                 &entry,
                 &select_action.options,
                 home_directory,
-            )
+            );
+
+            OperationEntry::Action(PlannedOperationAction {
+                source_availability: source_availability_from_result(
+                    source_reader
+                        .ensure_source_path_readable(action.source(), SourcePathRequirement::File),
+                ),
+                action,
+            })
         })
-        .collect())
+        .collect()
+}
+
+fn source_availability_from_result(result: Result<(), SourceReadError>) -> SourceAvailability {
+    match result {
+        Ok(()) => SourceAvailability::Available,
+        Err(error) => source_availability_from_error(&error),
+    }
+}
+
+fn source_availability_from_error(error: &SourceReadError) -> SourceAvailability {
+    match error.kind {
+        SourceReadErrorKind::Missing => SourceAvailability::Missing,
+        SourceReadErrorKind::PermissionDenied => SourceAvailability::Unreadable {
+            kind: SourceUnreadableKind::PermissionDenied,
+            message: error.message.clone(),
+        },
+        SourceReadErrorKind::UnexpectedIo => SourceAvailability::Unreadable {
+            kind: SourceUnreadableKind::UnexpectedIo,
+            message: error.message.clone(),
+        },
+    }
+}
+
+impl SourceAvailability {
+    pub(crate) fn diagnostic_suffix(&self) -> Option<String> {
+        match self {
+            SourceAvailability::Available => None,
+            SourceAvailability::Missing => Some("is missing".to_string()),
+            SourceAvailability::Unreadable { message, .. } => {
+                Some(format!("is unreadable ({message})"))
+            }
+        }
+    }
 }
 
 fn operation_action(
@@ -239,12 +382,16 @@ fn should_include_selection_entry(
 #[cfg(test)]
 mod tests {
     use super::{
-        FileOperation, OperationAction, OperationContext, OperationPlan, derive_operation_plan,
+        FileOperation, OperationAction, OperationContext, OperationEntry, OperationPlan,
+        OperationPlanningIssue, PlannedOperationAction, SourceReadErrorKind, derive_operation_plan,
     };
     use crate::{
         ActionMode, ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction,
-        IntentSource, ProgramError, ResolvedOptions, SelectionType,
-        boundary::{DirectoryEntriesReader, test_doubles::FnDirectoryReader},
+        IntentSource, ResolvedOptions, SelectionType, SourceAvailability, SourceUnreadableKind,
+        boundary::{
+            DirectoryEntriesReader, SourcePathRequirement, SourceReadError,
+            test_doubles::{FnDirectoryReader, FnSourceAvailabilityReader},
+        },
         derive_operation_plan as derive_operation_plan_entrypoint,
     };
     use std::fs;
@@ -300,6 +447,12 @@ mod tests {
         }
     }
 
+    type ReadableSourceReader =
+        FnSourceAvailabilityReader<fn(&Path, SourcePathRequirement) -> Result<(), SourceReadError>>;
+
+    static READABLE_SOURCE_READER: ReadableSourceReader =
+        FnSourceAvailabilityReader(readable_source_path);
+
     fn make_operation_context<'a>(
         home_directory: PathBuf,
         dir_reader: &'a dyn DirectoryEntriesReader,
@@ -308,6 +461,7 @@ mod tests {
         OperationContext {
             home_directory,
             dir_reader,
+            source_reader: &READABLE_SOURCE_READER,
             global_selection_excludes: global_selection_excludes
                 .unwrap_or_default()
                 .into_iter()
@@ -321,7 +475,17 @@ mod tests {
     // ---------------------------------------------------------------------------
 
     fn expected_operation_plan(actions: Vec<OperationAction>) -> OperationPlan {
-        OperationPlan { actions }
+        OperationPlan {
+            entries: actions
+                .into_iter()
+                .map(|action| {
+                    OperationEntry::Action(PlannedOperationAction {
+                        action,
+                        source_availability: SourceAvailability::Available,
+                    })
+                })
+                .collect(),
+        }
     }
 
     fn expected_symlink(source: PathBuf, target: PathBuf) -> OperationAction {
@@ -340,6 +504,13 @@ mod tests {
             mkdir: true,
             conflict_policy: ConflictPolicy::Skip,
         })
+    }
+
+    fn readable_source_path(
+        _path: &Path,
+        _requirement: SourcePathRequirement,
+    ) -> Result<(), SourceReadError> {
+        Ok(())
     }
 
     // ---------------------------------------------------------------------------
@@ -599,21 +770,247 @@ mod tests {
         );
 
         let dir_reader = FnDirectoryReader(|path| {
-            Err(ProgramError::SourceDirectoryReadFailed {
+            Err(SourceReadError {
                 path: path.to_path_buf(),
+                kind: crate::boundary::SourceReadErrorKind::UnexpectedIo,
                 message: "boom".to_string(),
             })
         });
         let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
-        let error = derive_operation_plan(&intent_plan, &context)
-            .expect_err("selector expansion should propagate listing failures");
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
+            .expect("selector expansion should preserve planning issues");
 
         assert_eq!(
-            error,
-            ProgramError::SourceDirectoryReadFailed {
-                path: PathBuf::from("/repo-root/configs"),
-                message: "boom".to_string(),
+            operation_plan,
+            OperationPlan {
+                entries: vec![OperationEntry::Issue(OperationPlanningIssue {
+                    path: PathBuf::from("/repo-root/configs"),
+                    source_availability: SourceAvailability::Unreadable {
+                        kind: SourceUnreadableKind::UnexpectedIo,
+                        message: "boom".to_string(),
+                    },
+                })],
             }
+        );
+    }
+
+    #[test]
+    fn preserve_a_missing_source_root_as_a_planning_issue() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = PathBuf::from("/repo-root");
+
+        let intent_plan = make_intent_plan(
+            &repository,
+            vec![make_intent_source(
+                "configs",
+                vec![make_select_action(
+                    SelectionType::Dot,
+                    vec![],
+                    default_options(),
+                )],
+            )],
+        );
+
+        let dir_reader = FnDirectoryReader(|_| Ok(vec![]));
+        let source_reader = FnSourceAvailabilityReader(|path, _| {
+            Err(SourceReadError {
+                path: path.to_path_buf(),
+                kind: SourceReadErrorKind::Missing,
+                message: "missing".to_string(),
+            })
+        });
+        let context = OperationContext {
+            home_directory: home.path().to_path_buf(),
+            dir_reader: &dir_reader,
+            source_reader: &source_reader,
+            global_selection_excludes: vec![],
+        };
+
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
+            .expect("missing source roots should be preserved as planning issues");
+
+        assert_eq!(
+            operation_plan,
+            OperationPlan {
+                entries: vec![OperationEntry::Issue(OperationPlanningIssue {
+                    path: repository.join("configs"),
+                    source_availability: SourceAvailability::Missing,
+                })],
+            }
+        );
+
+        let dir_reader = FnDirectoryReader(crate::fs_adapter::list_directory_entries);
+        let source_reader = FnSourceAvailabilityReader(|_, _| Ok(()));
+        let available_context = OperationContext {
+            home_directory: home.path().to_path_buf(),
+            dir_reader: &dir_reader,
+            source_reader: &source_reader,
+            global_selection_excludes: vec![],
+        };
+        let available_plan = derive_operation_plan(
+            &make_intent_plan(
+                &repository,
+                vec![make_intent_source(
+                    "configs",
+                    vec![make_file_action(".zshrc", ".zshrc", default_options())],
+                )],
+            ),
+            &available_context,
+        )
+        .expect("available file sources should be preserved as actions");
+
+        assert_eq!(
+            available_plan,
+            expected_operation_plan(vec![expected_symlink(
+                repository.join("configs").join(".zshrc"),
+                home.path().join(".zshrc"),
+            )])
+        );
+    }
+
+    #[test]
+    fn mark_a_file_action_source_as_unreadable_when_permission_is_denied() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+
+        fs::write(repository.path().join(".zshrc"), "export TEST=1\n")
+            .expect("source file should be written");
+
+        let intent_plan = make_intent_plan(
+            repository.path(),
+            vec![make_intent_source(
+                ".",
+                vec![make_file_action(".zshrc", ".zshrc", default_options())],
+            )],
+        );
+
+        let dir_reader = FnDirectoryReader(crate::fs_adapter::list_directory_entries);
+        let source_reader = FnSourceAvailabilityReader(|path, _| {
+            Err(SourceReadError {
+                path: path.to_path_buf(),
+                kind: SourceReadErrorKind::PermissionDenied,
+                message: "denied".to_string(),
+            })
+        });
+        let context = OperationContext {
+            home_directory: home.path().to_path_buf(),
+            dir_reader: &dir_reader,
+            source_reader: &source_reader,
+            global_selection_excludes: vec![],
+        };
+
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
+            .expect("permission-denied file sources should be preserved in the plan");
+
+        assert_eq!(
+            operation_plan,
+            OperationPlan {
+                entries: vec![OperationEntry::Action(PlannedOperationAction {
+                    action: expected_symlink(
+                        repository.path().join(".").join(".zshrc"),
+                        home.path().join(".zshrc"),
+                    ),
+                    source_availability: SourceAvailability::Unreadable {
+                        kind: SourceUnreadableKind::PermissionDenied,
+                        message: "denied".to_string(),
+                    },
+                })],
+            }
+        );
+
+        let dir_reader = FnDirectoryReader(|_| Ok(vec![".zshrc".to_string()]));
+        let readable_source_reader =
+            FnSourceAvailabilityReader(|_, requirement| match requirement {
+                SourcePathRequirement::Directory => Ok(()),
+                SourcePathRequirement::File => Ok(()),
+            });
+        let readable_context = OperationContext {
+            home_directory: home.path().to_path_buf(),
+            dir_reader: &dir_reader,
+            source_reader: &readable_source_reader,
+            global_selection_excludes: vec![],
+        };
+        let readable_plan = derive_operation_plan(
+            &make_intent_plan(
+                repository.path(),
+                vec![make_intent_source(
+                    ".",
+                    vec![make_select_action(
+                        SelectionType::Dot,
+                        vec![],
+                        default_options(),
+                    )],
+                )],
+            ),
+            &readable_context,
+        )
+        .expect("available directories should expand into actions");
+
+        assert_eq!(
+            readable_plan,
+            expected_operation_plan(vec![expected_symlink(
+                repository.path().join(".zshrc"),
+                home.path().join(".zshrc"),
+            )])
+        );
+    }
+
+    #[test]
+    fn source_reader_double_can_return_file_ok_and_directory_error() {
+        let repository = PathBuf::from("/repo-root");
+        let source_reader = FnSourceAvailabilityReader(|_, requirement| match requirement {
+            SourcePathRequirement::Directory => Err(SourceReadError {
+                path: repository.join("configs"),
+                kind: SourceReadErrorKind::Missing,
+                message: "missing".to_string(),
+            }),
+            SourcePathRequirement::File => Ok(()),
+        });
+
+        assert!(
+            crate::boundary::SourceAvailabilityReader::ensure_source_path_readable(
+                &source_reader,
+                &repository.join("configs").join(".zshrc"),
+                SourcePathRequirement::File,
+            )
+            .is_ok()
+        );
+        assert!(
+            crate::boundary::SourceAvailabilityReader::ensure_source_path_readable(
+                &source_reader,
+                &repository.join("configs"),
+                SourcePathRequirement::Directory,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn source_reader_double_can_return_directory_ok_and_file_error() {
+        let source_reader = FnSourceAvailabilityReader(|path, requirement| match requirement {
+            SourcePathRequirement::File => Err(SourceReadError {
+                path: path.to_path_buf(),
+                kind: SourceReadErrorKind::PermissionDenied,
+                message: "denied".to_string(),
+            }),
+            SourcePathRequirement::Directory => Ok(()),
+        });
+
+        assert!(
+            crate::boundary::SourceAvailabilityReader::ensure_source_path_readable(
+                &source_reader,
+                Path::new("/repo-root"),
+                SourcePathRequirement::Directory,
+            )
+            .is_ok()
+        );
+        assert!(
+            crate::boundary::SourceAvailabilityReader::ensure_source_path_readable(
+                &source_reader,
+                Path::new("/repo-root/.zshrc"),
+                SourcePathRequirement::File,
+            )
+            .is_err()
         );
     }
 
@@ -733,6 +1130,8 @@ mod tests {
     fn derive_operation_plan_uses_the_provided_home_directory() {
         let home = TempDir::new().expect("temporary home directory should be created");
         let repository = TempDir::new().expect("temporary repository should be created");
+        fs::write(repository.path().join(".zshrc"), "export TEST=1\n")
+            .expect("source file should be written");
 
         let intent_plan = make_intent_plan(
             repository.path(),
@@ -777,14 +1176,18 @@ mod tests {
             crate::fs_adapter::list_directory_entries(&path)
         });
         let context = make_operation_context(home.path().to_path_buf(), &dir_reader, None);
-        let error = derive_operation_plan(&intent_plan, &context)
-            .expect_err("missing source directories should fail with typed error");
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
+            .expect("missing source directories should be preserved as planning issues");
 
-        assert!(matches!(
-            &error,
-            ProgramError::SourceDirectoryReadFailed { path, message }
-                if path == &missing_source && !message.is_empty()
-        ));
+        assert_eq!(
+            operation_plan,
+            OperationPlan {
+                entries: vec![OperationEntry::Issue(OperationPlanningIssue {
+                    path: missing_source,
+                    source_availability: SourceAvailability::Missing,
+                })],
+            }
+        );
     }
 
     #[test]

@@ -10,7 +10,7 @@
 //! without touching the real filesystem.
 
 use crate::{
-    FileOperation, OperationAction, OperationPlan, ProgramError,
+    FileOperation, OperationAction, OperationEntry, OperationPlan, ProgramError,
     boundary::{SymlinkCreator, TargetProbe},
     logging,
     status::{CopyInspectionState, inspect_copy_operation_status},
@@ -50,12 +50,24 @@ pub(crate) fn apply_operation_plan(
     logging::actions(
         Level::Info,
         "apply_operation_plan_start",
-        format!("actions={}", operation_plan.actions.len()),
+        format!("entries={}", operation_plan.entries.len()),
     );
+
+    let blocking_diagnostics = operation_plan.apply_blocking_diagnostics();
+    if !blocking_diagnostics.is_empty() {
+        return Err(ProgramError::OperationPlanBlocked {
+            diagnostics: blocking_diagnostics,
+        });
+    }
 
     let mut outcomes = Vec::new();
 
-    for action in &operation_plan.actions {
+    for entry in &operation_plan.entries {
+        let OperationEntry::Action(action_entry) = entry else {
+            continue;
+        };
+
+        let action = &action_entry.action;
         let outcome = match action {
             OperationAction::Symlink(operation) => apply_symlink_operation(operation, context)?,
             OperationAction::Copy(operation) => {
@@ -337,8 +349,8 @@ mod tests {
         ensure_parent_directory_exists, move_target_to_backup, remove_target_path, target_exists,
     };
     use crate::{
-        ApplyOperationOutcome, ConflictPolicy, FileOperation, OperationAction, OperationPlan,
-        ProgramError,
+        ApplyOperationOutcome, ConflictPolicy, FileOperation, OperationAction, OperationEntry,
+        OperationPlan, PlannedOperationAction, ProgramError, SourceAvailability,
         boundary::{
             TargetProbe,
             test_doubles::{FnSymlinkCreator, FnTargetProbe},
@@ -365,11 +377,14 @@ mod tests {
         conflict_policy: ConflictPolicy,
     ) -> OperationPlan {
         OperationPlan {
-            actions: vec![OperationAction::Symlink(FileOperation {
-                source,
-                target,
-                mkdir,
-                conflict_policy,
+            entries: vec![OperationEntry::Action(PlannedOperationAction {
+                action: OperationAction::Symlink(FileOperation {
+                    source,
+                    target,
+                    mkdir,
+                    conflict_policy,
+                }),
+                source_availability: SourceAvailability::Available,
             })],
         }
     }
@@ -655,11 +670,14 @@ mod tests {
     #[test]
     fn report_copy_failures() {
         let operation_plan = OperationPlan {
-            actions: vec![OperationAction::Copy(FileOperation {
-                source: PathBuf::from("/repo/source"),
-                target: PathBuf::from("/home/target"),
-                mkdir: true,
-                conflict_policy: ConflictPolicy::Skip,
+            entries: vec![OperationEntry::Action(PlannedOperationAction {
+                action: OperationAction::Copy(FileOperation {
+                    source: PathBuf::from("/repo/source"),
+                    target: PathBuf::from("/home/target"),
+                    mkdir: true,
+                    conflict_policy: ConflictPolicy::Skip,
+                }),
+                source_availability: SourceAvailability::Available,
             })],
         };
         let target_probe = FnTargetProbe(|_| Ok(false));
@@ -678,5 +696,112 @@ mod tests {
                 if source == &PathBuf::from("/repo/source")
                     && target == &PathBuf::from("/home/target")
         ));
+    }
+
+    #[test]
+    fn cannot_apply_when_any_planned_source_is_unavailable() {
+        let operation_plan = OperationPlan {
+            entries: vec![OperationEntry::Action(PlannedOperationAction {
+                action: OperationAction::Symlink(FileOperation {
+                    source: PathBuf::from("/repo/private/.secret"),
+                    target: PathBuf::from("/home/.secret"),
+                    mkdir: true,
+                    conflict_policy: ConflictPolicy::Skip,
+                }),
+                source_availability: SourceAvailability::Unreadable {
+                    kind: crate::SourceUnreadableKind::PermissionDenied,
+                    message: "permission denied".to_string(),
+                },
+            })],
+        };
+        let target_probe = FnTargetProbe(|_| Ok(false));
+        let symlink_creator = FnSymlinkCreator(|_, _| Ok(()));
+        let context = ApplyContext {
+            target_probe: &target_probe,
+            symlink_creator: &symlink_creator,
+        };
+
+        let error = apply_operation_plan(&operation_plan, &context)
+            .expect_err("apply should stop before mutation when a source is unavailable");
+
+        assert_eq!(
+            error,
+            ProgramError::OperationPlanBlocked {
+                diagnostics: vec![
+                    "source /repo/private/.secret for /home/.secret is unreadable (permission denied)"
+                        .to_string(),
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn cannot_apply_when_a_planned_source_root_is_missing() {
+        let operation_plan = OperationPlan {
+            entries: vec![OperationEntry::Issue(crate::OperationPlanningIssue {
+                path: PathBuf::from("/repo/profiles"),
+                source_availability: SourceAvailability::Missing,
+            })],
+        };
+        let target_probe = FnTargetProbe(|_| Ok(false));
+        let symlink_creator = FnSymlinkCreator(|_, _| Ok(()));
+        let context = ApplyContext {
+            target_probe: &target_probe,
+            symlink_creator: &symlink_creator,
+        };
+
+        let error = apply_operation_plan(&operation_plan, &context)
+            .expect_err("apply should stop before mutation when a source root is missing");
+
+        assert_eq!(
+            error,
+            ProgramError::OperationPlanBlocked {
+                diagnostics: vec!["source root /repo/profiles is missing".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn skip_non_action_entries_while_applying_action_entries() {
+        let operation_plan = OperationPlan {
+            entries: vec![
+                OperationEntry::Issue(crate::OperationPlanningIssue {
+                    path: PathBuf::from("/repo/ignored"),
+                    source_availability: SourceAvailability::Available,
+                }),
+                OperationEntry::Action(PlannedOperationAction {
+                    action: OperationAction::Symlink(FileOperation {
+                        source: PathBuf::from("/repo/.zshrc"),
+                        target: PathBuf::from("/home/.zshrc"),
+                        mkdir: false,
+                        conflict_policy: ConflictPolicy::Skip,
+                    }),
+                    source_availability: SourceAvailability::Available,
+                }),
+            ],
+        };
+        let target_probe = FnTargetProbe(|_| Ok(false));
+        let symlink_creator = FnSymlinkCreator(|_, _| Ok(()));
+        let context = ApplyContext {
+            target_probe: &target_probe,
+            symlink_creator: &symlink_creator,
+        };
+
+        let report = apply_operation_plan(&operation_plan, &context)
+            .expect("apply should skip non-action entries and process concrete actions");
+
+        assert_eq!(
+            report,
+            crate::ApplyOperationReport {
+                outcomes: vec![ApplyOperationOutcome::Applied(OperationAction::Symlink(
+                    FileOperation {
+                        source: PathBuf::from("/repo/.zshrc"),
+                        target: PathBuf::from("/home/.zshrc"),
+                        mkdir: false,
+                        conflict_policy: ConflictPolicy::Skip,
+                    }
+                ))],
+            }
+        );
     }
 }

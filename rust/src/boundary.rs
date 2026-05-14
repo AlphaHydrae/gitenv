@@ -19,6 +19,27 @@ use crate::config::{LoadedConfig, load_config};
 use crate::fs_adapter;
 use crate::logging;
 use std::path::Path;
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SourcePathRequirement {
+    File,
+    Directory,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SourceReadErrorKind {
+    Missing,
+    PermissionDenied,
+    UnexpectedIo,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SourceReadError {
+    pub(crate) path: PathBuf,
+    pub(crate) kind: SourceReadErrorKind,
+    pub(crate) message: String,
+}
 
 /// Shared boundary for environment variable reads used across planning stages.
 pub(crate) trait EnvironmentReader {
@@ -37,7 +58,16 @@ pub(crate) trait ConfigReader {
 
 /// Shared boundary for enumerating file entries in a directory.
 pub(crate) trait DirectoryEntriesReader {
-    fn list_directory_entries(&self, path: &Path) -> Result<Vec<String>, ProgramError>;
+    fn list_directory_entries(&self, path: &Path) -> Result<Vec<String>, SourceReadError>;
+}
+
+/// Shared boundary for checking whether a source path exists and is readable.
+pub(crate) trait SourceAvailabilityReader {
+    fn ensure_source_path_readable(
+        &self,
+        path: &Path,
+        requirement: SourcePathRequirement,
+    ) -> Result<(), SourceReadError>;
 }
 
 /// Shared boundary for probing whether an operation target currently exists.
@@ -77,8 +107,18 @@ impl ConfigReader for RealBoundary {
 }
 
 impl DirectoryEntriesReader for RealBoundary {
-    fn list_directory_entries(&self, path: &Path) -> Result<Vec<String>, ProgramError> {
+    fn list_directory_entries(&self, path: &Path) -> Result<Vec<String>, SourceReadError> {
         fs_adapter::list_directory_entries(path)
+    }
+}
+
+impl SourceAvailabilityReader for RealBoundary {
+    fn ensure_source_path_readable(
+        &self,
+        path: &Path,
+        requirement: SourcePathRequirement,
+    ) -> Result<(), SourceReadError> {
+        fs_adapter::ensure_source_path_readable(path, requirement)
     }
 }
 
@@ -96,7 +136,10 @@ impl SymlinkCreator for RealBoundary {
 
 #[cfg(test)]
 pub(crate) mod test_doubles {
-    use super::{DirectoryEntriesReader, EnvironmentReader, SymlinkCreator, TargetProbe};
+    use super::{
+        DirectoryEntriesReader, EnvironmentReader, SourceAvailabilityReader, SourcePathRequirement,
+        SourceReadError, SymlinkCreator, TargetProbe,
+    };
     use crate::ProgramError;
     use std::collections::BTreeMap;
     use std::path::Path;
@@ -136,15 +179,32 @@ pub(crate) mod test_doubles {
     }
 
     /// Test double: wraps a closure for directory listing operations.
-    pub(crate) struct FnDirectoryReader<F: Fn(&Path) -> Result<Vec<String>, ProgramError>>(
+    pub(crate) struct FnDirectoryReader<F: Fn(&Path) -> Result<Vec<String>, SourceReadError>>(
         pub(crate) F,
     );
 
-    impl<F: Fn(&Path) -> Result<Vec<String>, ProgramError>> DirectoryEntriesReader
+    impl<F: Fn(&Path) -> Result<Vec<String>, SourceReadError>> DirectoryEntriesReader
         for FnDirectoryReader<F>
     {
-        fn list_directory_entries(&self, path: &Path) -> Result<Vec<String>, ProgramError> {
+        fn list_directory_entries(&self, path: &Path) -> Result<Vec<String>, SourceReadError> {
             self.0(path)
+        }
+    }
+
+    /// Test double: wraps a closure for source readability checks.
+    pub(crate) struct FnSourceAvailabilityReader<
+        F: Fn(&Path, SourcePathRequirement) -> Result<(), SourceReadError>,
+    >(pub(crate) F);
+
+    impl<F: Fn(&Path, SourcePathRequirement) -> Result<(), SourceReadError>>
+        SourceAvailabilityReader for FnSourceAvailabilityReader<F>
+    {
+        fn ensure_source_path_readable(
+            &self,
+            path: &Path,
+            requirement: SourcePathRequirement,
+        ) -> Result<(), SourceReadError> {
+            self.0(path, requirement)
         }
     }
 

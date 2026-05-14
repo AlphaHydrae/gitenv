@@ -59,8 +59,8 @@ mod tests {
     use crate::{
         ActionMode, ColorMode, Config, ConfigItem, ConflictPolicy, Defaults, FileConfig,
         FileOperation, Guard, Include, IntentAction, IntentFileAction, IntentPlan, IntentSource,
-        LoadedConfig, OperationAction, OperationPlan, ProgramError, ResolvedOptions, RuntimeConfig,
-        Source, SourceRoot,
+        LoadedConfig, OperationAction, OperationEntry, OperationPlan, PlannedOperationAction,
+        ProgramError, ResolvedOptions, RuntimeConfig, Source, SourceAvailability, SourceRoot,
     };
     use std::path::{Path, PathBuf};
     use tempfile::TempDir;
@@ -100,6 +100,20 @@ mod tests {
         LoadedConfig {
             path: PathBuf::from("/tmp/gitenv-test-config.yml"),
             config,
+        }
+    }
+
+    fn available_operation_plan(actions: Vec<OperationAction>) -> OperationPlan {
+        OperationPlan {
+            entries: actions
+                .into_iter()
+                .map(|action| {
+                    OperationEntry::Action(PlannedOperationAction {
+                        action,
+                        source_availability: SourceAvailability::Available,
+                    })
+                })
+                .collect(),
         }
     }
 
@@ -146,14 +160,13 @@ mod tests {
             }],
         };
 
-        let operation_plan = OperationPlan {
-            actions: vec![OperationAction::Symlink(FileOperation {
+        let operation_plan =
+            available_operation_plan(vec![OperationAction::Symlink(FileOperation {
                 source: PathBuf::from("/repo/guarded.conf"),
                 target: home_path.join("guarded.conf"),
                 mkdir: true,
                 conflict_policy: ConflictPolicy::Skip,
-            })],
-        };
+            })]);
 
         let output = run_info_with(
             home_path.clone(),
@@ -199,7 +212,7 @@ mod tests {
                 path: PathBuf::from("missing-dir"),
                 message: "not found".to_string(),
             }),
-            Ok(OperationPlan { actions: vec![] }),
+            Ok(available_operation_plan(vec![])),
         )
         .expect_err("error from intent planner should propagate");
 
@@ -233,14 +246,13 @@ mod tests {
             }],
         };
 
-        let operation_plan = OperationPlan {
-            actions: vec![OperationAction::Symlink(FileOperation {
+        let operation_plan =
+            available_operation_plan(vec![OperationAction::Symlink(FileOperation {
                 source: PathBuf::from("/repo/.gitconfig"),
                 target: home_path.join(".gitconfig"),
                 mkdir: true,
                 conflict_policy: ConflictPolicy::Skip,
-            })],
-        };
+            })]);
 
         let output = run_info_with(
             home_path.clone(),
@@ -299,22 +311,20 @@ mod tests {
             ],
         };
 
-        let operation_plan = OperationPlan {
-            actions: vec![
-                OperationAction::Symlink(FileOperation {
-                    source: PathBuf::from("/repo/root.conf"),
-                    target: home_path.join(".root.conf"),
-                    mkdir: true,
-                    conflict_policy: ConflictPolicy::Skip,
-                }),
-                OperationAction::Symlink(FileOperation {
-                    source: PathBuf::from("/repo/shared.conf"),
-                    target: home_path.join(".shared.conf"),
-                    mkdir: true,
-                    conflict_policy: ConflictPolicy::Skip,
-                }),
-            ],
-        };
+        let operation_plan = available_operation_plan(vec![
+            OperationAction::Symlink(FileOperation {
+                source: PathBuf::from("/repo/root.conf"),
+                target: home_path.join(".root.conf"),
+                mkdir: true,
+                conflict_policy: ConflictPolicy::Skip,
+            }),
+            OperationAction::Symlink(FileOperation {
+                source: PathBuf::from("/repo/shared.conf"),
+                target: home_path.join(".shared.conf"),
+                mkdir: true,
+                conflict_policy: ConflictPolicy::Skip,
+            }),
+        ]);
 
         let loaded_config = LoadedConfig {
             path: PathBuf::from("/home/configs/root.yml"),
@@ -380,14 +390,12 @@ mod tests {
             }],
         };
 
-        let operation_plan = OperationPlan {
-            actions: vec![OperationAction::Copy(FileOperation {
-                source: PathBuf::from("/repo/missing.txt"),
-                target: home_path.join("missing.txt"),
-                mkdir: true,
-                conflict_policy: ConflictPolicy::Skip,
-            })],
-        };
+        let operation_plan = available_operation_plan(vec![OperationAction::Copy(FileOperation {
+            source: PathBuf::from("/repo/missing.txt"),
+            target: home_path.join("missing.txt"),
+            mkdir: true,
+            conflict_policy: ConflictPolicy::Skip,
+        })]);
 
         let output = run_info_with(
             home_path,
@@ -422,14 +430,12 @@ mod tests {
             sources: vec![],
         };
 
-        let operation_plan = OperationPlan {
-            actions: vec![OperationAction::Copy(FileOperation {
-                source: missing_source.clone(),
-                target: target_file,
-                mkdir: false,
-                conflict_policy: ConflictPolicy::Skip,
-            })],
-        };
+        let operation_plan = available_operation_plan(vec![OperationAction::Copy(FileOperation {
+            source: missing_source.clone(),
+            target: target_file,
+            mkdir: false,
+            conflict_policy: ConflictPolicy::Skip,
+        })]);
 
         let error = run_info_with(
             home_path,
@@ -471,7 +477,7 @@ mod tests {
             Err(ProgramError::MissingEnvironment {
                 vars: vec!["MISSING_SOURCE_ROOT".to_string()],
             }),
-            Ok(OperationPlan { actions: vec![] }),
+            Ok(available_operation_plan(vec![])),
         )
         .expect_err("error from intent planner should propagate");
 

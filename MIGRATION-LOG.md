@@ -11,6 +11,12 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-14: Carry source availability on operation plans - Replace the
+  operation-plan `actions` shape with ordered operation entries that preserve
+  declaration order for concrete actions and planning issues, carry typed
+  source availability through operation planning, surface unavailable/planning
+  issue entries in `info` rendering, and block `apply` with grouped source
+  diagnostics before filesystem mutation.
 - 2026-05-13: Replace select dotfiles boolean with selector type enum - Replace
   `select.dotfiles` with `select.type` (`dot`, `non-dot`, `all`) across config
   parsing, intent and operation models, selector expansion logic, tests, and

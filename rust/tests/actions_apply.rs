@@ -1,6 +1,7 @@
 use gitenv::{
     ApplyOperationOutcome, ApplyOperationReport, ConflictPolicy, FileOperation, OperationAction,
-    OperationPlan, ProgramError, apply_operation_plan,
+    OperationEntry, OperationPlan, PlannedOperationAction, ProgramError, SourceAvailability,
+    apply_operation_plan,
 };
 mod support;
 use std::fs;
@@ -74,6 +75,20 @@ fn copy_operation_with_options(
     })
 }
 
+fn available_operation_plan(actions: Vec<OperationAction>) -> OperationPlan {
+    OperationPlan {
+        entries: actions
+            .into_iter()
+            .map(|action| {
+                OperationEntry::Action(PlannedOperationAction {
+                    action,
+                    source_availability: SourceAvailability::Available,
+                })
+            })
+            .collect(),
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn create_symlink_when_target_is_missing() {
@@ -82,14 +97,12 @@ fn create_symlink_when_target_is_missing() {
     let target = temp.path().join("target.txt");
     fs::write(&source, "source\n").expect("source file should be written");
 
-    let operation_plan = OperationPlan {
-        actions: vec![symlink_operation(
-            source.clone(),
-            target.clone(),
-            true,
-            ConflictPolicy::Skip,
-        )],
-    };
+    let operation_plan = available_operation_plan(vec![symlink_operation(
+        source.clone(),
+        target.clone(),
+        true,
+        ConflictPolicy::Skip,
+    )]);
 
     let report = apply_operation_plan(&operation_plan)
         .expect("missing-target symlink operations should be applied");
@@ -125,14 +138,12 @@ fn skip_existing_symlink_target_when_conflict_policy_is_skip() {
     fs::write(&current, "current\n").expect("current file should be written");
     symlink(&current, &target).expect("existing target symlink should be created");
 
-    let operation_plan = OperationPlan {
-        actions: vec![symlink_operation(
-            source.clone(),
-            target.clone(),
-            true,
-            ConflictPolicy::Skip,
-        )],
-    };
+    let operation_plan = available_operation_plan(vec![symlink_operation(
+        source.clone(),
+        target.clone(),
+        true,
+        ConflictPolicy::Skip,
+    )]);
 
     let report =
         apply_operation_plan(&operation_plan).expect("skip conflicts should preserve targets");
@@ -171,14 +182,12 @@ fn overwrite_existing_target_when_conflict_policy_is_overwrite() {
     fs::write(&current, "current\n").expect("current file should be written");
     symlink(&current, &target).expect("existing target symlink should be created");
 
-    let operation_plan = OperationPlan {
-        actions: vec![symlink_operation(
-            source.clone(),
-            target.clone(),
-            true,
-            ConflictPolicy::Overwrite,
-        )],
-    };
+    let operation_plan = available_operation_plan(vec![symlink_operation(
+        source.clone(),
+        target.clone(),
+        true,
+        ConflictPolicy::Overwrite,
+    )]);
 
     let report =
         apply_operation_plan(&operation_plan).expect("overwrite conflicts should replace target");
@@ -215,14 +224,12 @@ fn backup_then_overwrite_existing_target_when_conflict_policy_is_overwrite_with_
     fs::write(&current, "current\n").expect("current file should be written");
     symlink(&current, &target).expect("existing target symlink should be created");
 
-    let operation_plan = OperationPlan {
-        actions: vec![symlink_operation(
-            source.clone(),
-            target.clone(),
-            true,
-            ConflictPolicy::OverwriteWithBackup,
-        )],
-    };
+    let operation_plan = available_operation_plan(vec![symlink_operation(
+        source.clone(),
+        target.clone(),
+        true,
+        ConflictPolicy::OverwriteWithBackup,
+    )]);
 
     let report = apply_operation_plan(&operation_plan)
         .expect("overwrite-with-backup conflicts should preserve a backup");
@@ -262,14 +269,12 @@ fn reject_backup_overwrite_when_backup_path_already_exists() {
     fs::write(&backup, "backup\n").expect("backup file should be written");
     symlink(&current, &target).expect("existing target symlink should be created");
 
-    let operation_plan = OperationPlan {
-        actions: vec![symlink_operation(
-            source,
-            target.clone(),
-            true,
-            ConflictPolicy::OverwriteWithBackup,
-        )],
-    };
+    let operation_plan = available_operation_plan(vec![symlink_operation(
+        source,
+        target.clone(),
+        true,
+        ConflictPolicy::OverwriteWithBackup,
+    )]);
 
     let error = apply_operation_plan(&operation_plan)
         .expect_err("backup conflicts should fail when backup path already exists");
@@ -294,14 +299,12 @@ fn create_missing_target_parent_directory_when_mkdir_is_enabled() {
     let target = temp.path().join("nested").join("config").join("target.txt");
     fs::write(&source, "source\n").expect("source file should be written");
 
-    let operation_plan = OperationPlan {
-        actions: vec![symlink_operation(
-            source.clone(),
-            target.clone(),
-            true,
-            ConflictPolicy::Skip,
-        )],
-    };
+    let operation_plan = available_operation_plan(vec![symlink_operation(
+        source.clone(),
+        target.clone(),
+        true,
+        ConflictPolicy::Skip,
+    )]);
 
     let report = apply_operation_plan(&operation_plan)
         .expect("mkdir-enabled operations should create missing parent directories");
@@ -336,14 +339,12 @@ fn fail_when_target_parent_directory_is_missing_and_mkdir_is_disabled() {
     let target = temp.path().join("nested").join("config").join("target.txt");
     fs::write(&source, "source\n").expect("source file should be written");
 
-    let operation_plan = OperationPlan {
-        actions: vec![symlink_operation(
-            source,
-            target,
-            false,
-            ConflictPolicy::Skip,
-        )],
-    };
+    let operation_plan = available_operation_plan(vec![symlink_operation(
+        source,
+        target,
+        false,
+        ConflictPolicy::Skip,
+    )]);
 
     let error = apply_operation_plan(&operation_plan)
         .expect_err("mkdir-disabled operations should fail when parent is missing");
@@ -363,9 +364,8 @@ fn create_copy_when_target_is_missing() {
     let target = temp.path().join("target.txt");
     fs::write(&source, "source\n").expect("source file should be written");
 
-    let operation_plan = OperationPlan {
-        actions: vec![copy_operation(source.clone(), target.clone())],
-    };
+    let operation_plan =
+        available_operation_plan(vec![copy_operation(source.clone(), target.clone())]);
 
     let report = apply_operation_plan(&operation_plan)
         .expect("missing-target copy operations should be applied");
@@ -396,14 +396,12 @@ fn skip_existing_copy_target_when_conflict_policy_is_skip() {
     fs::write(&source, "source\n").expect("source file should be written");
     fs::write(&target, "current\n").expect("target file should be written");
 
-    let operation_plan = OperationPlan {
-        actions: vec![copy_operation_with_options(
-            source.clone(),
-            target.clone(),
-            true,
-            ConflictPolicy::Skip,
-        )],
-    };
+    let operation_plan = available_operation_plan(vec![copy_operation_with_options(
+        source.clone(),
+        target.clone(),
+        true,
+        ConflictPolicy::Skip,
+    )]);
 
     let report =
         apply_operation_plan(&operation_plan).expect("skip conflicts should preserve copy targets");
@@ -433,14 +431,12 @@ fn overwrite_existing_copy_target_when_conflict_policy_is_overwrite() {
     fs::write(&source, "source\n").expect("source file should be written");
     fs::write(&target, "current\n").expect("target file should be written");
 
-    let operation_plan = OperationPlan {
-        actions: vec![copy_operation_with_options(
-            source.clone(),
-            target.clone(),
-            true,
-            ConflictPolicy::Overwrite,
-        )],
-    };
+    let operation_plan = available_operation_plan(vec![copy_operation_with_options(
+        source.clone(),
+        target.clone(),
+        true,
+        ConflictPolicy::Overwrite,
+    )]);
 
     let report = apply_operation_plan(&operation_plan)
         .expect("overwrite conflicts should replace copy targets");
@@ -473,14 +469,12 @@ fn backup_then_overwrite_existing_copy_target_when_conflict_policy_is_overwrite_
     fs::write(&source, "source\n").expect("source file should be written");
     fs::write(&target, "current\n").expect("target file should be written");
 
-    let operation_plan = OperationPlan {
-        actions: vec![copy_operation_with_options(
-            source.clone(),
-            target.clone(),
-            true,
-            ConflictPolicy::OverwriteWithBackup,
-        )],
-    };
+    let operation_plan = available_operation_plan(vec![copy_operation_with_options(
+        source.clone(),
+        target.clone(),
+        true,
+        ConflictPolicy::OverwriteWithBackup,
+    )]);
 
     let report = apply_operation_plan(&operation_plan)
         .expect("overwrite-with-backup conflicts should preserve a copy backup");
@@ -513,14 +507,12 @@ fn fail_when_copy_target_parent_directory_is_missing_and_mkdir_is_disabled() {
     let target = temp.path().join("nested").join("config").join("target.txt");
     fs::write(&source, "source\n").expect("source file should be written");
 
-    let operation_plan = OperationPlan {
-        actions: vec![copy_operation_with_options(
-            source,
-            target,
-            false,
-            ConflictPolicy::Skip,
-        )],
-    };
+    let operation_plan = available_operation_plan(vec![copy_operation_with_options(
+        source,
+        target,
+        false,
+        ConflictPolicy::Skip,
+    )]);
 
     let error = apply_operation_plan(&operation_plan)
         .expect_err("mkdir-disabled copy operations should fail when parent is missing");
@@ -540,14 +532,12 @@ fn create_missing_copy_target_parent_directory_when_mkdir_is_enabled() {
     let target = temp.path().join("nested").join("config").join("target.txt");
     fs::write(&source, "source\n").expect("source file should be written");
 
-    let operation_plan = OperationPlan {
-        actions: vec![copy_operation_with_options(
-            source.clone(),
-            target.clone(),
-            true,
-            ConflictPolicy::Skip,
-        )],
-    };
+    let operation_plan = available_operation_plan(vec![copy_operation_with_options(
+        source.clone(),
+        target.clone(),
+        true,
+        ConflictPolicy::Skip,
+    )]);
 
     let report = apply_operation_plan(&operation_plan)
         .expect("mkdir-enabled copy operations should create missing parent directories");
@@ -584,14 +574,12 @@ fn reject_backup_overwrite_for_copy_when_backup_path_already_exists() {
     fs::write(&target, "current\n").expect("target file should be written");
     fs::write(&backup, "backup\n").expect("backup file should be written");
 
-    let operation_plan = OperationPlan {
-        actions: vec![copy_operation_with_options(
-            source,
-            target.clone(),
-            true,
-            ConflictPolicy::OverwriteWithBackup,
-        )],
-    };
+    let operation_plan = available_operation_plan(vec![copy_operation_with_options(
+        source,
+        target.clone(),
+        true,
+        ConflictPolicy::OverwriteWithBackup,
+    )]);
 
     let error = apply_operation_plan(&operation_plan)
         .expect_err("copy backup conflicts should fail when backup path already exists");
@@ -618,17 +606,15 @@ fn preserve_operation_kind_in_apply_outcomes_for_symlink_and_copy_actions() {
     fs::write(&symlink_source, "link\n").expect("symlink source file should be written");
     fs::write(&copy_source, "copy\n").expect("copy source file should be written");
 
-    let operation_plan = OperationPlan {
-        actions: vec![
-            symlink_operation(
-                symlink_source.clone(),
-                symlink_target.clone(),
-                true,
-                ConflictPolicy::Skip,
-            ),
-            copy_operation(copy_source.clone(), copy_target.clone()),
-        ],
-    };
+    let operation_plan = available_operation_plan(vec![
+        symlink_operation(
+            symlink_source.clone(),
+            symlink_target.clone(),
+            true,
+            ConflictPolicy::Skip,
+        ),
+        copy_operation(copy_source.clone(), copy_target.clone()),
+    ]);
 
     let report = apply_operation_plan(&operation_plan)
         .expect("apply should preserve operation kinds in typed outcomes");

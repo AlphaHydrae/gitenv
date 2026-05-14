@@ -68,45 +68,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 59: Carry source availability on operation plans
-
-Why this increment exists:
-
-- The Rust port needs source availability information for both `info` and
-  `apply`. Ruby's `check_files!` grouped missing or unreadable sources before
-  apply; in the Rust model, operation planning can surface the same facts once
-  and let downstream stages interpret them differently.
-- Operation planning already touches the filesystem for selector expansion, so
-  carrying source availability in the planning result keeps the increment
-  cohesive without introducing a separate validation pass.
-- The operation-planning result must preserve deterministic configuration order
-  so `info` can present successful and failing entries in the same order users
-  declared them.
-
-Review target:
-
-- Replace the operation-plan `actions`-only shape with an ordered list of
-  operation entries that can represent either:
-  1. a concrete executable action with source availability metadata, or
-  2. a planning issue emitted at the same position in config order (for
-     example, selector root missing/unreadable so expansion cannot proceed).
-- Source availability metadata and planning issues must distinguish:
-  1. source exists and is readable,
-  2. source or source root is missing,
-  3. source or source root is unreadable because of permissions,
-  4. source or source root is unreadable because of unexpected I/O failure.
-- Operation planning populates ordered entries for direct file actions and
-  selector expansion outcomes while preserving deterministic config order.
-- `run_info` renders the ordered mixed entries without failing so successful
-  actions and failures appear in declaration order.
-- `run_apply` scans the same ordered entries and returns a grouped
-  `ProgramError` for unavailable sources/planning issues before filesystem
-  mutation begins.
-- A unit test asserts ordered entry output (good + bad entries interleaved),
-  including both permission-denied and unexpected-I/O unreadable cases.
-- An integration test verifies grouped apply diagnostics and ordered info
-  rendering for mixed success/failure scenarios.
-
 ### Increment 60: Add `recursive` to `select` with default `false` (planning-only slice)
 
 Why this increment exists:
