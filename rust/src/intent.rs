@@ -85,6 +85,10 @@ impl ValidatedGlobPattern {
         Self::parse_for_field(pattern, "select.exclude")
     }
 
+    pub(crate) fn parse_select_include(pattern: &str) -> Result<Self, ProgramError> {
+        Self::parse_for_field(pattern, "select.include")
+    }
+
     pub(crate) fn parse_global_select_exclude(pattern: &str) -> Result<Self, ProgramError> {
         Self::parse_for_field(pattern, "global select.exclude")
     }
@@ -117,6 +121,20 @@ impl PartialEq for ValidatedGlobPattern {
 
 impl Eq for ValidatedGlobPattern {}
 
+#[cfg(test)]
+pub(crate) fn validated_test_globs(patterns: &[&str]) -> Vec<ValidatedGlobPattern> {
+    patterns
+        .iter()
+        .map(|pattern| {
+            let glob = Glob::new(pattern).unwrap();
+            ValidatedGlobPattern {
+                pattern: pattern.to_string(),
+                matcher: glob.compile_matcher(),
+            }
+        })
+        .collect()
+}
+
 /// Resolved action that operates on a glob-selected set of files.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IntentSelectAction {
@@ -126,6 +144,8 @@ pub struct IntentSelectAction {
     pub recursive: bool,
     /// Keeps recursive entries only when their target directory already exists.
     pub existing_directories_only: bool,
+    /// Validated glob patterns explicitly included by the selection.
+    pub include: Vec<ValidatedGlobPattern>,
     /// Validated glob patterns explicitly excluded from selection.
     pub exclude: Vec<ValidatedGlobPattern>,
     pub options: ResolvedOptions,
@@ -333,6 +353,7 @@ fn plan_sources_recursively(
                         selection_type: select_config.selection_type.clone(),
                         recursive: select_config.recursive,
                         existing_directories_only: select_config.existing_directories_only,
+                        include: validate_select_include_patterns(&select_config.include)?,
                         exclude: validate_select_exclude_patterns(&select_config.exclude)?,
                         options,
                     }))
@@ -464,6 +485,15 @@ fn validate_select_exclude_patterns(
         .collect()
 }
 
+fn validate_select_include_patterns(
+    patterns: &[String],
+) -> Result<Vec<ValidatedGlobPattern>, ProgramError> {
+    patterns
+        .iter()
+        .map(|pattern| ValidatedGlobPattern::parse_select_include(pattern))
+        .collect()
+}
+
 /// Resolves execution options for a single config item by merging item-level
 /// overrides on top of the inherited defaults and source-level destination.
 ///
@@ -505,8 +535,7 @@ fn resolve_item_options(
 mod tests {
     use super::{
         ConflictPolicy, IntentAction, IntentContext, IntentFileAction, IntentPlan,
-        IntentSelectAction, IntentSource, ResolvedOptions, ValidatedGlobPattern,
-        derive_intent_plan,
+        IntentSelectAction, IntentSource, ResolvedOptions, derive_intent_plan,
     };
     use crate::boundary::{ConfigReader, DirectoryProbe, EnvironmentReader};
     use crate::{
@@ -697,16 +726,6 @@ mod tests {
         )
     }
 
-    fn validated_excludes(patterns: &[&str]) -> Vec<ValidatedGlobPattern> {
-        patterns
-            .iter()
-            .map(|pattern| {
-                ValidatedGlobPattern::parse_select_exclude(pattern)
-                    .expect("test glob patterns should be valid")
-            })
-            .collect()
-    }
-
     // ---------------------------------------------------------------------------
     // Intent plan derivation
     // ---------------------------------------------------------------------------
@@ -770,6 +789,7 @@ mod tests {
                         selection_type: SelectionType::Dot,
                         recursive: false,
                         existing_directories_only: false,
+                        include: vec!["*.conf".to_string()],
                         exclude: vec![".git".to_string()],
                         mode: None,
                         to: None,
@@ -816,7 +836,8 @@ mod tests {
                         selection_type: SelectionType::Dot,
                         recursive: false,
                         existing_directories_only: false,
-                        exclude: validated_excludes(&[".git"]),
+                        include: super::validated_test_globs(&["*.conf"]),
+                        exclude: super::validated_test_globs(&[".git"]),
                         options: ResolvedOptions {
                             mode: ActionMode::Copy,
                             to: "~/dest".to_string(),
@@ -852,6 +873,7 @@ mod tests {
                     selection_type: SelectionType::NonDot,
                     recursive: false,
                     existing_directories_only: false,
+                    include: vec![],
                     exclude: vec!["Makefile".to_string()],
                     mode: None,
                     to: None,
@@ -876,7 +898,8 @@ mod tests {
                     selection_type: SelectionType::NonDot,
                     recursive: false,
                     existing_directories_only: false,
-                    exclude: validated_excludes(&["Makefile"]),
+                    include: vec![],
+                    exclude: super::validated_test_globs(&["Makefile"]),
                     options: ResolvedOptions {
                         mode: ActionMode::Copy,
                         to: "~/dest".to_string(),
@@ -911,6 +934,7 @@ mod tests {
                     selection_type: SelectionType::All,
                     recursive: false,
                     existing_directories_only: false,
+                    include: vec![],
                     exclude: vec![".backup".to_string(), ".tmp".to_string()],
                     mode: None,
                     to: None,
@@ -935,7 +959,8 @@ mod tests {
                     selection_type: SelectionType::All,
                     recursive: false,
                     existing_directories_only: false,
-                    exclude: validated_excludes(&[".backup", ".tmp"]),
+                    include: vec![],
+                    exclude: super::validated_test_globs(&[".backup", ".tmp"]),
                     options: ResolvedOptions {
                         mode: ActionMode::Symlink,
                         to: "~".to_string(),
@@ -964,6 +989,7 @@ mod tests {
                     selection_type: SelectionType::Dot,
                     recursive: true,
                     existing_directories_only: false,
+                    include: vec![],
                     exclude: vec![".git".to_string()],
                     mode: None,
                     to: None,
@@ -988,7 +1014,8 @@ mod tests {
                     selection_type: SelectionType::Dot,
                     recursive: true,
                     existing_directories_only: false,
-                    exclude: validated_excludes(&[".git"]),
+                    include: vec![],
+                    exclude: super::validated_test_globs(&[".git"]),
                     options: ResolvedOptions {
                         mode: ActionMode::Symlink,
                         to: "~".to_string(),
@@ -2823,6 +2850,7 @@ mod tests {
                     selection_type: SelectionType::Dot,
                     recursive: false,
                     existing_directories_only: false,
+                    include: vec![],
                     exclude: vec![],
                     mode: Some(ActionMode::Copy),
                     to: Some("~/config".to_string()),
@@ -2847,7 +2875,8 @@ mod tests {
                     selection_type: SelectionType::Dot,
                     recursive: false,
                     existing_directories_only: false,
-                    exclude: validated_excludes(&[]),
+                    include: vec![],
+                    exclude: super::validated_test_globs(&[]),
                     options: ResolvedOptions {
                         mode: ActionMode::Copy,
                         to: "~/config".to_string(),
@@ -2874,6 +2903,7 @@ mod tests {
                     selection_type: SelectionType::Dot,
                     recursive: false,
                     existing_directories_only: false,
+                    include: vec![],
                     exclude: vec!["[".to_string()],
                     mode: None,
                     to: None,
@@ -2950,6 +2980,7 @@ mod tests {
                     selection_type: SelectionType::Dot,
                     recursive: false,
                     existing_directories_only: false,
+                    include: vec![],
                     exclude: vec![],
                     mode: None,
                     to: None,

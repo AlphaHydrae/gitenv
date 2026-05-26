@@ -68,25 +68,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 65: Add selector include patterns with deterministic precedence
-
-Why this increment exists:
-
-- Glob excludes are now available, but some recursive workflows require explicit
-  inclusion of a subset of files before exclusion rules are applied.
-
-Review target:
-
-- Extend select config and intent models with optional include glob patterns.
-- Define and implement stable precedence: selection type filtering first,
-  include patterns next (when present), then exclude patterns.
-- Match include/exclude patterns against source-relative paths in direct and
-  recursive modes.
-- Add representative unit coverage for include-only, include+exclude overlap,
-  and recursive nested-path cases.
-- Update Rust README selector documentation with include semantics and
-  precedence examples.
-
 ### Increment 66: Enforce README examples and coverage threshold in CI
 
 Why this increment exists:

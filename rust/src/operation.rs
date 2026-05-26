@@ -286,7 +286,12 @@ fn expand_select_action(
     let selected_entries = entries
         .into_iter()
         .filter(|entry| {
-            should_include_selection_entry(entry, select_action.selection_type.clone(), &excludes)
+            should_include_selection_entry(
+                entry,
+                select_action.selection_type.clone(),
+                &select_action.include,
+                &excludes,
+            )
         })
         .collect::<Vec<_>>();
 
@@ -504,6 +509,7 @@ fn operation_action(
 fn should_include_selection_entry(
     entry: &str,
     selection_type: SelectionType,
+    includes: &[ValidatedGlobPattern],
     excludes: &[ValidatedGlobPattern],
 ) -> bool {
     let entry_name = Path::new(entry)
@@ -517,9 +523,13 @@ fn should_include_selection_entry(
         SelectionType::All => true,
     };
 
-    // Selection type decides the candidate set first; glob excludes further
-    // reduce that set.
+    // Selection type decides the candidate set first; includes then narrow
+    // that set before excludes remove any remaining matches.
     selected_by_type
+        && (includes.is_empty()
+            || includes
+                .iter()
+                .any(|included| included.is_match(Path::new(entry))))
         && !excludes
             .iter()
             .any(|excluded| excluded.is_match(Path::new(entry)))
@@ -535,11 +545,11 @@ mod tests {
     use crate::{
         ActionMode, ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction,
         IntentSource, ResolvedOptions, SelectionType, SourceAvailability, SourceUnreadableKind,
-        ValidatedGlobPattern,
         boundary::{
             SourcePathRequirement, SourceReadError, test_doubles::FnSourceAvailabilityReader,
         },
         derive_operation_plan as derive_operation_plan_entrypoint,
+        intent::validated_test_globs,
     };
     use std::fs;
     use std::io::ErrorKind;
@@ -594,7 +604,8 @@ mod tests {
             selection_type,
             recursive,
             existing_directories_only: false,
-            exclude: validated_patterns(exclude),
+            include: vec![],
+            exclude: validated_test_globs(&exclude),
             options,
         })
     }
@@ -610,19 +621,27 @@ mod tests {
             selection_type,
             recursive,
             existing_directories_only,
-            exclude: validated_patterns(exclude),
+            include: vec![],
+            exclude: validated_test_globs(&exclude),
             options,
         })
     }
 
-    fn validated_patterns(patterns: Vec<&str>) -> Vec<ValidatedGlobPattern> {
-        patterns
-            .into_iter()
-            .map(|pattern| {
-                ValidatedGlobPattern::parse_select_exclude(pattern)
-                    .expect("test glob patterns should be valid")
-            })
-            .collect()
+    fn make_select_action_with_patterns(
+        selection_type: SelectionType,
+        recursive: bool,
+        include: Vec<&str>,
+        exclude: Vec<&str>,
+        options: ResolvedOptions,
+    ) -> IntentAction {
+        IntentAction::Select(IntentSelectAction {
+            selection_type,
+            recursive,
+            existing_directories_only: false,
+            include: validated_test_globs(&include),
+            exclude: validated_test_globs(&exclude),
+            options,
+        })
     }
 
     fn default_options() -> ResolvedOptions {
@@ -647,8 +666,8 @@ mod tests {
         OperationContext {
             home_directory,
             source_reader: &READABLE_SOURCE_READER,
-            global_selection_excludes: validated_patterns(
-                global_selection_excludes.unwrap_or_default(),
+            global_selection_excludes: validated_test_globs(
+                &global_selection_excludes.unwrap_or_default(),
             ),
         }
     }
@@ -734,6 +753,87 @@ mod tests {
             expected_operation_plan(vec![expected_symlink(
                 repository.path().join(".zshrc"),
                 home.path().join(".zshrc"),
+            )])
+        );
+    }
+
+    #[test]
+    fn include_glob_patterns_can_select_direct_entries_without_excludes() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::write(repository.path().join(".keep"), "keep\n").expect("dotfile should be written");
+        fs::write(repository.path().join("notes.tmp"), "tmp\n")
+            .expect("temporary file should be written");
+        fs::write(repository.path().join("archive.tmp"), "tmp\n")
+            .expect("temporary file should be written");
+
+        let intent_plan = make_intent_plan(
+            repository.path(),
+            vec![make_intent_source(
+                ".",
+                vec![make_select_action_with_patterns(
+                    SelectionType::All,
+                    false,
+                    vec!["*.tmp"],
+                    vec![],
+                    default_options(),
+                )],
+            )],
+        );
+
+        let context = make_operation_context(home.path().to_path_buf(), None);
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
+            .expect("operation planning should honor include-only selector patterns");
+
+        assert_eq!(
+            operation_plan,
+            expected_operation_plan(vec![
+                expected_symlink(
+                    repository.path().join("archive.tmp"),
+                    home.path().join("archive.tmp"),
+                ),
+                expected_symlink(
+                    repository.path().join("notes.tmp"),
+                    home.path().join("notes.tmp"),
+                ),
+            ])
+        );
+    }
+
+    #[test]
+    fn exclude_matching_entries_after_include_patterns_are_applied() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::write(repository.path().join(".keep"), "keep\n")
+            .expect("selected dotfile should be written");
+        fs::write(repository.path().join("notes.tmp"), "tmp\n")
+            .expect("temporary file should be written");
+        fs::write(repository.path().join("archive.tmp"), "tmp\n")
+            .expect("temporary file should be written");
+
+        let intent_plan = make_intent_plan(
+            repository.path(),
+            vec![make_intent_source(
+                ".",
+                vec![make_select_action_with_patterns(
+                    SelectionType::All,
+                    false,
+                    vec!["*.tmp", ".keep"],
+                    vec!["*.tmp"],
+                    default_options(),
+                )],
+            )],
+        );
+
+        let context = make_operation_context(home.path().to_path_buf(), None);
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
+            .expect("operation planning should keep includes ahead of excludes");
+
+        assert_eq!(
+            operation_plan,
+            expected_operation_plan(vec![expected_symlink(
+                repository.path().join(".keep"),
+                home.path().join(".keep"),
             )])
         );
     }
@@ -1027,9 +1127,10 @@ mod tests {
             repository.path(),
             vec![make_intent_source(
                 "bundle",
-                vec![make_select_action_with_recursive(
+                vec![make_select_action_with_patterns(
                     SelectionType::All,
                     true,
+                    vec!["keep.conf", "nested/**"],
                     vec!["**/*.tmp", "nested/private/**"],
                     default_options(),
                 )],

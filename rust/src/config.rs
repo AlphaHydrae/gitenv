@@ -303,6 +303,8 @@ pub struct SelectConfig {
     #[serde(default)]
     pub existing_directories_only: bool,
     #[serde(default)]
+    pub include: Vec<String>,
+    #[serde(default)]
     pub exclude: Vec<String>,
     #[serde(default)]
     pub mode: Option<ActionMode>,
@@ -664,6 +666,8 @@ sources:
     configs:
       - select:
           type: dot
+          include:
+            - profiles/**
           exclude:
             - .DS_Store
             - .git
@@ -690,6 +694,7 @@ sources:
                     selection_type: SelectionType::Dot,
                     recursive: false,
                     existing_directories_only: false,
+                    include: vec!["profiles/**".to_string()],
                     exclude: vec![".DS_Store".to_string(), ".git".to_string()],
                     mode: None,
                     to: None,
@@ -759,6 +764,7 @@ sources:
                 guard: None,
                 configs: vec![ConfigItem::Select(SelectConfig {
                     selection_type: SelectionType::Dot,
+                    include: vec![],
                     exclude: vec![],
                     recursive: true,
                     existing_directories_only: false,
@@ -802,6 +808,7 @@ sources:
                 guard: None,
                 configs: vec![ConfigItem::Select(SelectConfig {
                     selection_type: SelectionType::Dot,
+                    include: vec![],
                     recursive: true,
                     existing_directories_only: true,
                     exclude: vec![],
@@ -920,6 +927,7 @@ sources:
                 configs: vec![
                     ConfigItem::Select(SelectConfig {
                         selection_type: SelectionType::Dot,
+                        include: vec![],
                         exclude: vec![],
                         recursive: false,
                         existing_directories_only: false,
@@ -931,6 +939,7 @@ sources:
                     }),
                     ConfigItem::Select(SelectConfig {
                         selection_type: SelectionType::NonDot,
+                        include: vec![],
                         exclude: vec![],
                         recursive: false,
                         existing_directories_only: false,
@@ -942,6 +951,7 @@ sources:
                     }),
                     ConfigItem::Select(SelectConfig {
                         selection_type: SelectionType::All,
+                        include: vec![],
                         exclude: vec![".DS_Store".to_string()],
                         recursive: false,
                         existing_directories_only: false,
@@ -1696,6 +1706,7 @@ sources:
                 guard: None,
                 configs: vec![ConfigItem::Select(SelectConfig {
                     selection_type: SelectionType::Dot,
+                    include: vec![],
                     exclude: vec![],
                     recursive: false,
                     existing_directories_only: false,

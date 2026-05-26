@@ -166,6 +166,8 @@ sources:
     configs:
       - select:
           type: dot
+          include:
+            - "dotfiles/**"
           exclude:
             - "**/*.tmp"
             - "private/**"
@@ -177,6 +179,11 @@ sources:
 - `non-dot` for names that do not start with `.`
 - `all` for both dot and non-dot names
 
+`include` uses glob patterns matched against source-relative paths. When it is
+present, a file must match at least one include pattern before the excludes
+are applied. This keeps recursive selectors predictable when you want to carve
+out a smaller subset from a larger tree.
+
 `exclude` uses glob patterns matched against source-relative paths. For example:
 
 - `"**/*.tmp"` excludes temporary files anywhere in recursive selection
@@ -184,7 +191,8 @@ sources:
 - `"**/.DS_Store"` excludes Finder metadata files in any directory
 
 Selection precedence is deterministic: `type` selects candidates first, then
-`exclude` removes matching candidates.
+`include` narrows the candidate set when present, then `exclude` removes any
+remaining matches.
 
 On macOS, `.DS_Store` is excluded automatically during selector expansion.
 Add it to `exclude` if you want to make the rule explicit for a source.

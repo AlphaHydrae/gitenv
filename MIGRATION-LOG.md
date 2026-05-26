@@ -11,6 +11,12 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-26: Add selector include patterns with deterministic precedence -
+  Extend select config and intent models with optional include glob patterns,
+  apply include-before-exclude precedence during selector expansion, match
+  include and exclude patterns against source-relative paths in direct and
+  recursive modes, add representative include coverage, and document the
+  selector semantics in the Rust README.
 - 2026-05-26: Move selector glob parsing to intent planning - Add a validated
   selector exclude pattern representation in intent planning, validate
   source-level `select.exclude` patterns during intent derivation, pre-validate
