@@ -68,23 +68,41 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 66: Enforce README examples and coverage threshold in CI
+### Increment 66: Validate README config examples in CI
 
 Why this increment exists:
 
-- The migration plan still has open exit criteria for runnable Rust README
-  examples and hardening around coverage/CI checks.
+- The migration plan has an open Phase 3 exit criterion: README examples run as
+  documented.
+- The coverage gate (90% floor) was wired in as part of the setup for this
+  increment; the README validation work remains.
+
+Decision: README examples are validated by reading `rust/README.md` at test
+time, not by copying YAML into integration test fixtures. The README is the
+single source of truth. The test scans for all ` ```yaml ` fenced blocks
+(using the language tag already present — no extra markup needed) and requires
+an explicit expectation for every block. Adding a new YAML block to the README
+without a matching expectation fails the test, keeping coverage complete.
+
+There are currently 10 `yaml` fenced blocks in the README (minimal config,
+repository, defaults, rename targets, sub-folders, change destination, copy
+files, select, overwrite/backup, includes). All are complete configs that
+should parse cleanly.
 
 Review target:
 
-- Add an automated check that executes Rust-port README configuration examples
-  (or equivalent tested fixtures) so documented behavior stays runnable.
-- Add a CI coverage gate that fails when line coverage drops below an agreed
-  threshold for the Rust workspace.
-- Wire the new checks into the existing CI workflow and local helper wrappers
-  where appropriate.
-- Keep diagnostics concise and actionable when README-example or coverage checks
-  fail.
+- Add `rust/tests/readme_examples.rs` that:
+  - reads `rust/README.md` at test time via `fs::read_to_string` and extracts
+    all ` ```yaml ` fenced blocks,
+  - asserts the count of extracted blocks matches the number of known
+    expectations (so adding a YAML block without an expectation is a test
+    failure),
+  - runs each block through `parse_config` and asserts parse success,
+  - asserts at least one structural property per block (e.g. `sources.len()`,
+    presence of `defaults`, `includes`, or a specific field value) so the test
+    fails if the config schema changes in a breaking way.
+- No changes to `rust/README.md` required (the ` ```yaml ` language tags are
+  already the extraction signal).
 
 ### Increment 67: Directory symlink support
 

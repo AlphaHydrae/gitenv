@@ -63,8 +63,8 @@ fi
 set +e
 if [[ $# -eq 0 ]]; then
   echo "Run started at (UTC): $RUN_STARTED_AT" | tee "$OUTPUT_LOG"
-  echo "Running: cargo llvm-cov --workspace --all-targets --summary-only" | tee -a "$OUTPUT_LOG"
-  cargo llvm-cov --workspace --all-targets --summary-only 2>&1 | tee -a "$OUTPUT_LOG"
+  echo "Running: cargo llvm-cov --workspace --all-targets --summary-only --fail-under-lines 90" | tee -a "$OUTPUT_LOG"
+  cargo llvm-cov --workspace --all-targets --summary-only --fail-under-lines 90 2>&1 | tee -a "$OUTPUT_LOG"
   SUMMARY_EXIT_CODE=${PIPESTATUS[0]}
 
   # Also write a line-by-line annotated report so that uncovered lines can be

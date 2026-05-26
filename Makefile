@@ -18,7 +18,7 @@ coverage:
 	@echo
 	@printf "$(title)Running tests with coverage...$(sgr0)\n"
 	@echo "$(sep)"
-	cd $(RUST_DIR) && cargo llvm-cov --workspace --all-targets --summary-only
+	cd $(RUST_DIR) && cargo llvm-cov --workspace --all-targets --summary-only --fail-under-lines 90
 
 echo:
 	@echo

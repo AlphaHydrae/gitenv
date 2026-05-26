@@ -374,7 +374,8 @@ Exit criteria:
 
 ### Phase 4: Hardening and release readiness
 
-- Add coverage reporting and enforce threshold.
+- [x] Add coverage reporting and enforce threshold (90% floor active; goal is
+      100%).
 - Add CI matrix and release workflow.
 
 Exit criteria:
