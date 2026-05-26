@@ -11,6 +11,12 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-26: Add directory symlink source support in planning and apply - Add
+  a dedicated symlink source readability requirement so operation planning
+  accepts directory sources for symlink actions while preserving copy-file
+  checks, add apply-stage unit coverage for create/skip/backup-overwrite
+  directory symlink conflicts, and add an end-to-end apply integration scenario
+  that verifies directory sources become symlink targets.
 - 2026-05-26: Validate Rust README config examples with strict ID mapping - Add
   explicit `readme-config-id` markers for every Rust README YAML config
   example, enforce language tags for all README fenced code blocks, validate

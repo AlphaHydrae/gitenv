@@ -357,8 +357,9 @@ pub(crate) fn create_symlink_on_filesystem(
 #[cfg(test)]
 mod tests {
     use super::{
-        ApplyContext, apply_copy_operation, apply_operation_plan, backup_path_for_target,
-        ensure_parent_directory_exists, move_target_to_backup, remove_target_path, target_exists,
+        ApplyContext, apply_copy_operation, apply_operation_plan, apply_symlink_operation,
+        backup_path_for_target, ensure_parent_directory_exists, move_target_to_backup,
+        remove_target_path, target_exists,
     };
     use crate::{
         ApplyOperationOutcome, ConflictPolicy, FileOperation, OperationAction, OperationEntry,
@@ -611,6 +612,137 @@ mod tests {
         assert_eq!(
             std::fs::read_link(&target).expect("created symlink target should be readable"),
             source
+        );
+    }
+
+    #[test]
+    fn create_a_directory_symlink_when_the_target_is_missing() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source_directory = temp.path().join("source-dir");
+        let target = temp.path().join("target-dir");
+        let target_probe = NativeTargetProbe;
+
+        fs::create_dir_all(source_directory.join("nested"))
+            .expect("source directory should be created");
+
+        let outcome = apply_symlink_operation(
+            &FileOperation {
+                source: source_directory.clone(),
+                target: target.clone(),
+                mkdir: false,
+                conflict_policy: ConflictPolicy::Skip,
+            },
+            &ApplyContext {
+                target_probe: &target_probe,
+                symlink_creator: &FnSymlinkCreator(super::create_symlink_on_filesystem),
+            },
+        )
+        .expect("apply should create a directory symlink when target is missing");
+
+        assert_eq!(
+            outcome,
+            ApplyOperationOutcome::Applied(OperationAction::Symlink(FileOperation {
+                source: source_directory.clone(),
+                target: target.clone(),
+                mkdir: false,
+                conflict_policy: ConflictPolicy::Skip,
+            }))
+        );
+        assert_eq!(
+            fs::read_link(&target).expect("directory symlink target should be readable"),
+            source_directory
+        );
+    }
+
+    #[test]
+    fn skip_a_directory_symlink_when_the_target_exists() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source_directory = temp.path().join("source-dir");
+        let target = temp.path().join("target-dir");
+        let target_probe = NativeTargetProbe;
+
+        fs::create_dir_all(source_directory.join("nested"))
+            .expect("source directory should be created");
+        fs::create_dir_all(target.join("existing"))
+            .expect("existing target directory should be created");
+
+        let outcome = apply_symlink_operation(
+            &FileOperation {
+                source: source_directory,
+                target: target.clone(),
+                mkdir: false,
+                conflict_policy: ConflictPolicy::Skip,
+            },
+            &ApplyContext {
+                target_probe: &target_probe,
+                symlink_creator: &FnSymlinkCreator(super::create_symlink_on_filesystem),
+            },
+        )
+        .expect("apply should skip existing targets when conflict policy is skip");
+
+        assert_eq!(
+            outcome,
+            ApplyOperationOutcome::SkippedExistingTarget(OperationAction::Symlink(FileOperation {
+                source: temp.path().join("source-dir"),
+                target: target.clone(),
+                mkdir: false,
+                conflict_policy: ConflictPolicy::Skip,
+            }))
+        );
+        assert!(
+            target.is_dir(),
+            "existing directory target should be preserved"
+        );
+    }
+
+    #[test]
+    fn backup_and_replace_existing_directories_for_directory_symlink_actions() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source_directory = temp.path().join("source-dir");
+        let target = temp.path().join("target-dir");
+        let backup_target = PathBuf::from(format!("{}.orig", target.display()));
+        let target_probe = NativeTargetProbe;
+
+        fs::create_dir_all(source_directory.join("nested"))
+            .expect("source directory should be created");
+        fs::create_dir_all(&target).expect("existing target directory should be created");
+        fs::write(target.join("old.txt"), "old\n").expect("existing target file should be written");
+
+        let outcome = apply_symlink_operation(
+            &FileOperation {
+                source: source_directory.clone(),
+                target: target.clone(),
+                mkdir: false,
+                conflict_policy: ConflictPolicy::OverwriteWithBackup,
+            },
+            &ApplyContext {
+                target_probe: &target_probe,
+                symlink_creator: &FnSymlinkCreator(super::create_symlink_on_filesystem),
+            },
+        )
+        .expect("apply should backup and replace existing directory targets");
+
+        assert_eq!(
+            outcome,
+            ApplyOperationOutcome::Applied(OperationAction::Symlink(FileOperation {
+                source: source_directory.clone(),
+                target: target.clone(),
+                mkdir: false,
+                conflict_policy: ConflictPolicy::OverwriteWithBackup,
+            }))
+        );
+        assert_eq!(
+            fs::read_link(&target).expect("replacement directory symlink should be readable"),
+            source_directory
+        );
+        assert!(
+            backup_target.is_dir(),
+            "backup directory should preserve replaced target"
+        );
+        assert_eq!(
+            fs::read_to_string(backup_target.join("old.txt"))
+                .expect("backup directory contents should be readable"),
+            "old\n"
         );
     }
 

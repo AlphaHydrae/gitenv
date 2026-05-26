@@ -21,10 +21,26 @@ use crate::logging;
 use std::path::Path;
 use std::path::PathBuf;
 
+/// Declares which source-path shape and readability contract a planning stage
+/// requires from [`SourceAvailabilityReader::ensure_source_path_readable`].
+///
+/// Operation planning uses this to enforce different source checks for copy,
+/// symlink, and selector-root expansion paths.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SourcePathRequirement {
+    /// Source must be readable as a file-like path.
+    ///
+    /// This is used by copy actions, where directory inputs are invalid.
     File,
+    /// Source must be readable as a directory.
+    ///
+    /// This is used when validating selector source roots before expansion.
     Directory,
+    /// Source must be readable for symlink actions.
+    ///
+    /// Unlike [`File`], this allows either a readable file or a readable
+    /// directory source because both are valid symlink targets.
+    Symlink,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

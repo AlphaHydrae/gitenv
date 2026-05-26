@@ -105,6 +105,13 @@ impl OperationAction {
         }
     }
 
+    pub(crate) fn source_requirement(&self) -> SourcePathRequirement {
+        match self {
+            OperationAction::Copy(_) => SourcePathRequirement::File,
+            OperationAction::Symlink(_) => SourcePathRequirement::Symlink,
+        }
+    }
+
     pub(crate) fn target(&self) -> &Path {
         match self {
             OperationAction::Copy(operation) | OperationAction::Symlink(operation) => {
@@ -236,7 +243,7 @@ fn expand_file_action(
 
     OperationEntry::Action(PlannedOperationAction {
         source_availability: source_availability_from_result(
-            source_reader.ensure_source_path_readable(action.source(), SourcePathRequirement::File),
+            source_reader.ensure_source_path_readable(action.source(), action.source_requirement()),
         ),
         skip_reason: None,
         action,
@@ -319,7 +326,7 @@ fn expand_select_action(
 
             let source_availability = source_availability_from_result(
                 source_reader
-                    .ensure_source_path_readable(action.source(), SourcePathRequirement::File),
+                    .ensure_source_path_readable(action.source(), action.source_requirement()),
             );
             let skip_reason = if select_action.recursive
                 && select_action.existing_directories_only
@@ -1631,7 +1638,7 @@ mod tests {
         let readable_source_reader =
             FnSourceAvailabilityReader(|_, requirement| match requirement {
                 SourcePathRequirement::Directory => Ok(()),
-                SourcePathRequirement::File => Ok(()),
+                SourcePathRequirement::File | SourcePathRequirement::Symlink => Ok(()),
             });
         let readable_context = OperationContext {
             home_directory: home.path().to_path_buf(),
@@ -1672,7 +1679,7 @@ mod tests {
                 kind: SourceReadErrorKind::Missing,
                 message: "missing".to_string(),
             }),
-            SourcePathRequirement::File => Ok(()),
+            SourcePathRequirement::File | SourcePathRequirement::Symlink => Ok(()),
         });
 
         assert!(
@@ -1696,7 +1703,7 @@ mod tests {
     #[test]
     fn source_reader_double_can_return_directory_ok_and_file_error() {
         let source_reader = FnSourceAvailabilityReader(|path, requirement| match requirement {
-            SourcePathRequirement::File => Err(SourceReadError {
+            SourcePathRequirement::File | SourcePathRequirement::Symlink => Err(SourceReadError {
                 path: path.to_path_buf(),
                 kind: SourceReadErrorKind::PermissionDenied,
                 message: "denied".to_string(),
@@ -1719,6 +1726,90 @@ mod tests {
                 SourcePathRequirement::File,
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn allow_directory_sources_for_symlink_actions() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        let source_directory = repository.path().join("dotfiles");
+        fs::create_dir_all(&source_directory).expect("source directory should be created");
+        fs::write(source_directory.join("nested.txt"), "nested\n")
+            .expect("nested source file should be written");
+
+        let intent_plan = make_intent_plan(
+            repository.path(),
+            vec![make_intent_source(
+                ".",
+                vec![make_file_action("dotfiles", "dotfiles", default_options())],
+            )],
+        );
+        let source_reader = FnSourceAvailabilityReader(|path, requirement| {
+            assert_eq!(requirement, SourcePathRequirement::Symlink);
+            assert!(
+                path.ends_with("dotfiles"),
+                "symlink source probe should target dotfiles source"
+            );
+            Ok(())
+        });
+        let context = OperationContext {
+            home_directory: home.path().to_path_buf(),
+            source_reader: &source_reader,
+            global_selection_excludes: vec![],
+        };
+
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
+            .expect("directory symlink sources should be marked as available");
+
+        assert_eq!(
+            operation_plan,
+            expected_operation_plan(vec![expected_symlink(
+                repository.path().join(".").join("dotfiles"),
+                home.path().join("dotfiles"),
+            )])
+        );
+    }
+
+    #[test]
+    fn keep_copy_actions_on_file_source_requirements() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        let source_file = repository.path().join("copied.conf");
+        fs::write(&source_file, "copied\n").expect("copy source file should be written");
+
+        let mut options = default_options();
+        options.mode = ActionMode::Copy;
+        let intent_plan = make_intent_plan(
+            repository.path(),
+            vec![make_intent_source(
+                ".",
+                vec![make_file_action("copied.conf", "copied.conf", options)],
+            )],
+        );
+        let source_reader = FnSourceAvailabilityReader(|path, requirement| {
+            assert_eq!(requirement, SourcePathRequirement::File);
+            assert!(
+                path.ends_with("copied.conf"),
+                "copy source probe should target copied.conf"
+            );
+            Ok(())
+        });
+        let context = OperationContext {
+            home_directory: home.path().to_path_buf(),
+            source_reader: &source_reader,
+            global_selection_excludes: vec![],
+        };
+
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
+            .expect("copy actions should keep file readability checks");
+
+        assert_eq!(
+            operation_plan,
+            expected_operation_plan(vec![expected_copy(
+                repository.path().join(".").join("copied.conf"),
+                home.path().join("copied.conf"),
+            )])
         );
     }
 
@@ -1747,6 +1838,28 @@ mod tests {
                 home.path().join("links").join("shell/zshrc"),
             )])
         );
+    }
+
+    #[test]
+    fn expose_target_paths_for_copy_and_symlink_actions() {
+        let copy_target = PathBuf::from("/home/copy-target");
+        let symlink_target = PathBuf::from("/home/symlink-target");
+
+        let copy_action = OperationAction::Copy(FileOperation {
+            source: PathBuf::from("/repo/copy-source"),
+            target: copy_target.clone(),
+            mkdir: false,
+            conflict_policy: ConflictPolicy::Skip,
+        });
+        let symlink_action = OperationAction::Symlink(FileOperation {
+            source: PathBuf::from("/repo/symlink-source"),
+            target: symlink_target.clone(),
+            mkdir: false,
+            conflict_policy: ConflictPolicy::Skip,
+        });
+
+        assert_eq!(copy_action.target(), copy_target.as_path());
+        assert_eq!(symlink_action.target(), symlink_target.as_path());
     }
 
     #[test]

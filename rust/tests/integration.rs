@@ -739,6 +739,81 @@ fn invoke_the_apply_command() {
 
 #[cfg(unix)]
 #[test]
+fn apply_directory_sources_as_symlinks() {
+    let home = TempDir::new().expect("temporary home directory should be created");
+    let repository = TempDir::new().expect("temporary repository should be created");
+
+    write_file(
+        &repository
+            .path()
+            .join("directory-source")
+            .join("nested.conf"),
+        "nested\n",
+    );
+
+    let config = format!(
+        concat!(
+            "version: 1\n",
+            "repository: \"{}\"\n",
+            "defaults:\n",
+            "  mkdir: true\n",
+            "sources:\n",
+            "  - from: \".\"\n",
+            "    to: \".config/gitenv-apply-dir\"\n",
+            "    configs:\n",
+            "      - file: directory-source\n",
+            "        as: linked-dir\n",
+            "        mode: symlink\n"
+        ),
+        repository.path().display()
+    );
+    let config_path = home
+        .path()
+        .join(".config")
+        .join("gitenv")
+        .join("config.yml");
+    write_file(&config_path, &config);
+
+    let output = gitenv_command_for_home(&home)
+        .arg("apply")
+        .output()
+        .expect("binary should run");
+
+    let linked_target = home
+        .path()
+        .join(".config")
+        .join("gitenv-apply-dir")
+        .join("linked-dir");
+    let linked_source = repository.path().join(".").join("directory-source");
+    let expected_stdout = replace_home_prefix_with_tilde(
+        format!(
+            "created symlink {} -> {}\n",
+            linked_target.display(),
+            linked_source.display(),
+        ),
+        home.path(),
+    );
+
+    assert!(output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), expected_stdout);
+    assert!(output.stderr.is_empty());
+
+    let home_snapshot =
+        snapshot_directory_contents(home.path()).expect("home directory should be readable");
+    assert_eq!(
+        home_snapshot,
+        vec![
+            directory(".config"),
+            directory(".config/gitenv"),
+            file(".config/gitenv/config.yml", &config),
+            directory(".config/gitenv-apply-dir"),
+            symlink_entry(".config/gitenv-apply-dir/linked-dir", &linked_source),
+        ]
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn show_info_output_when_config_uses_relative_include_paths() {
     let home = TempDir::new().expect("temporary home directory should be created");
     let repository = TempDir::new().expect("temporary repository should be created");

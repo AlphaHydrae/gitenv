@@ -68,25 +68,6 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 67: Directory symlink support
-
-Why this increment exists:
-
-- Real configurations symlink directories, not only files. The Rust source
-  availability check in `fs_adapter.rs` currently rejects directory sources,
-  causing those entries to be reported as unavailable during apply.
-
-Review target:
-
-- Extend `ensure_source_path_readable` in `fs_adapter.rs` to accept directory
-  sources when the action is a symlink operation.
-- Extend the apply executor in `actions.rs` to call `create_symlink` for
-  directory sources using the same conflict-policy semantics as file symlinks.
-- Add unit tests covering a directory source that is symlinked, skipped on
-  conflict, and overwritten with backup.
-- Add an integration test that places a directory in the repository and verifies
-  the symlink appears at the expected target location.
-
 ### Increment 68: Repository binding from env variable
 
 Why this increment exists:
@@ -98,12 +79,20 @@ Why this increment exists:
 
 Review target:
 
-- Support a `GITENV_REPO` environment variable (and a `--repo` CLI flag) that
-  overrides the `repository` field declared in the config at runtime.
-- Keep the YAML `repository` field functional as the declared default; the
-  env/flag override is additive and takes precedence when set.
+- Support a `GITENV_REPO` environment variable and a `--repo PATH` CLI flag
+  that can override the `repository` field declared in config at runtime.
+- Define and document deterministic precedence for the effective repository
+  root: `--repo` flag first, `GITENV_REPO` second, config `repository` last.
+- Keep the YAML `repository` field functional as the declared default when
+  neither runtime override is set.
+- Validate the selected runtime value (from flag/env/config) and fail with a
+  typed error when it is empty or whitespace-only.
 - Propagate the resolved repository root to intent and operation planning
   without changing the canonical data model.
-- Add unit tests verifying that the env variable takes precedence over the
-  config field and that the config value is used when the variable is absent.
+- Keep override scope limited to top-level repository root resolution (do not
+  change include/source env semantics in this increment).
+- Add unit tests verifying: flag beats env, env beats config, and config is
+  used when both runtime overrides are absent.
+- Add diagnostics/logging coverage that makes the selected precedence source
+  (`flag`, `env`, or `config`) observable at debug level.
 - Document the override in the Rust README.
