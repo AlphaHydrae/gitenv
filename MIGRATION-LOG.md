@@ -11,6 +11,12 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-26: Validate Rust README config examples with strict ID mapping - Add
+  explicit `readme-config-id` markers for every Rust README YAML config
+  example, enforce language tags for all README fenced code blocks, validate
+  one-to-one ID parity between README examples and expectations in
+  `rust/tests/readme_examples.rs`, and assert exact parsed `Config` equality
+  for each example.
 - 2026-05-26: Add selector include patterns with deterministic precedence -
   Extend select config and intent models with optional include glob patterns,
   apply include-before-exclude precedence during selector expansion, match

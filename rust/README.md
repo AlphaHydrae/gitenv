@@ -37,6 +37,8 @@ gitenv reads YAML configuration from one of the following locations:
 
 Start with a minimal configuration:
 
+<!-- readme-config-id: minimal -->
+
 ```yaml
 version: 1
 repository: "~/projects/env"
@@ -54,6 +56,8 @@ The sections below explain the main parts of that file and the common options.
 
 ### Repository
 
+<!-- readme-config-id: repository -->
+
 ```yaml
 version: 1
 repository: "~/projects/env"
@@ -66,6 +70,8 @@ sources:
 `repository` points to the root of the environment repository on disk.
 
 ### Defaults
+
+<!-- readme-config-id: defaults -->
 
 ```yaml
 version: 1
@@ -89,6 +95,8 @@ individual item overrides it.
 
 ### Rename targets
 
+<!-- readme-config-id: rename-targets -->
+
 ```yaml
 version: 1
 repository: "~/projects/env"
@@ -106,6 +114,8 @@ in the repository. The shorthand `- filename` form uses the same name for
 source and target.
 
 ### Sub-folders in the repository
+
+<!-- readme-config-id: sub-folders -->
 
 ```yaml
 version: 1
@@ -125,6 +135,8 @@ equivalent of grouping entries under a repository sub-directory.
 
 ### Change the destination
 
+<!-- readme-config-id: destination -->
+
 ```yaml
 version: 1
 repository: "~/projects/env"
@@ -139,6 +151,8 @@ sources:
 `to` is resolved relative to the home directory when it is not absolute.
 
 ### Copy files
+
+<!-- readme-config-id: copy-files -->
 
 ```yaml
 version: 1
@@ -156,6 +170,8 @@ sources:
 Set `mode: copy` when a target should be copied instead of symlinked.
 
 ### Select multiple files
+
+<!-- readme-config-id: select-multiple-files -->
 
 ```yaml
 version: 1
@@ -199,6 +215,8 @@ Add it to `exclude` if you want to make the rule explicit for a source.
 
 ### Overwrite and backup
 
+<!-- readme-config-id: overwrite-and-backup -->
+
 ```yaml
 version: 1
 repository: "~/projects/env"
@@ -219,6 +237,8 @@ the previous target as a sibling `.orig` path before replacement.
 ### Composition with includes
 
 Use `includes` to reference other config files for composition:
+
+<!-- readme-config-id: composition-with-includes -->
 
 ```yaml
 version: 1

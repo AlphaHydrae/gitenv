@@ -85,6 +85,10 @@ Business modules must not print directly to terminal output.
 - Treat coverage as a signal, not a substitute for assertion quality.
 - Include parity tests for equivalent library and CLI workflows.
 - Include logging tests for level filtering and expected diagnostic visibility.
+- Keep `rust/README.md` config examples aligned with
+  `rust/tests/readme_examples.rs`. That test enforces language tags on fenced
+  code blocks and one-to-one example ID parity; update
+  `expected_readme_configs` when README examples intentionally change.
 - **Prefer unit tests over integration tests.** Unit tests (in `#[cfg(test)] mod
 tests` within source files) are faster, more precise, and easier to maintain.
   Use integration tests in `tests/` only for behavior that genuinely requires
