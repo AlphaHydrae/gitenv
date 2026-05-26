@@ -393,18 +393,56 @@ implemented in a future increment.
 - [x] Do not copy files when the target file already matches (hash).
 - [x] Improve action tests by reading the whole temporary test directory state.
 
+## Config Parity Gaps
+
+These behaviors appear in real configurations and are not yet supported by the
+Rust implementation. Both are tracked as active increments in
+[`MIGRATION-INCREMENTS.md`](./MIGRATION-INCREMENTS.md).
+
+### Directory symlink support
+
+The Ruby DSL allows symlinking a directory, not only regular files. Some
+configurations use the same `symlink` call on directory sources to link
+versioned config directories into place. The Rust operation stage currently
+requires sources to be regular files or file symlinks; directory sources are
+rejected during source availability checks in `fs_adapter.rs`. Support requires
+changes to both the source readability check and the apply executor.
+
+### Repository binding from env or CLI flag
+
+The Ruby CLI exposes a `--repo PATH` flag and a `GITENV_REPO` environment
+variable that override the repository root at runtime without editing the config
+file. The Rust implementation has no equivalent; the repository path is always
+declared inside the YAML config. Users who rely on `--repo` or `GITENV_REPO` to
+switch between repositories will need to restructure their config or maintain
+multiple config files during migration.
+
 ## Future Work
 
-### Selector pattern includes (after glob excludes)
+### Include path composition from env-backed directories
 
-- Glob-pattern excludes are tracked as near-term migration increments and should
-  be treated as planned baseline selector behavior rather than open-ended
-  future exploration.
-- Add selector include patterns on top of glob excludes, with deterministic
-  precedence rules between selector scope (`type`), include patterns, and
-  exclude patterns.
-- Prefer simple glob-style patterns first; evaluate regexp support only if glob
-  matching proves insufficient for real migration cases.
+The Ruby DSL supports building an include path by joining an environment
+variable with a relative file name:
+
+```ruby
+private_dir = ENV['PRIVATE_ENV_DIR']
+include File.join(private_dir, '.gitenv.extra.rb')
+```
+
+The Rust `includes` field resolves an env-backed entry as the full path stored
+in the variable; it does not support composing the path by appending a static
+suffix to an env-provided directory:
+
+```yaml
+# Supported: env variable holds the full include path
+includes:
+  - env: GITENV_EXTRA_CONFIG
+# Not supported: env variable provides only the directory; file name is fixed
+```
+
+Users who need this pattern should set an additional environment variable to the
+full file path. Supporting composition would require a new include form and is
+not planned for the current migration scope.
 
 ### Recursive selector traversal limits
 

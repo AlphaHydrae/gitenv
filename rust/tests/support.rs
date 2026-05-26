@@ -2,11 +2,52 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use gitenv::{
+    OperationAction, OperationEntry, OperationPlan, PlannedOperationAction, SourceAvailability,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DirectoryEntry {
     Directory { path: PathBuf },
     File { path: PathBuf, contents: String },
     Symlink { path: PathBuf, target: PathBuf },
+}
+
+pub fn directory(path: &str) -> DirectoryEntry {
+    DirectoryEntry::Directory {
+        path: PathBuf::from(path),
+    }
+}
+
+pub fn file(path: &str, contents: &str) -> DirectoryEntry {
+    DirectoryEntry::File {
+        path: PathBuf::from(path),
+        contents: contents.to_string(),
+    }
+}
+
+#[cfg(unix)]
+pub fn symlink_entry(path: &str, target: &Path) -> DirectoryEntry {
+    DirectoryEntry::Symlink {
+        path: PathBuf::from(path),
+        target: target.to_path_buf(),
+    }
+}
+
+#[allow(dead_code)]
+pub fn available_operation_plan(actions: Vec<OperationAction>) -> OperationPlan {
+    OperationPlan {
+        entries: actions
+            .into_iter()
+            .map(|action| {
+                OperationEntry::Action(PlannedOperationAction {
+                    action,
+                    source_availability: SourceAvailability::Available,
+                    skip_reason: None,
+                })
+            })
+            .collect(),
+    }
 }
 
 pub fn snapshot_directory_contents(root: &Path) -> io::Result<Vec<DirectoryEntry>> {

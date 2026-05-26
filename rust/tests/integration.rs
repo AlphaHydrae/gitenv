@@ -4,29 +4,10 @@ use std::process::Command;
 use tempfile::TempDir;
 
 mod support;
-use support::{DirectoryEntry, snapshot_directory_contents};
+use support::{directory, file, snapshot_directory_contents, symlink_entry};
 
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
-
-fn directory(path: &str) -> DirectoryEntry {
-    DirectoryEntry::Directory { path: path.into() }
-}
-
-fn file(path: &str, contents: &str) -> DirectoryEntry {
-    DirectoryEntry::File {
-        path: path.into(),
-        contents: contents.to_string(),
-    }
-}
-
-#[cfg(unix)]
-fn symlink_entry(path: &str, target: &Path) -> DirectoryEntry {
-    DirectoryEntry::Symlink {
-        path: path.into(),
-        target: target.to_path_buf(),
-    }
-}
 
 fn gitenv_command_for_home(home: &TempDir) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_gitenv"));

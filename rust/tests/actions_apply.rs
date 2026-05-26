@@ -1,36 +1,16 @@
 use gitenv::{
     ApplyOperationOutcome, ApplyOperationReport, ConflictPolicy, FileOperation, OperationAction,
-    OperationEntry, OperationPlan, PlannedOperationAction, ProgramError, SourceAvailability,
-    apply_operation_plan,
+    ProgramError, apply_operation_plan,
 };
 mod support;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
-use std::path::{Path, PathBuf};
-use support::{DirectoryEntry, snapshot_directory_contents};
+use support::{
+    DirectoryEntry, available_operation_plan, directory, file, snapshot_directory_contents,
+    symlink_entry,
+};
 use tempfile::TempDir;
-
-fn directory(path: &str) -> DirectoryEntry {
-    DirectoryEntry::Directory {
-        path: PathBuf::from(path),
-    }
-}
-
-fn file(path: &str, contents: &str) -> DirectoryEntry {
-    DirectoryEntry::File {
-        path: PathBuf::from(path),
-        contents: contents.to_string(),
-    }
-}
-
-#[cfg(unix)]
-fn symlink_entry(path: &str, target: &Path) -> DirectoryEntry {
-    DirectoryEntry::Symlink {
-        path: PathBuf::from(path),
-        target: target.to_path_buf(),
-    }
-}
 
 fn assert_temp_directory_state(temp: &TempDir, expected: Vec<DirectoryEntry>) {
     let snapshot =
@@ -73,21 +53,6 @@ fn copy_operation_with_options(
         mkdir,
         conflict_policy,
     })
-}
-
-fn available_operation_plan(actions: Vec<OperationAction>) -> OperationPlan {
-    OperationPlan {
-        entries: actions
-            .into_iter()
-            .map(|action| {
-                OperationEntry::Action(PlannedOperationAction {
-                    action,
-                    source_availability: SourceAvailability::Available,
-                    skip_reason: None,
-                })
-            })
-            .collect(),
-    }
 }
 
 #[cfg(unix)]
