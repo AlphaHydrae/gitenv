@@ -68,24 +68,39 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 63: Make `select.exclude` use glob patterns
+### Increment 65: Add selector include patterns with deterministic precedence
 
 Why this increment exists:
 
-- Recursive selection is most useful with path-aware filtering. Moving from
-  exact-name exclusion to glob patterns enables practical recursive workflows
-  without adding includes yet.
+- Glob excludes are now available, but some recursive workflows require explicit
+  inclusion of a subset of files before exclusion rules are applied.
 
 Review target:
 
-- Replace exact-string exclusion checks with glob-pattern matching for
-  `select.exclude`.
-- Match recursive candidates using source-relative paths (for example
-  `**/*.tmp`, `private/**`, `**/.DS_Store`).
-- Keep deterministic behavior and define stable precedence between selector
-  type filtering and glob excludes.
-- Add unit tests for representative glob cases in both direct and recursive
-  modes.
-- Add one integration test validating glob excludes in recursive apply output.
-- Preferred library: `globset` (widely used in Rust tooling, deterministic,
-  supports `**` and efficient compiled pattern sets).
+- Extend select config and intent models with optional include glob patterns.
+- Define and implement stable precedence: selection type filtering first,
+  include patterns next (when present), then exclude patterns.
+- Match include/exclude patterns against source-relative paths in direct and
+  recursive modes.
+- Add representative unit coverage for include-only, include+exclude overlap,
+  and recursive nested-path cases.
+- Update Rust README selector documentation with include semantics and
+  precedence examples.
+
+### Increment 66: Enforce README examples and coverage threshold in CI
+
+Why this increment exists:
+
+- The migration plan still has open exit criteria for runnable Rust README
+  examples and hardening around coverage/CI checks.
+
+Review target:
+
+- Add an automated check that executes Rust-port README configuration examples
+  (or equivalent tested fixtures) so documented behavior stays runnable.
+- Add a CI coverage gate that fails when line coverage drops below an agreed
+  threshold for the Rust workspace.
+- Wire the new checks into the existing CI workflow and local helper wrappers
+  where appropriate.
+- Keep diagnostics concise and actionable when README-example or coverage checks
+  fail.

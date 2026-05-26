@@ -6,6 +6,7 @@ use crate::config::{
 };
 use crate::logging;
 use crate::path_resolution;
+use globset::{Glob, GlobMatcher};
 use log::Level;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -72,6 +73,50 @@ pub struct IntentFileAction {
     pub options: ResolvedOptions,
 }
 
+/// A selector exclude glob pattern that was parsed and validated during intent planning.
+#[derive(Debug, Clone)]
+pub struct ValidatedGlobPattern {
+    pattern: String,
+    matcher: GlobMatcher,
+}
+
+impl ValidatedGlobPattern {
+    pub(crate) fn parse_select_exclude(pattern: &str) -> Result<Self, ProgramError> {
+        Self::parse_for_field(pattern, "select.exclude")
+    }
+
+    pub(crate) fn parse_global_select_exclude(pattern: &str) -> Result<Self, ProgramError> {
+        Self::parse_for_field(pattern, "global select.exclude")
+    }
+
+    fn parse_for_field(pattern: &str, field_name: &str) -> Result<Self, ProgramError> {
+        let glob = Glob::new(pattern).map_err(|error| ProgramError::InvalidConfiguration {
+            message: format!("invalid {field_name} glob pattern '{pattern}' ({error})"),
+        })?;
+
+        Ok(Self {
+            pattern: pattern.to_string(),
+            matcher: glob.compile_matcher(),
+        })
+    }
+
+    pub(crate) fn is_match(&self, path: &Path) -> bool {
+        self.matcher.is_match(path)
+    }
+
+    pub fn pattern(&self) -> &str {
+        &self.pattern
+    }
+}
+
+impl PartialEq for ValidatedGlobPattern {
+    fn eq(&self, other: &Self) -> bool {
+        self.pattern == other.pattern
+    }
+}
+
+impl Eq for ValidatedGlobPattern {}
+
 /// Resolved action that operates on a glob-selected set of files.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IntentSelectAction {
@@ -81,8 +126,8 @@ pub struct IntentSelectAction {
     pub recursive: bool,
     /// Keeps recursive entries only when their target directory already exists.
     pub existing_directories_only: bool,
-    /// Filenames explicitly excluded from selection.
-    pub exclude: Vec<String>,
+    /// Validated glob patterns explicitly excluded from selection.
+    pub exclude: Vec<ValidatedGlobPattern>,
     pub options: ResolvedOptions,
 }
 
@@ -288,7 +333,7 @@ fn plan_sources_recursively(
                         selection_type: select_config.selection_type.clone(),
                         recursive: select_config.recursive,
                         existing_directories_only: select_config.existing_directories_only,
-                        exclude: select_config.exclude.clone(),
+                        exclude: validate_select_exclude_patterns(&select_config.exclude)?,
                         options,
                     }))
                 }
@@ -410,6 +455,15 @@ fn resolve_conflict_policy(overwrite: bool, backup_on_overwrite: bool) -> Confli
     }
 }
 
+fn validate_select_exclude_patterns(
+    patterns: &[String],
+) -> Result<Vec<ValidatedGlobPattern>, ProgramError> {
+    patterns
+        .iter()
+        .map(|pattern| ValidatedGlobPattern::parse_select_exclude(pattern))
+        .collect()
+}
+
 /// Resolves execution options for a single config item by merging item-level
 /// overrides on top of the inherited defaults and source-level destination.
 ///
@@ -451,7 +505,8 @@ fn resolve_item_options(
 mod tests {
     use super::{
         ConflictPolicy, IntentAction, IntentContext, IntentFileAction, IntentPlan,
-        IntentSelectAction, IntentSource, ResolvedOptions, derive_intent_plan,
+        IntentSelectAction, IntentSource, ResolvedOptions, ValidatedGlobPattern,
+        derive_intent_plan,
     };
     use crate::boundary::{ConfigReader, DirectoryProbe, EnvironmentReader};
     use crate::{
@@ -642,6 +697,16 @@ mod tests {
         )
     }
 
+    fn validated_excludes(patterns: &[&str]) -> Vec<ValidatedGlobPattern> {
+        patterns
+            .iter()
+            .map(|pattern| {
+                ValidatedGlobPattern::parse_select_exclude(pattern)
+                    .expect("test glob patterns should be valid")
+            })
+            .collect()
+    }
+
     // ---------------------------------------------------------------------------
     // Intent plan derivation
     // ---------------------------------------------------------------------------
@@ -751,7 +816,7 @@ mod tests {
                         selection_type: SelectionType::Dot,
                         recursive: false,
                         existing_directories_only: false,
-                        exclude: vec![".git".to_string()],
+                        exclude: validated_excludes(&[".git"]),
                         options: ResolvedOptions {
                             mode: ActionMode::Copy,
                             to: "~/dest".to_string(),
@@ -811,7 +876,7 @@ mod tests {
                     selection_type: SelectionType::NonDot,
                     recursive: false,
                     existing_directories_only: false,
-                    exclude: vec!["Makefile".to_string()],
+                    exclude: validated_excludes(&["Makefile"]),
                     options: ResolvedOptions {
                         mode: ActionMode::Copy,
                         to: "~/dest".to_string(),
@@ -870,7 +935,7 @@ mod tests {
                     selection_type: SelectionType::All,
                     recursive: false,
                     existing_directories_only: false,
-                    exclude: vec![".backup".to_string(), ".tmp".to_string()],
+                    exclude: validated_excludes(&[".backup", ".tmp"]),
                     options: ResolvedOptions {
                         mode: ActionMode::Symlink,
                         to: "~".to_string(),
@@ -923,7 +988,7 @@ mod tests {
                     selection_type: SelectionType::Dot,
                     recursive: true,
                     existing_directories_only: false,
-                    exclude: vec![".git".to_string()],
+                    exclude: validated_excludes(&[".git"]),
                     options: ResolvedOptions {
                         mode: ActionMode::Symlink,
                         to: "~".to_string(),
@@ -2782,7 +2847,7 @@ mod tests {
                     selection_type: SelectionType::Dot,
                     recursive: false,
                     existing_directories_only: false,
-                    exclude: vec![],
+                    exclude: validated_excludes(&[]),
                     options: ResolvedOptions {
                         mode: ActionMode::Copy,
                         to: "~/config".to_string(),
@@ -2792,6 +2857,44 @@ mod tests {
                 })],
             }])
         );
+    }
+
+    #[test]
+    fn reject_invalid_select_exclude_patterns_during_intent_planning() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::Select(SelectConfig {
+                    selection_type: SelectionType::Dot,
+                    recursive: false,
+                    existing_directories_only: false,
+                    exclude: vec!["[".to_string()],
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        let error = derive_intent_plan(
+            &root_loaded_config(&config),
+            &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
+        )
+        .expect_err("planning should reject invalid select.exclude glob patterns");
+
+        assert!(matches!(
+            error,
+            ProgramError::InvalidConfiguration { message }
+                if message.contains("invalid select.exclude glob pattern")
+        ));
     }
 
     #[test]

@@ -15,7 +15,7 @@ use crate::boundary::{
 };
 use crate::intent::{
     ConflictPolicy, IntentAction, IntentContext, IntentFileAction, IntentPlan, IntentSelectAction,
-    IntentSource, ResolvedOptions, derive_intent_plan,
+    IntentSource, ResolvedOptions, ValidatedGlobPattern, derive_intent_plan,
 };
 use crate::operation::{
     OperationContext, OperationEntry, PlannedOperationAction, derive_operation_plan,
@@ -76,6 +76,16 @@ fn available_operation_plan(actions: Vec<OperationAction>) -> OperationPlan {
             })
             .collect(),
     }
+}
+
+fn validated_excludes(patterns: &[&str]) -> Vec<ValidatedGlobPattern> {
+    patterns
+        .iter()
+        .map(|pattern| {
+            ValidatedGlobPattern::parse_select_exclude(pattern)
+                .expect("test glob patterns should be valid")
+        })
+        .collect()
 }
 
 // --- Helper -----------------------------------------------------------------
@@ -304,7 +314,7 @@ fn create_rich_intent_and_operation_plans() {
                         selection_type: SelectionType::Dot,
                         recursive: false,
                         existing_directories_only: false,
-                        exclude: vec![".gitignore".to_string()],
+                        exclude: validated_excludes(&[".gitignore"]),
                         options: ResolvedOptions {
                             mode: ActionMode::Symlink,
                             to: "dot-targets".to_string(),

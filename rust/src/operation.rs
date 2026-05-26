@@ -12,7 +12,7 @@
 use crate::config::SelectionType;
 use crate::{
     ActionMode, ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction,
-    ProgramError, ResolvedOptions, SourceAvailability, SourceUnreadableKind,
+    ProgramError, ResolvedOptions, SourceAvailability, SourceUnreadableKind, ValidatedGlobPattern,
     boundary::{
         SourceAvailabilityReader, SourcePathRequirement, SourceReadError, SourceReadErrorKind,
     },
@@ -136,7 +136,7 @@ pub(crate) struct OperationContext<'a> {
     /// Boundary adapter for probing direct source path availability.
     pub(crate) source_reader: &'a dyn SourceAvailabilityReader,
     /// Platform- or configuration-derived exclusions applied to every selector.
-    pub(crate) global_selection_excludes: Vec<String>,
+    pub(crate) global_selection_excludes: Vec<ValidatedGlobPattern>,
 }
 
 /// Internal planning function accepting a stage-owned context for
@@ -247,7 +247,7 @@ fn expand_select_action(
     source_root: &Path,
     select_action: &IntentSelectAction,
     home_directory: &Path,
-    global_selection_excludes: &[String],
+    global_selection_excludes: &[ValidatedGlobPattern],
     source_reader: &dyn SourceAvailabilityReader,
 ) -> Vec<OperationEntry> {
     let source_root_availability = source_availability_from_result(
@@ -260,6 +260,11 @@ fn expand_select_action(
             source_availability: source_root_availability,
         })];
     }
+
+    let mut excludes =
+        Vec::with_capacity(global_selection_excludes.len() + select_action.exclude.len());
+    excludes.extend_from_slice(global_selection_excludes);
+    excludes.extend_from_slice(&select_action.exclude);
 
     let max_depth = if select_action.recursive {
         None
@@ -281,7 +286,7 @@ fn expand_select_action(
     let selected_entries = entries
         .into_iter()
         .filter(|entry| {
-            should_include_selection_entry(entry, select_action, global_selection_excludes)
+            should_include_selection_entry(entry, select_action.selection_type.clone(), &excludes)
         })
         .collect::<Vec<_>>();
 
@@ -498,28 +503,26 @@ fn operation_action(
 
 fn should_include_selection_entry(
     entry: &str,
-    select_action: &IntentSelectAction,
-    global_selection_excludes: &[String],
+    selection_type: SelectionType,
+    excludes: &[ValidatedGlobPattern],
 ) -> bool {
     let entry_name = Path::new(entry)
         .file_name()
         .and_then(|segment| segment.to_str())
         .unwrap_or(entry);
     let has_dot_prefix = entry_name.starts_with('.');
-    let selected_by_type = match select_action.selection_type {
+    let selected_by_type = match selection_type {
         SelectionType::Dot => has_dot_prefix,
         SelectionType::NonDot => !has_dot_prefix,
         SelectionType::All => true,
     };
 
+    // Selection type decides the candidate set first; glob excludes further
+    // reduce that set.
     selected_by_type
-        && !global_selection_excludes
+        && !excludes
             .iter()
-            .any(|excluded| excluded == entry)
-        && !select_action
-            .exclude
-            .iter()
-            .any(|excluded| excluded == entry)
+            .any(|excluded| excluded.is_match(Path::new(entry)))
 }
 
 #[cfg(test)]
@@ -532,6 +535,7 @@ mod tests {
     use crate::{
         ActionMode, ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction,
         IntentSource, ResolvedOptions, SelectionType, SourceAvailability, SourceUnreadableKind,
+        ValidatedGlobPattern,
         boundary::{
             SourcePathRequirement, SourceReadError, test_doubles::FnSourceAvailabilityReader,
         },
@@ -590,7 +594,7 @@ mod tests {
             selection_type,
             recursive,
             existing_directories_only: false,
-            exclude: exclude.into_iter().map(str::to_string).collect(),
+            exclude: validated_patterns(exclude),
             options,
         })
     }
@@ -606,9 +610,19 @@ mod tests {
             selection_type,
             recursive,
             existing_directories_only,
-            exclude: exclude.into_iter().map(str::to_string).collect(),
+            exclude: validated_patterns(exclude),
             options,
         })
+    }
+
+    fn validated_patterns(patterns: Vec<&str>) -> Vec<ValidatedGlobPattern> {
+        patterns
+            .into_iter()
+            .map(|pattern| {
+                ValidatedGlobPattern::parse_select_exclude(pattern)
+                    .expect("test glob patterns should be valid")
+            })
+            .collect()
     }
 
     fn default_options() -> ResolvedOptions {
@@ -633,11 +647,9 @@ mod tests {
         OperationContext {
             home_directory,
             source_reader: &READABLE_SOURCE_READER,
-            global_selection_excludes: global_selection_excludes
-                .unwrap_or_default()
-                .into_iter()
-                .map(str::to_string)
-                .collect(),
+            global_selection_excludes: validated_patterns(
+                global_selection_excludes.unwrap_or_default(),
+            ),
         }
     }
 
@@ -927,6 +939,121 @@ mod tests {
                 expected_symlink(
                     repository.path().join("configs").join("tmux.conf"),
                     home.path().join("tmux.conf"),
+                ),
+            ])
+        );
+    }
+
+    #[test]
+    fn apply_glob_excludes_after_dot_selection_type_filtering() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::write(repository.path().join(".keep"), "dot file\n")
+            .expect("selected dotfile should be written");
+        fs::write(repository.path().join(".ignore.tmp"), "dot temp file\n")
+            .expect("excluded dotfile should be written");
+        fs::write(repository.path().join("notes.tmp"), "plain temp file\n")
+            .expect("non-dot file should be written");
+
+        let intent_plan = make_intent_plan(
+            repository.path(),
+            vec![make_intent_source(
+                ".",
+                vec![make_select_action(
+                    SelectionType::Dot,
+                    vec!["*.tmp"],
+                    default_options(),
+                )],
+            )],
+        );
+
+        let context = make_operation_context(home.path().to_path_buf(), None);
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
+            .expect("operation planning should apply dot-selection and excludes");
+
+        assert_eq!(
+            operation_plan,
+            expected_operation_plan(vec![expected_symlink(
+                repository.path().join(".keep"),
+                home.path().join(".keep"),
+            )])
+        );
+    }
+
+    #[test]
+    fn apply_recursive_glob_excludes_to_source_relative_paths() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::create_dir_all(
+            repository
+                .path()
+                .join("bundle")
+                .join("nested")
+                .join("private"),
+        )
+        .expect("nested source directories should be created");
+        fs::write(repository.path().join("bundle").join("keep.conf"), "keep\n")
+            .expect("top-level file should be written");
+        fs::write(
+            repository
+                .path()
+                .join("bundle")
+                .join("nested")
+                .join("cache.tmp"),
+            "cache\n",
+        )
+        .expect("nested temporary file should be written");
+        fs::write(
+            repository
+                .path()
+                .join("bundle")
+                .join("nested")
+                .join("private")
+                .join("secret.conf"),
+            "secret\n",
+        )
+        .expect("nested excluded file should be written");
+        fs::write(
+            repository
+                .path()
+                .join("bundle")
+                .join("nested")
+                .join("public.conf"),
+            "public\n",
+        )
+        .expect("nested selected file should be written");
+
+        let intent_plan = make_intent_plan(
+            repository.path(),
+            vec![make_intent_source(
+                "bundle",
+                vec![make_select_action_with_recursive(
+                    SelectionType::All,
+                    true,
+                    vec!["**/*.tmp", "nested/private/**"],
+                    default_options(),
+                )],
+            )],
+        );
+
+        let context = make_operation_context(home.path().to_path_buf(), None);
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
+            .expect("operation planning should apply recursive glob excludes");
+
+        assert_eq!(
+            operation_plan,
+            expected_operation_plan(vec![
+                expected_symlink(
+                    repository.path().join("bundle").join("keep.conf"),
+                    home.path().join("keep.conf"),
+                ),
+                expected_symlink(
+                    repository
+                        .path()
+                        .join("bundle")
+                        .join("nested")
+                        .join("public.conf"),
+                    home.path().join("nested").join("public.conf"),
                 ),
             ])
         );
@@ -1695,7 +1822,7 @@ mod tests {
                 )],
             )],
         );
-        let context = make_operation_context(home.path().to_path_buf(), Some(vec![".DS_Store"]));
+        let context = make_operation_context(home.path().to_path_buf(), Some(vec!["**/.DS_Store"]));
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should honor global excludes");
 
@@ -1730,8 +1857,10 @@ mod tests {
                 )],
             )],
         );
-        let context =
-            make_operation_context(home.path().to_path_buf(), Some(vec![".DS_Store", ".git"]));
+        let context = make_operation_context(
+            home.path().to_path_buf(),
+            Some(vec!["**/.DS_Store", "**/.git"]),
+        );
         let operation_plan = derive_operation_plan(&intent_plan, &context)
             .expect("operation planning should honor multiple global excludes");
 

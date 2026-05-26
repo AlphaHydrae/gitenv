@@ -27,7 +27,7 @@ pub use config::{
 };
 pub use intent::{
     ConflictPolicy, IntentAction, IntentFileAction, IntentPlan, IntentSelectAction, IntentSource,
-    ResolvedOptions,
+    ResolvedOptions, ValidatedGlobPattern,
 };
 pub use operation::{
     FileOperation, OperationAction, OperationEntry, OperationPlan, OperationPlanningIssue,
@@ -163,7 +163,7 @@ pub fn derive_operation_plan(
     let context = operation::OperationContext {
         home_directory: home_directory.to_path_buf(),
         source_reader: &boundary,
-        global_selection_excludes: default_global_selection_excludes(std::env::consts::OS),
+        global_selection_excludes: default_global_selection_excludes(std::env::consts::OS)?,
     };
     operation::derive_operation_plan(intent_plan, &context)
 }
@@ -229,14 +229,19 @@ fn default_config_path_from_env(
         .join(DEFAULT_CONFIG_FILE_NAME)
 }
 
-fn default_global_selection_excludes(os_name: &str) -> Vec<String> {
-    let mut excludes = Vec::new();
+fn default_global_selection_excludes(
+    os_name: &str,
+) -> Result<Vec<ValidatedGlobPattern>, ProgramError> {
+    let mut patterns = Vec::new();
 
     if os_name == "macos" {
-        excludes.push(".DS_Store".to_string());
+        patterns.push("**/.DS_Store");
     }
 
-    excludes
+    patterns
+        .into_iter()
+        .map(ValidatedGlobPattern::parse_global_select_exclude)
+        .collect()
 }
 
 #[cfg(test)]
@@ -362,15 +367,21 @@ mod tests {
 
     #[test]
     fn include_ds_store_in_global_selection_excludes_for_macos() {
-        let excludes = default_global_selection_excludes("macos");
+        let excludes = default_global_selection_excludes("macos")
+            .expect("macOS global selector excludes should parse");
+        let patterns = excludes
+            .iter()
+            .map(ValidatedGlobPattern::pattern)
+            .collect::<Vec<_>>();
 
-        assert_eq!(excludes, vec![".DS_Store".to_string()]);
+        assert_eq!(patterns, vec!["**/.DS_Store"]);
     }
 
     #[test]
     fn keep_global_selection_excludes_empty_for_non_macos_os_names() {
-        let excludes = default_global_selection_excludes("linux");
+        let excludes = default_global_selection_excludes("linux")
+            .expect("non-macOS global selector excludes should parse");
 
-        assert_eq!(excludes, Vec::<String>::new());
+        assert_eq!(excludes, Vec::<ValidatedGlobPattern>::new());
     }
 }

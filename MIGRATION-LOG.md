@@ -11,6 +11,18 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-26: Move selector glob parsing to intent planning - Add a validated
+  selector exclude pattern representation in intent planning, validate
+  source-level `select.exclude` patterns during intent derivation, pre-validate
+  global selector excludes in `lib.rs` before operation planning context
+  wiring, remove operation-stage glob parsing, and add intent-stage invalid
+  pattern diagnostics coverage.
+- 2026-05-26: Make select.exclude use glob patterns - Replace exact-name
+  selector excludes with source-relative glob matching, apply selector type
+  filtering before exclude matching, add direct and recursive glob coverage in
+  operation planner tests, add invalid glob validation coverage, extend
+  recursive apply integration coverage for glob excludes, and document glob
+  semantics and precedence in the Rust README.
 - 2026-05-14: Add existing-directories-only recursive select policy - Extend
   select config and intent models with `existing_directories_only`, keep
   recursive selector entries visible when their target directory chain is

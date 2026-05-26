@@ -850,6 +850,23 @@ fn apply_recursive_select_entries_into_nested_targets() {
         &repository.path().join("bundle").join("z-last.conf"),
         "last\n",
     );
+    write_file(
+        &repository
+            .path()
+            .join("bundle")
+            .join("nested")
+            .join("cache.tmp"),
+        "cache\n",
+    );
+    write_file(
+        &repository
+            .path()
+            .join("bundle")
+            .join("nested")
+            .join("private")
+            .join("ignored.conf"),
+        "ignored\n",
+    );
 
     let config = format!(
         concat!(
@@ -863,7 +880,10 @@ fn apply_recursive_select_entries_into_nested_targets() {
             "    configs:\n",
             "      - select:\n",
             "          type: all\n",
-            "          recursive: true\n"
+            "          recursive: true\n",
+            "          exclude:\n",
+            "            - \"**/*.tmp\"\n",
+            "            - \"nested/private/**\"\n",
         ),
         repository.path().display()
     );

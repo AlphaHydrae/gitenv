@@ -167,7 +167,8 @@ sources:
       - select:
           type: dot
           exclude:
-            - .ignored
+            - "**/*.tmp"
+            - "private/**"
 ```
 
 `select` expands a set of files from one source directory. Set `type` to:
@@ -175,6 +176,15 @@ sources:
 - `dot` for names that start with `.`
 - `non-dot` for names that do not start with `.`
 - `all` for both dot and non-dot names
+
+`exclude` uses glob patterns matched against source-relative paths. For example:
+
+- `"**/*.tmp"` excludes temporary files anywhere in recursive selection
+- `"private/**"` excludes everything under `private/` from the source root
+- `"**/.DS_Store"` excludes Finder metadata files in any directory
+
+Selection precedence is deterministic: `type` selects candidates first, then
+`exclude` removes matching candidates.
 
 On macOS, `.DS_Store` is excluded automatically during selector expansion.
 Add it to `exclude` if you want to make the rule explicit for a source.
