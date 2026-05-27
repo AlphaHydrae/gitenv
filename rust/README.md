@@ -69,6 +69,18 @@ sources:
 
 `repository` points to the root of the environment repository on disk.
 
+At runtime, `repository` can be overridden without editing YAML:
+
+1. `--repo PATH`
+2. `GITENV_REPO`
+
+Examples:
+
+```sh
+gitenv --repo ~/projects/other-env
+GITENV_REPO=~/projects/other-env gitenv
+```
+
 ### Defaults
 
 <!-- readme-config-id: defaults -->

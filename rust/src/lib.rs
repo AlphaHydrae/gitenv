@@ -41,6 +41,7 @@ pub use status::{
 use std::path::{Path, PathBuf};
 
 use crate::boundary::EnvironmentReader;
+use clap::parser::ValueSource;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProgramOutput {
@@ -50,6 +51,23 @@ pub struct ProgramOutput {
 const DEFAULT_CONFIG_HOME_SUFFIX: &str = ".config";
 const DEFAULT_CONFIG_DIRECTORY_NAME: &str = "gitenv";
 const DEFAULT_CONFIG_FILE_NAME: &str = "config.yml";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RepositorySource {
+    Flag,
+    Env,
+    Config,
+}
+
+impl RepositorySource {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Flag => "flag",
+            Self::Env => "env",
+            Self::Config => "config",
+        }
+    }
+}
 
 /// Parse CLI arguments from the provided iterator and run the selected command.
 ///
@@ -62,8 +80,7 @@ where
     I: IntoIterator<Item = T>,
     T: Into<std::ffi::OsString> + Clone,
 {
-    use clap::Parser;
-    let cli = Cli::parse_from(args);
+    let cli = cli::parse_with_value_sources(args);
     run_cli(cli)
 }
 
@@ -77,9 +94,12 @@ pub fn run_cli(cli: Cli) -> Result<ProgramOutput, ProgramError> {
     let Cli {
         command,
         config_path,
+        repo_path,
+        repo_value_source,
         log_level,
         color,
     } = cli;
+    let repository_source = repository_source_from_value_source(repo_value_source);
 
     let runtime_config = RuntimeConfig::new(
         color,
@@ -91,8 +111,19 @@ pub fn run_cli(cli: Cli) -> Result<ProgramOutput, ProgramError> {
 
     let boundary = boundary::RealBoundary;
     let home_directory = fs_adapter::resolve_home_directory(&|name| boundary.get_env_var(name))?;
-    let config_path = determine_config_path(config_path.as_deref(), &home_directory, &boundary)?;
-    let loaded_config = load_config(&config_path)?;
+    let config_path = determine_config_path(config_path.as_deref(), &home_directory, &boundary);
+    let mut loaded_config = load_config(&config_path)?;
+    let (repository, repository_source) = resolve_runtime_repository_root(
+        repo_path.as_deref(),
+        repository_source,
+        &loaded_config.config.repository,
+    )?;
+    loaded_config.config.repository = repository;
+    log::debug!(
+        "resolved repository root from {} precedence source ({})",
+        repository_source.label(),
+        loaded_config.config.repository,
+    );
 
     match command {
         Some(Command::Apply) => run_apply(loaded_config, home_directory, runtime_config),
@@ -163,7 +194,7 @@ pub fn derive_operation_plan(
     let context = operation::OperationContext {
         home_directory: home_directory.to_path_buf(),
         source_reader: &boundary,
-        global_selection_excludes: default_global_selection_excludes(std::env::consts::OS)?,
+        global_selection_excludes: default_global_selection_excludes(std::env::consts::OS),
     };
     operation::derive_operation_plan(intent_plan, &context)
 }
@@ -191,10 +222,10 @@ pub fn apply_operation_plan(
 fn determine_config_path(
     explicit_config_path: Option<&Path>,
     home_directory: &Path,
-    boundary: &impl EnvironmentReader,
-) -> Result<PathBuf, ProgramError> {
+    boundary: &dyn EnvironmentReader,
+) -> PathBuf {
     if let Some(path) = explicit_config_path {
-        return Ok(path.to_path_buf());
+        return path.to_path_buf();
     }
 
     default_config_path(home_directory, boundary)
@@ -205,15 +236,9 @@ fn determine_config_path(
 /// Priority:
 /// 1. XDG_CONFIG_HOME/gitenv/config.yml if XDG_CONFIG_HOME is set and absolute
 /// 2. $HOME/.config/gitenv/config.yml as default
-fn default_config_path(
-    home_directory: &Path,
-    boundary: &impl EnvironmentReader,
-) -> Result<PathBuf, ProgramError> {
+fn default_config_path(home_directory: &Path, boundary: &dyn EnvironmentReader) -> PathBuf {
     let xdg_config_home = boundary.get_env_var("XDG_CONFIG_HOME").map(PathBuf::from);
-    Ok(default_config_path_from_env(
-        home_directory,
-        xdg_config_home,
-    ))
+    default_config_path_from_env(home_directory, xdg_config_home)
 }
 
 fn default_config_path_from_env(
@@ -229,19 +254,52 @@ fn default_config_path_from_env(
         .join(DEFAULT_CONFIG_FILE_NAME)
 }
 
-fn default_global_selection_excludes(
-    os_name: &str,
-) -> Result<Vec<ValidatedGlobPattern>, ProgramError> {
+fn default_global_selection_excludes(os_name: &str) -> Vec<ValidatedGlobPattern> {
     let mut patterns = Vec::new();
 
-    if os_name == "macos" {
-        patterns.push("**/.DS_Store");
+    if os_name == "macos"
+        && let Ok(pattern) = ValidatedGlobPattern::parse_global_select_exclude("**/.DS_Store")
+    {
+        patterns.push(pattern);
     }
 
     patterns
-        .into_iter()
-        .map(ValidatedGlobPattern::parse_global_select_exclude)
-        .collect()
+}
+
+fn resolve_runtime_repository_root(
+    explicit_repo_path: Option<&Path>,
+    explicit_repo_source: Option<RepositorySource>,
+    config_repository_path: &str,
+) -> Result<(String, RepositorySource), ProgramError> {
+    let (repository, source) = if let Some(path) = explicit_repo_path {
+        (
+            path.to_string_lossy().into_owned(),
+            explicit_repo_source.unwrap_or(RepositorySource::Flag),
+        )
+    } else {
+        (config_repository_path.to_string(), RepositorySource::Config)
+    };
+
+    if repository.trim().is_empty() {
+        return Err(ProgramError::InvalidConfiguration {
+            message: format!(
+                "repository root selected from {} precedence source cannot be empty",
+                source.label()
+            ),
+        });
+    }
+
+    Ok((repository, source))
+}
+
+fn repository_source_from_value_source(
+    value_source: Option<ValueSource>,
+) -> Option<RepositorySource> {
+    match value_source {
+        Some(ValueSource::CommandLine) => Some(RepositorySource::Flag),
+        Some(ValueSource::EnvVariable) => Some(RepositorySource::Env),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -249,7 +307,9 @@ mod tests {
     use super::*;
     use crate::boundary::test_doubles::MapEnvReader;
     use clap::Parser;
+    use std::fs;
     use std::path::{Path, PathBuf};
+    use tempfile::TempDir;
 
     #[test]
     fn resolve_default_config_path_from_xdg_config_home() {
@@ -287,8 +347,7 @@ mod tests {
             Some(Path::new("/tmp/custom-config.yml")),
             Path::new("/home/alex"),
             &boundary,
-        )
-        .expect("explicit config path should short-circuit default path resolution");
+        );
 
         assert_eq!(path, PathBuf::from("/tmp/custom-config.yml"));
     }
@@ -300,8 +359,7 @@ mod tests {
             ("XDG_CONFIG_HOME", "/custom/config"),
         ]);
 
-        let path = default_config_path(Path::new("/home/alex"), &boundary)
-            .expect("default path should ignore GITENV_CONFIG and use XDG_CONFIG_HOME");
+        let path = default_config_path(Path::new("/home/alex"), &boundary);
 
         assert_eq!(path, PathBuf::from("/custom/config/gitenv/config.yml"));
     }
@@ -310,8 +368,7 @@ mod tests {
     fn resolve_default_config_path_with_xdg_config_home_via_boundary() {
         let boundary = MapEnvReader::from_pairs([("XDG_CONFIG_HOME", "/custom/config")]);
 
-        let path = default_config_path(Path::new("/home/alex"), &boundary)
-            .expect("XDG_CONFIG_HOME should be used when set");
+        let path = default_config_path(Path::new("/home/alex"), &boundary);
 
         assert_eq!(path, PathBuf::from("/custom/config/gitenv/config.yml"));
     }
@@ -320,8 +377,7 @@ mod tests {
     fn resolve_default_config_path_without_overrides() {
         let boundary = MapEnvReader::empty();
 
-        let path = default_config_path(Path::new("/home/alex"), &boundary)
-            .expect("default path should be resolved from home directory");
+        let path = default_config_path(Path::new("/home/alex"), &boundary);
 
         assert_eq!(path, PathBuf::from("/home/alex/.config/gitenv/config.yml"));
     }
@@ -367,8 +423,7 @@ mod tests {
 
     #[test]
     fn include_ds_store_in_global_selection_excludes_for_macos() {
-        let excludes = default_global_selection_excludes("macos")
-            .expect("macOS global selector excludes should parse");
+        let excludes = default_global_selection_excludes("macos");
         let patterns = excludes
             .iter()
             .map(ValidatedGlobPattern::pattern)
@@ -379,9 +434,219 @@ mod tests {
 
     #[test]
     fn keep_global_selection_excludes_empty_for_non_macos_os_names() {
-        let excludes = default_global_selection_excludes("linux")
-            .expect("non-macOS global selector excludes should parse");
+        let excludes = default_global_selection_excludes("linux");
 
         assert_eq!(excludes, Vec::<ValidatedGlobPattern>::new());
+    }
+
+    #[test]
+    fn use_flag_repository_when_flag_and_env_are_both_set() {
+        let (repository, source) = resolve_runtime_repository_root(
+            Some(Path::new("/tmp/flag-repo")),
+            Some(RepositorySource::Flag),
+            "/tmp/config-repo",
+        )
+        .expect("flag repository should win when both runtime overrides are set");
+
+        assert_eq!(repository, "/tmp/flag-repo");
+        assert_eq!(source, RepositorySource::Flag);
+        assert_eq!(source.label(), "flag");
+    }
+
+    #[test]
+    fn use_env_repository_when_only_env_override_is_set() {
+        let (repository, source) = resolve_runtime_repository_root(
+            Some(Path::new("/tmp/env-repo")),
+            Some(RepositorySource::Env),
+            "/tmp/config-repo",
+        )
+        .expect("env repository should win when the flag override is absent");
+
+        assert_eq!(repository, "/tmp/env-repo");
+        assert_eq!(source, RepositorySource::Env);
+    }
+
+    #[test]
+    fn use_config_repository_when_runtime_overrides_are_absent() {
+        let (repository, source) = resolve_runtime_repository_root(None, None, "/tmp/config-repo")
+            .expect("config repository should be used when runtime overrides are absent");
+
+        assert_eq!(repository, "/tmp/config-repo");
+        assert_eq!(source, RepositorySource::Config);
+    }
+
+    #[test]
+    fn cannot_use_whitespace_only_runtime_repository_paths() {
+        let result = resolve_runtime_repository_root(
+            Some(Path::new("   \t")),
+            Some(RepositorySource::Env),
+            "/tmp/config-repo",
+        );
+
+        assert!(matches!(
+            result,
+            Err(ProgramError::InvalidConfiguration { message })
+                if message == "repository root selected from env precedence source cannot be empty"
+        ));
+    }
+
+    #[test]
+    fn cannot_run_with_a_whitespace_only_flag_repository_override() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::write(repository.path().join(".gitconfig"), "[user]\n")
+            .expect("source file should be written");
+
+        let config = format!(
+            concat!(
+                "version: 1\n",
+                "repository: \"{}\"\n",
+                "sources:\n",
+                "  - from: \".\"\n",
+                "    configs:\n",
+                "      - file: .gitconfig\n"
+            ),
+            repository.path().display()
+        );
+        let config_path = home.path().join("config.yml");
+        fs::write(&config_path, config).expect("config file should be written");
+
+        let cli = Cli::parse_from([
+            "gitenv",
+            "--config",
+            config_path
+                .to_str()
+                .expect("test config path should be valid UTF-8"),
+            "--repo",
+            "   ",
+        ]);
+
+        let result = run_cli(cli);
+
+        assert!(matches!(
+            result,
+            Err(ProgramError::InvalidConfiguration { message })
+                if message == "repository root selected from flag precedence source cannot be empty"
+        ));
+    }
+
+    #[test]
+    fn cannot_run_with_a_whitespace_only_env_repository_override() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::write(repository.path().join(".gitconfig"), "[user]\n")
+            .expect("source file should be written");
+
+        let config = format!(
+            concat!(
+                "version: 1\n",
+                "repository: \"{}\"\n",
+                "sources:\n",
+                "  - from: \".\"\n",
+                "    configs:\n",
+                "      - file: .gitconfig\n"
+            ),
+            repository.path().display()
+        );
+        let config_path = home.path().join("config.yml");
+        fs::write(&config_path, config).expect("config file should be written");
+
+        let cli = Cli {
+            command: None,
+            config_path: Some(config_path),
+            repo_path: Some(PathBuf::from("   ")),
+            repo_value_source: Some(ValueSource::EnvVariable),
+            log_level: LogLevel::Warn,
+            color: ColorMode::Auto,
+        };
+
+        let result = run_cli(cli);
+
+        assert!(matches!(
+            result,
+            Err(ProgramError::InvalidConfiguration { message })
+                if message == "repository root selected from env precedence source cannot be empty"
+        ));
+    }
+
+    #[test]
+    fn run_cli_accepts_valid_repository_override_without_explicit_value_source() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::write(repository.path().join(".gitconfig"), "[user]\n")
+            .expect("source file should be written");
+
+        let config = concat!(
+            "version: 1\n",
+            "repository: \"/path/that/does/not/exist\"\n",
+            "sources:\n",
+            "  - from: \".\"\n",
+            "    configs:\n",
+            "      - file: .gitconfig\n"
+        );
+        let config_path = home.path().join("config.yml");
+        fs::write(&config_path, config).expect("config file should be written");
+
+        let cli = Cli {
+            command: None,
+            config_path: Some(config_path),
+            repo_path: Some(repository.path().to_path_buf()),
+            repo_value_source: None,
+            log_level: LogLevel::Warn,
+            color: ColorMode::Auto,
+        };
+
+        let result = run_cli(cli);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn run_cli_accepts_valid_repository_override_from_env_value_source() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+        fs::write(repository.path().join(".gitconfig"), "[user]\n")
+            .expect("source file should be written");
+
+        let config = concat!(
+            "version: 1\n",
+            "repository: \"/path/that/does/not/exist\"\n",
+            "sources:\n",
+            "  - from: \".\"\n",
+            "    configs:\n",
+            "      - file: .gitconfig\n"
+        );
+        let config_path = home.path().join("config.yml");
+        fs::write(&config_path, config).expect("config file should be written");
+
+        let cli = Cli {
+            command: None,
+            config_path: Some(config_path),
+            repo_path: Some(repository.path().to_path_buf()),
+            repo_value_source: Some(ValueSource::EnvVariable),
+            log_level: LogLevel::Warn,
+            color: ColorMode::Auto,
+        };
+
+        let result = run_cli(cli);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn map_clap_value_sources_to_repository_sources() {
+        assert_eq!(
+            repository_source_from_value_source(Some(ValueSource::CommandLine)),
+            Some(RepositorySource::Flag)
+        );
+        assert_eq!(
+            repository_source_from_value_source(Some(ValueSource::EnvVariable)),
+            Some(RepositorySource::Env)
+        );
+        assert_eq!(
+            repository_source_from_value_source(Some(ValueSource::DefaultValue)),
+            None
+        );
+        assert_eq!(repository_source_from_value_source(None), None);
     }
 }

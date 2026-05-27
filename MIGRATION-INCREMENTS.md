@@ -68,31 +68,21 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 68: Repository binding from env variable
+### Increment 69: Recover coverage after repository override delivery
 
 Why this increment exists:
 
-- The Ruby CLI supports overriding the repository root at runtime via
-  `GITENV_REPO` env and `--repo PATH` flag. The Rust implementation requires
-  the repository path to be declared in YAML. Users migrating from the Ruby
-  tool lose this runtime override workflow.
+- Increment 68 ships the repository runtime override behavior, and the project
+  owner approves stopping with a temporary line-coverage gap (99.91 vs 99.93
+  baseline).
 
 Review target:
 
-- Support a `GITENV_REPO` environment variable and a `--repo PATH` CLI flag
-  that can override the `repository` field declared in config at runtime.
-- Define and document deterministic precedence for the effective repository
-  root: `--repo` flag first, `GITENV_REPO` second, config `repository` last.
-- Keep the YAML `repository` field functional as the declared default when
-  neither runtime override is set.
-- Validate the selected runtime value (from flag/env/config) and fail with a
-  typed error when it is empty or whitespace-only.
-- Propagate the resolved repository root to intent and operation planning
-  without changing the canonical data model.
-- Keep override scope limited to top-level repository root resolution (do not
-  change include/source env semantics in this increment).
-- Add unit tests verifying: flag beats env, env beats config, and config is
-  used when both runtime overrides are absent.
-- Add diagnostics/logging coverage that makes the selected precedence source
-  (`flag`, `env`, or `config`) observable at debug level.
-- Document the override in the Rust README.
+- Restore total line coverage to at least the pre-increment baseline (99.93)
+  without changing delivered repository-override behavior.
+- Prefer unit tests over integration tests while closing the remaining
+  uncovered paths in `rust/src/lib.rs`.
+- Keep parsing concerns in `rust/src/cli.rs` and composition-root wiring in
+  `rust/src/lib.rs`.
+- Run required wrappers (`tests`, `lint`, `build`, `format`, `coverage`, and
+  `lint-md` when docs change) and report fresh timestamp evidence.

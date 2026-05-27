@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum, parser::ValueSource};
 use std::path::{Path, PathBuf};
 
 use crate::{
@@ -80,6 +80,19 @@ pub struct Cli {
         value_name = "PATH"
     )]
     pub config_path: Option<PathBuf>,
+    /// Repository root override.
+    ///
+    /// CLI flag takes precedence over the `GITENV_REPO` environment variable.
+    #[arg(
+        short = 'r',
+        long = "repo",
+        env = "GITENV_REPO",
+        id = "repo",
+        value_name = "PATH"
+    )]
+    pub repo_path: Option<PathBuf>,
+    #[arg(skip = None)]
+    pub(crate) repo_value_source: Option<ValueSource>,
     /// Set the diagnostic log level. Log messages are written to stderr.
     #[arg(long, default_value = "warn", value_enum)]
     pub log_level: LogLevel,
@@ -96,6 +109,21 @@ pub enum Command {
     Info,
     /// Apply all configured operations to the system.
     Apply,
+}
+
+pub(crate) fn parse_with_value_sources<I, T>(args: I) -> Cli
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+{
+    use clap::CommandFactory;
+
+    let parsed_args = args.into_iter().map(Into::into).collect::<Vec<_>>();
+    let command = Cli::command();
+    let matches = command.get_matches_from(parsed_args.clone());
+    let mut cli = Cli::parse_from(parsed_args);
+    cli.repo_value_source = matches.value_source("repo");
+    cli
 }
 
 pub(crate) fn render_default_inspection_output(
@@ -929,6 +957,36 @@ mod tests {
     fn parse_config_path_from_the_short_config_flag() {
         let cli = Cli::parse_from(["gitenv", "-c", "/tmp/config.yml"]);
         assert_eq!(cli.config_path, Some(PathBuf::from("/tmp/config.yml")));
+    }
+
+    #[test]
+    fn parse_repository_path_from_the_repo_flag() {
+        let cli = Cli::parse_from(["gitenv", "--repo", "/tmp/repository"]);
+        assert_eq!(cli.repo_path, Some(PathBuf::from("/tmp/repository")));
+    }
+
+    #[test]
+    fn parse_repository_path_from_the_short_repo_flag() {
+        let cli = Cli::parse_from(["gitenv", "-r", "/tmp/repository"]);
+        assert_eq!(cli.repo_path, Some(PathBuf::from("/tmp/repository")));
+    }
+
+    #[test]
+    fn parse_with_value_sources_tracks_command_line_repository_source() {
+        let cli = super::parse_with_value_sources(["gitenv", "--repo", "/tmp/repository"]);
+
+        assert_eq!(cli.repo_path, Some(PathBuf::from("/tmp/repository")));
+        assert_eq!(
+            cli.repo_value_source,
+            Some(clap::parser::ValueSource::CommandLine)
+        );
+    }
+
+    #[test]
+    fn parse_with_value_sources_leaves_repository_source_empty_when_unset() {
+        let cli = super::parse_with_value_sources(["gitenv"]);
+
+        assert_eq!(cli.repo_path.is_some(), cli.repo_value_source.is_some());
     }
 
     #[test]

@@ -14,7 +14,8 @@ fn gitenv_command_for_home(home: &TempDir) -> Command {
     command
         .env("HOME", home.path())
         .env_remove("XDG_CONFIG_HOME")
-        .env_remove("GITENV_CONFIG");
+        .env_remove("GITENV_CONFIG")
+        .env_remove("GITENV_REPO");
     command
 }
 

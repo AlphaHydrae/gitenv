@@ -11,6 +11,13 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-27: Add repository runtime override precedence from CLI and env - Add
+  clap-backed `--repo`/`GITENV_REPO` parsing with value-source attribution,
+  resolve repository precedence (`flag` > `env` > config) before planning,
+  validate whitespace-only selected repository roots with typed errors,
+  preserve composition-root and CLI-boundary separation by moving parsing
+  helper logic into `cli.rs`, extend unit coverage for precedence/value-source
+  behavior, and document repository override precedence in the Rust README.
 - 2026-05-26: Add directory symlink source support in planning and apply - Add
   a dedicated symlink source readability requirement so operation planning
   accepts directory sources for symlink actions while preserving copy-file
