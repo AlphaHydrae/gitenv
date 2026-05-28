@@ -1429,6 +1429,39 @@ mod tests {
     }
 
     #[test]
+    fn list_directory_children_reports_files_and_directories() {
+        let root = TempDir::new().expect("temporary root should be created");
+        let directory = root.path().join("configs");
+        fs::create_dir_all(directory.join("nested")).expect("nested directory should be created");
+        fs::write(directory.join("tool.conf"), "tool\n").expect("file should be written");
+
+        let mut children = super::list_directory_children(&directory)
+            .expect("directory children should be listed successfully");
+        children.sort_by(|left, right| left.0.cmp(&right.0));
+
+        assert_eq!(
+            children,
+            vec![
+                (
+                    "nested".to_string(),
+                    super::RecursiveDirectoryEntryKind::Directory,
+                ),
+                (
+                    "tool.conf".to_string(),
+                    super::RecursiveDirectoryEntryKind::File,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn decrement_depth_saturates_at_zero() {
+        assert_eq!(super::decrement_depth(None), None);
+        assert_eq!(super::decrement_depth(Some(2)), Some(1));
+        assert_eq!(super::decrement_depth(Some(0)), Some(0));
+    }
+
+    #[test]
     fn preserve_directory_entry_type_errors_as_source_read_errors() {
         let directory = PathBuf::from("/repo-root/configs");
 
@@ -2084,6 +2117,44 @@ mod tests {
                 repository.path().join(".zshrc"),
                 home.path().join(".zshrc"),
             )])
+        );
+    }
+
+    #[test]
+    fn derive_operation_plan_expands_all_selection_type_into_multiple_actions() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = TempDir::new().expect("temporary repository should be created");
+
+        // Create multiple files in the repository
+        fs::write(repository.path().join(".zshrc"), "export TEST=1\n")
+            .expect("first file should be written");
+        fs::write(repository.path().join("bashrc"), "export TEST=2\n")
+            .expect("second file should be written");
+        fs::write(repository.path().join(".gitconfig"), "[user]\n")
+            .expect("third file should be written");
+
+        let options = default_options();
+        let intent_plan = make_intent_plan(
+            repository.path(),
+            vec![make_intent_source(
+                ".",
+                vec![make_select_action(SelectionType::All, vec![], options)],
+            )],
+        );
+        let context = make_operation_context(home.path().to_path_buf(), None);
+        let operation_plan = derive_operation_plan(&intent_plan, &context)
+            .expect("all selection should expand all files in directory");
+
+        assert_eq!(
+            operation_plan,
+            expected_operation_plan(vec![
+                expected_symlink(
+                    repository.path().join(".gitconfig"),
+                    home.path().join(".gitconfig"),
+                ),
+                expected_symlink(repository.path().join(".zshrc"), home.path().join(".zshrc"),),
+                expected_symlink(repository.path().join("bashrc"), home.path().join("bashrc")),
+            ])
         );
     }
 }

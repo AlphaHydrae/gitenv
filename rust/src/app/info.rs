@@ -227,6 +227,40 @@ mod tests {
     }
 
     #[test]
+    fn cannot_run_info_when_operation_planning_fails() {
+        let home_path = PathBuf::from("/tmp/home");
+
+        let error = run_info_with(
+            home_path,
+            make_loaded_config(Config {
+                version: 1,
+                repository: "/repo".to_string(),
+                defaults: Defaults::default(),
+                includes: vec![],
+                sources: vec![],
+            }),
+            RuntimeConfig::new(ColorMode::Auto, false, false),
+            Ok(IntentPlan {
+                repository: "/repo".to_string(),
+                sources: vec![],
+            }),
+            Err(ProgramError::SourceDirectoryReadFailed {
+                path: PathBuf::from("missing-operation-source"),
+                message: "cannot read source".to_string(),
+            }),
+        )
+        .expect_err("error from operation planner should propagate");
+
+        assert_eq!(
+            error,
+            ProgramError::SourceDirectoryReadFailed {
+                path: PathBuf::from("missing-operation-source"),
+                message: "cannot read source".to_string(),
+            }
+        );
+    }
+
+    #[test]
     fn show_default_inspection_output_for_a_missing_symlink() {
         let home_path = PathBuf::from("/tmp/home");
 

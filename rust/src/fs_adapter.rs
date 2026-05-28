@@ -294,4 +294,15 @@ mod tests {
         assert_eq!(error.path, directory_path);
         assert_eq!(error.kind, SourceReadErrorKind::PermissionDenied);
     }
+
+    #[test]
+    fn report_metadata_failures_when_symlink_path_cannot_be_inspected() {
+        let missing_path = PathBuf::from("/path/that/does/not/exist/symlink");
+
+        let error = ensure_source_path_readable(&missing_path, SourcePathRequirement::Symlink)
+            .expect_err("missing symlink paths should report inspection failures");
+
+        assert_eq!(error.path, missing_path);
+        assert_eq!(error.kind, SourceReadErrorKind::Missing);
+    }
 }

@@ -91,6 +91,16 @@ pub(crate) trait SymlinkCreator {
     fn create_symlink(&self, source: &Path, target: &Path) -> Result<(), ProgramError>;
 }
 
+/// Shared boundary for creating parent directories during apply execution.
+pub(crate) trait DirectoryCreator {
+    fn ensure_parent_directory_exists(&self, target: &Path) -> Result<(), ProgramError>;
+}
+
+/// Shared boundary for removing paths during apply execution.
+pub(crate) trait PathRemover {
+    fn remove_path(&self, path: &Path) -> Result<(), ProgramError>;
+}
+
 /// Production adapter implementation used by the composition root.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct RealBoundary;
@@ -139,11 +149,72 @@ impl SymlinkCreator for RealBoundary {
     }
 }
 
+impl DirectoryCreator for RealBoundary {
+    fn ensure_parent_directory_exists(&self, target: &Path) -> Result<(), ProgramError> {
+        let Some(parent) = target.parent() else {
+            return Ok(());
+        };
+
+        logging::system(
+            log::Level::Trace,
+            "create_dir_all",
+            format!("path={}", parent.display()),
+        );
+
+        std::fs::create_dir_all(parent).map_err(|error| {
+            ProgramError::TargetDirectoryCreationFailed {
+                path: parent.to_path_buf(),
+                message: error.to_string(),
+            }
+        })
+    }
+}
+
+impl PathRemover for RealBoundary {
+    fn remove_path(&self, path: &Path) -> Result<(), ProgramError> {
+        logging::system(
+            log::Level::Trace,
+            "symlink_metadata",
+            format!("path={}", path.display()),
+        );
+
+        let metadata =
+            std::fs::symlink_metadata(path).map_err(|error| ProgramError::TargetRemovalFailed {
+                path: path.to_path_buf(),
+                message: error.to_string(),
+            })?;
+
+        if metadata.file_type().is_dir() {
+            logging::system(
+                log::Level::Trace,
+                "remove_dir",
+                format!("path={}", path.display()),
+            );
+
+            std::fs::remove_dir(path).map_err(|error| ProgramError::TargetRemovalFailed {
+                path: path.to_path_buf(),
+                message: error.to_string(),
+            })
+        } else {
+            logging::system(
+                log::Level::Trace,
+                "remove_file",
+                format!("path={}", path.display()),
+            );
+
+            std::fs::remove_file(path).map_err(|error| ProgramError::TargetRemovalFailed {
+                path: path.to_path_buf(),
+                message: error.to_string(),
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod test_doubles {
     use super::{
-        EnvironmentReader, SourceAvailabilityReader, SourcePathRequirement, SourceReadError,
-        SymlinkCreator, TargetProbe,
+        DirectoryCreator, EnvironmentReader, PathRemover, SourceAvailabilityReader,
+        SourcePathRequirement, SourceReadError, SymlinkCreator, TargetProbe,
     };
     use crate::ProgramError;
     use std::collections::BTreeMap;
@@ -219,13 +290,33 @@ pub(crate) mod test_doubles {
             self.0(source, target)
         }
     }
+
+    /// Test double: wraps a closure for parent directory creation.
+    pub(crate) struct FnDirectoryCreator<F: Fn(&Path) -> Result<(), ProgramError>>(pub(crate) F);
+
+    impl<F: Fn(&Path) -> Result<(), ProgramError>> DirectoryCreator for FnDirectoryCreator<F> {
+        fn ensure_parent_directory_exists(&self, target: &Path) -> Result<(), ProgramError> {
+            self.0(target)
+        }
+    }
+
+    /// Test double: wraps a closure for path removal.
+    pub(crate) struct FnPathRemover<F: Fn(&Path) -> Result<(), ProgramError>>(pub(crate) F);
+
+    impl<F: Fn(&Path) -> Result<(), ProgramError>> PathRemover for FnPathRemover<F> {
+        fn remove_path(&self, path: &Path) -> Result<(), ProgramError> {
+            self.0(path)
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ConfigReader, DirectoryProbe, RealBoundary};
-    use crate::{Config, LoadedConfig};
+    use super::{ConfigReader, DirectoryCreator, DirectoryProbe, PathRemover, RealBoundary};
+    use crate::{Config, LoadedConfig, ProgramError};
     use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use tempfile::TempDir;
 
     #[test]
@@ -285,5 +376,148 @@ mod tests {
                 },
             }
         );
+    }
+
+    #[test]
+    fn directory_creator_succeeds_for_parent_directory_creation() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let target = temp.path().join("nested").join("target.txt");
+        let boundary = RealBoundary;
+
+        let result = boundary.ensure_parent_directory_exists(&target);
+
+        assert!(
+            result.is_ok(),
+            "directory creation should succeed for valid paths"
+        );
+        assert!(target.parent().unwrap().exists());
+    }
+
+    #[test]
+    fn directory_creator_reports_failures_when_parent_is_a_file() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let parent_file = temp.path().join("parent-as-file");
+        fs::write(&parent_file, "content\n").expect("file should be written");
+        let nested_target = parent_file.join("target.txt");
+        let boundary = RealBoundary;
+
+        let error = boundary
+            .ensure_parent_directory_exists(&nested_target)
+            .expect_err("mkdir should fail when parent is a file");
+
+        assert!(matches!(
+            &error,
+            ProgramError::TargetDirectoryCreationFailed { path, .. } if path == &parent_file
+        ));
+    }
+
+    #[test]
+    fn path_remover_succeeds_for_file_removal() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let target_file = temp.path().join("target.txt");
+        fs::write(&target_file, "content\n").expect("file should be written");
+        let boundary = RealBoundary;
+
+        let result = boundary.remove_path(&target_file);
+
+        assert!(result.is_ok(), "file removal should succeed");
+        assert!(!target_file.exists());
+    }
+
+    #[test]
+    fn path_remover_succeeds_for_directory_removal() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let target_dir = temp.path().join("target-dir");
+        fs::create_dir(&target_dir).expect("directory should be created");
+        let boundary = RealBoundary;
+
+        let result = boundary.remove_path(&target_dir);
+
+        assert!(result.is_ok(), "directory removal should succeed");
+        assert!(!target_dir.exists());
+    }
+
+    #[test]
+    fn path_remover_reports_failures_for_missing_paths() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let missing_path = temp.path().join("missing");
+        let boundary = RealBoundary;
+
+        let error = boundary
+            .remove_path(&missing_path)
+            .expect_err("remove should fail for missing paths");
+
+        assert!(matches!(
+            &error,
+            ProgramError::TargetRemovalFailed { path, .. } if path == &missing_path
+        ));
+    }
+
+    #[test]
+    fn directory_creator_handles_root_path_with_no_parent() {
+        let boundary = RealBoundary;
+        // On Unix, "/" has no parent. On Windows, a root like "C:\" has a parent "C:".
+        // So to test the no-parent case, we pass a path that Path::parent() returns None for.
+        // In practice, this only happens with paths like "/" on Unix.
+        #[cfg(unix)]
+        {
+            let root = std::path::Path::new("/");
+            let result = boundary.ensure_parent_directory_exists(root);
+            assert!(result.is_ok(), "should handle root path with no parent");
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn path_remover_reports_permission_denied_on_directory_removal() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let target_dir = temp.path().join("target-dir");
+        fs::create_dir(&target_dir).expect("directory should be created");
+
+        // Make parent directory read-only to prevent directory removal
+        let parent = temp.path();
+        let perms = fs::Permissions::from_mode(0o555);
+        fs::set_permissions(parent, perms).expect("permissions should be set");
+
+        let boundary = RealBoundary;
+        let error = boundary
+            .remove_path(&target_dir)
+            .expect_err("remove should fail without write permissions");
+
+        // Restore permissions for cleanup
+        let perms = fs::Permissions::from_mode(0o755);
+        fs::set_permissions(parent, perms).expect("permissions should be restored");
+
+        assert!(matches!(
+            &error,
+            ProgramError::TargetRemovalFailed { path, .. } if path == &target_dir
+        ));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn path_remover_reports_permission_denied_on_file_removal() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let target_file = temp.path().join("target.txt");
+        fs::write(&target_file, "content\n").expect("file should be written");
+
+        // Make parent directory read-only to prevent file removal
+        let parent = temp.path();
+        let perms = fs::Permissions::from_mode(0o555);
+        fs::set_permissions(parent, perms).expect("permissions should be set");
+
+        let boundary = RealBoundary;
+        let error = boundary
+            .remove_path(&target_file)
+            .expect_err("remove should fail without write permissions");
+
+        // Restore permissions for cleanup
+        let perms = fs::Permissions::from_mode(0o755);
+        fs::set_permissions(parent, perms).expect("permissions should be restored");
+
+        assert!(matches!(
+            &error,
+            ProgramError::TargetRemovalFailed { path, .. } if path == &target_file
+        ));
     }
 }

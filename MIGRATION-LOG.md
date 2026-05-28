@@ -11,6 +11,26 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-28: Cover apply success paths and planning helper gaps - Add
+  apply-stage tests for symlink overwrite, symlink overwrite-with-backup,
+  missing-copy creation, copy skip, and copy overwrite-with-backup success
+  flows, add direct operation helper coverage for directory child listing and
+  saturating depth decrement, add intent-stage invalid `select.include`
+  validation coverage, and improve total line coverage from 99.70% to 99.71%.
+- 2026-05-28: Add filesystem operation boundary tests for error path coverage -
+  Extract filesystem mkdir and remove operations (remove_file, remove_dir)
+  behind injectable DirectoryCreator and PathRemover trait boundaries in
+  boundary.rs, implement both traits on RealBoundary with full error mapping,
+  add closure-based FnDirectoryCreator and FnPathRemover test doubles for
+  deterministic error simulation, update ApplyContext to hold all 4 boundaries
+  (target_probe, symlink_creator, directory_creator, path_remover), refactor
+  apply_symlink_operation() and apply_copy_operation() to use injected
+  boundaries, update lib.rs composition root to inject all boundaries, add 8
+  comprehensive boundary.rs trait tests covering success paths and
+  permission-denied scenarios, add 3 error-path action tests covering lines 141,
+  158, 188, improve boundary.rs coverage from 86.62% to 99.57%, and reach 99.63%
+  overall line coverage with 37 missed lines (6 inline closure artifacts, 1
+  defensive match arm).
 - 2026-05-27: Add repository runtime override precedence from CLI and env - Add
   clap-backed `--repo`/`GITENV_REPO` parsing with value-source attribution,
   resolve repository precedence (`flag` > `env` > config) before planning,

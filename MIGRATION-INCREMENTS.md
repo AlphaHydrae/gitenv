@@ -68,20 +68,24 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 69: Recover coverage after repository override delivery
+### Increment 69: Continue coverage recovery after apply-path branch tests
 
 Why this increment exists:
 
-- Increment 68 ships the repository runtime override behavior, and the project
-  owner approves stopping with a temporary line-coverage gap (99.91 vs 99.93
-  baseline).
+- Follow-up coverage increments have raised total line coverage to 99.71%, but
+  remaining live-path gaps in `rust/src/lib.rs`, `rust/src/actions.rs`, and
+  region-only gaps in `rust/src/status.rs` still keep the broader recovery work
+  open.
 
 Review target:
 
-- Restore total line coverage to at least the pre-increment baseline (99.93)
-  without changing delivered repository-override behavior.
+- Improve total line coverage above the current 99.71% baseline without
+  changing delivered runtime behavior.
 - Prefer unit tests over integration tests while closing the remaining
-  uncovered paths in `rust/src/lib.rs`.
+  uncovered paths in `rust/src/lib.rs` and the highest-value residual live
+  branches in `rust/src/actions.rs`.
+- Treat region-only gaps in `rust/src/status.rs` and `rust/src/app/apply.rs`
+  as lower priority unless they become the cheapest remaining wins.
 - Keep parsing concerns in `rust/src/cli.rs` and composition-root wiring in
   `rust/src/lib.rs`.
 - Run required wrappers (`tests`, `lint`, `build`, `format`, `coverage`, and

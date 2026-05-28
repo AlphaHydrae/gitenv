@@ -11,7 +11,7 @@
 
 use crate::{
     FileOperation, OperationAction, OperationEntry, OperationPlan, ProgramError,
-    boundary::{SymlinkCreator, TargetProbe},
+    boundary::{DirectoryCreator, PathRemover, SymlinkCreator, TargetProbe},
     logging,
     status::{CopyInspectionState, inspect_copy_operation_status},
 };
@@ -40,6 +40,8 @@ pub enum ApplyOperationOutcome {
 pub(crate) struct ApplyContext<'a> {
     pub(crate) target_probe: &'a dyn TargetProbe,
     pub(crate) symlink_creator: &'a dyn SymlinkCreator,
+    pub(crate) directory_creator: &'a dyn DirectoryCreator,
+    pub(crate) path_remover: &'a dyn PathRemover,
 }
 
 /// Internal apply entrypoint accepting a stage-owned context for deterministic
@@ -80,9 +82,7 @@ pub(crate) fn apply_operation_plan(
 
         let outcome = match action {
             OperationAction::Symlink(operation) => apply_symlink_operation(operation, context)?,
-            OperationAction::Copy(operation) => {
-                apply_copy_operation(operation, context.target_probe)?
-            }
+            OperationAction::Copy(operation) => apply_copy_operation(operation, context)?,
         };
 
         logging::actions(
@@ -138,7 +138,9 @@ fn apply_symlink_operation(
     context: &ApplyContext,
 ) -> Result<ApplyOperationOutcome, ProgramError> {
     if operation.mkdir {
-        ensure_parent_directory_exists(&operation.target)?;
+        context
+            .directory_creator
+            .ensure_parent_directory_exists(&operation.target)?;
     }
 
     if !context.target_probe.target_exists(&operation.target)? {
@@ -155,7 +157,7 @@ fn apply_symlink_operation(
             OperationAction::Symlink(operation.clone()),
         )),
         crate::ConflictPolicy::Overwrite => {
-            remove_target_path(&operation.target)?;
+            context.path_remover.remove_path(&operation.target)?;
             context
                 .symlink_creator
                 .create_symlink(&operation.source, &operation.target)?;
@@ -182,13 +184,15 @@ fn apply_symlink_operation(
 
 fn apply_copy_operation(
     operation: &FileOperation,
-    target_probe: &dyn TargetProbe,
+    context: &ApplyContext,
 ) -> Result<ApplyOperationOutcome, ProgramError> {
     if operation.mkdir {
-        ensure_parent_directory_exists(&operation.target)?;
+        context
+            .directory_creator
+            .ensure_parent_directory_exists(&operation.target)?;
     }
 
-    if !target_probe.target_exists(&operation.target)? {
+    if !context.target_probe.target_exists(&operation.target)? {
         copy_source_to_target(&operation.source, &operation.target)?;
         return Ok(ApplyOperationOutcome::Applied(OperationAction::Copy(
             operation.clone(),
@@ -206,7 +210,7 @@ fn apply_copy_operation(
             OperationAction::Copy(operation.clone()),
         )),
         crate::ConflictPolicy::Overwrite => {
-            remove_target_path(&operation.target)?;
+            context.path_remover.remove_path(&operation.target)?;
             copy_source_to_target(&operation.source, &operation.target)?;
             Ok(ApplyOperationOutcome::Applied(OperationAction::Copy(
                 operation.clone(),
@@ -214,7 +218,7 @@ fn apply_copy_operation(
         }
         crate::ConflictPolicy::OverwriteWithBackup => {
             let backup_path = backup_path_for_target(&operation.target);
-            if target_probe.target_exists(&backup_path)? {
+            if context.target_probe.target_exists(&backup_path)? {
                 return Err(ProgramError::BackupAlreadyExists { path: backup_path });
             }
 
@@ -241,61 +245,6 @@ fn copy_source_to_target(source: &Path, target: &Path) -> Result<(), ProgramErro
             target: target.to_path_buf(),
             message: error.to_string(),
         })
-}
-
-fn ensure_parent_directory_exists(target: &Path) -> Result<(), ProgramError> {
-    let Some(parent) = target.parent() else {
-        return Ok(());
-    };
-
-    logging::system(
-        Level::Trace,
-        "create_dir_all",
-        format!("path={}", parent.display()),
-    );
-
-    std::fs::create_dir_all(parent).map_err(|error| ProgramError::TargetDirectoryCreationFailed {
-        path: parent.to_path_buf(),
-        message: error.to_string(),
-    })
-}
-
-fn remove_target_path(path: &Path) -> Result<(), ProgramError> {
-    logging::system(
-        Level::Trace,
-        "symlink_metadata",
-        format!("path={}", path.display()),
-    );
-
-    let metadata =
-        std::fs::symlink_metadata(path).map_err(|error| ProgramError::TargetRemovalFailed {
-            path: path.to_path_buf(),
-            message: error.to_string(),
-        })?;
-
-    if metadata.file_type().is_dir() {
-        logging::system(
-            Level::Trace,
-            "remove_dir",
-            format!("path={}", path.display()),
-        );
-
-        std::fs::remove_dir(path).map_err(|error| ProgramError::TargetRemovalFailed {
-            path: path.to_path_buf(),
-            message: error.to_string(),
-        })
-    } else {
-        logging::system(
-            Level::Trace,
-            "remove_file",
-            format!("path={}", path.display()),
-        );
-
-        std::fs::remove_file(path).map_err(|error| ProgramError::TargetRemovalFailed {
-            path: path.to_path_buf(),
-            message: error.to_string(),
-        })
-    }
 }
 
 fn move_target_to_backup(target: &Path, backup_path: &Path) -> Result<(), ProgramError> {
@@ -358,15 +307,14 @@ pub(crate) fn create_symlink_on_filesystem(
 mod tests {
     use super::{
         ApplyContext, apply_copy_operation, apply_operation_plan, apply_symlink_operation,
-        backup_path_for_target, ensure_parent_directory_exists, move_target_to_backup,
-        remove_target_path, target_exists,
+        backup_path_for_target, move_target_to_backup, target_exists,
     };
     use crate::{
         ApplyOperationOutcome, ConflictPolicy, FileOperation, OperationAction, OperationEntry,
         OperationPlan, PlannedOperationAction, ProgramError, SourceAvailability,
         boundary::{
-            TargetProbe,
-            test_doubles::{FnSymlinkCreator, FnTargetProbe},
+            RealBoundary, TargetProbe,
+            test_doubles::{FnDirectoryCreator, FnPathRemover, FnSymlinkCreator, FnTargetProbe},
         },
     };
     use std::fs;
@@ -403,96 +351,51 @@ mod tests {
         }
     }
 
+    fn copy_plan(
+        source: PathBuf,
+        target: PathBuf,
+        mkdir: bool,
+        conflict_policy: ConflictPolicy,
+    ) -> OperationPlan {
+        OperationPlan {
+            entries: vec![OperationEntry::Action(PlannedOperationAction {
+                action: OperationAction::Copy(FileOperation {
+                    source,
+                    target,
+                    mkdir,
+                    conflict_policy,
+                }),
+                source_availability: SourceAvailability::Available,
+                skip_reason: None,
+            })],
+        }
+    }
+
+    fn ok_directory_creation(_: &Path) -> Result<(), ProgramError> {
+        Ok(())
+    }
+
+    fn ok_path_removal(_: &Path) -> Result<(), ProgramError> {
+        Ok(())
+    }
+
+    fn ok_symlink_creation(_: &Path, _: &Path) -> Result<(), ProgramError> {
+        Ok(())
+    }
+
+    #[test]
+    fn no_op_test_boundary_helpers_return_ok() {
+        assert!(ok_directory_creation(Path::new("anything")).is_ok());
+        assert!(ok_path_removal(Path::new("anything")).is_ok());
+        assert!(ok_symlink_creation(Path::new("source"), Path::new("target")).is_ok());
+    }
+
     #[test]
     fn append_orig_suffix_to_backup_paths() {
         assert_eq!(
             backup_path_for_target(std::path::Path::new("/home/.gitconfig")),
             PathBuf::from("/home/.gitconfig.orig")
         );
-    }
-
-    #[test]
-    fn allow_targets_without_a_parent_path() {
-        ensure_parent_directory_exists(std::path::Path::new(""))
-            .expect("empty targets should not require mkdir");
-    }
-
-    #[test]
-    fn report_create_directory_failures_with_typed_errors() {
-        let temp = TempDir::new().expect("temporary directory should be created");
-        let parent_file = temp.path().join("parent-as-file");
-        fs::write(&parent_file, "x\n").expect("parent file should be written");
-        let nested_target = parent_file.join("target.txt");
-
-        let error = ensure_parent_directory_exists(&nested_target)
-            .expect_err("mkdir should fail when parent path is a file");
-
-        assert!(matches!(
-            &error,
-            ProgramError::TargetDirectoryCreationFailed { path, .. } if path == &parent_file
-        ));
-    }
-
-    #[test]
-    fn report_remove_target_metadata_failures() {
-        let missing = PathBuf::from("/path/that/does/not/exist");
-
-        let error = remove_target_path(&missing)
-            .expect_err("remove should fail when target metadata cannot be read");
-
-        assert!(matches!(
-            &error,
-            ProgramError::TargetRemovalFailed { path, .. } if path == &missing
-        ));
-    }
-
-    #[test]
-    fn report_remove_target_failures_for_non_empty_directories() {
-        let temp = TempDir::new().expect("temporary directory should be created");
-        let target_directory = temp.path().join("target-directory");
-        fs::create_dir_all(&target_directory).expect("target directory should be created");
-        fs::write(target_directory.join("nested.txt"), "nested\n")
-            .expect("nested file should be written");
-
-        let error = remove_target_path(&target_directory)
-            .expect_err("remove should fail for non-empty directories");
-
-        assert!(matches!(
-            &error,
-            ProgramError::TargetRemovalFailed { path, .. } if path == &target_directory
-        ));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn report_remove_target_failures_for_files_in_non_writable_directories() {
-        let temp = TempDir::new().expect("temporary directory should be created");
-        let protected_directory = temp.path().join("protected");
-        fs::create_dir_all(&protected_directory).expect("protected directory should be created");
-        let target_file = protected_directory.join("target.txt");
-        fs::write(&target_file, "target\n").expect("target file should be written");
-
-        let mut permissions = fs::metadata(&protected_directory)
-            .expect("protected directory metadata should be readable")
-            .permissions();
-        permissions.set_mode(0o500);
-        fs::set_permissions(&protected_directory, permissions)
-            .expect("protected directory should be set to read-only");
-
-        let error = remove_target_path(&target_file)
-            .expect_err("remove should fail when parent directory is not writable");
-
-        let mut restore_permissions = fs::metadata(&protected_directory)
-            .expect("protected directory metadata should be readable")
-            .permissions();
-        restore_permissions.set_mode(0o700);
-        fs::set_permissions(&protected_directory, restore_permissions)
-            .expect("protected directory permissions should be restored");
-
-        assert!(matches!(
-            &error,
-            ProgramError::TargetRemovalFailed { path, .. } if path == &target_file
-        ));
     }
 
     #[test]
@@ -560,9 +463,13 @@ mod tests {
             })
         });
         let symlink_creator = FnSymlinkCreator(super::create_symlink_on_filesystem);
+        let directory_creator = FnDirectoryCreator(ok_directory_creation);
+        let path_remover = FnPathRemover(ok_path_removal);
         let context = ApplyContext {
             target_probe: &target_probe,
             symlink_creator: &symlink_creator,
+            directory_creator: &directory_creator,
+            path_remover: &path_remover,
         };
 
         let error = apply_operation_plan(&operation_plan, &context)
@@ -586,9 +493,13 @@ mod tests {
             symlink_plan(source.clone(), target.clone(), false, ConflictPolicy::Skip);
         let target_probe = FnTargetProbe(|_| Ok(false));
         let symlink_creator = FnSymlinkCreator(super::create_symlink_on_filesystem);
+        let directory_creator = FnDirectoryCreator(ok_directory_creation);
+        let path_remover = FnPathRemover(ok_path_removal);
         let context = ApplyContext {
             target_probe: &target_probe,
             symlink_creator: &symlink_creator,
+            directory_creator: &directory_creator,
+            path_remover: &path_remover,
         };
 
         fs::write(&source, "source\n").expect("source file should be written");
@@ -635,6 +546,8 @@ mod tests {
             &ApplyContext {
                 target_probe: &target_probe,
                 symlink_creator: &FnSymlinkCreator(super::create_symlink_on_filesystem),
+                directory_creator: &FnDirectoryCreator(ok_directory_creation),
+                path_remover: &FnPathRemover(ok_path_removal),
             },
         )
         .expect("apply should create a directory symlink when target is missing");
@@ -676,6 +589,8 @@ mod tests {
             &ApplyContext {
                 target_probe: &target_probe,
                 symlink_creator: &FnSymlinkCreator(super::create_symlink_on_filesystem),
+                directory_creator: &FnDirectoryCreator(ok_directory_creation),
+                path_remover: &FnPathRemover(ok_path_removal),
             },
         )
         .expect("apply should skip existing targets when conflict policy is skip");
@@ -718,6 +633,8 @@ mod tests {
             &ApplyContext {
                 target_probe: &target_probe,
                 symlink_creator: &FnSymlinkCreator(super::create_symlink_on_filesystem),
+                directory_creator: &FnDirectoryCreator(ok_directory_creation),
+                path_remover: &FnPathRemover(ok_path_removal),
             },
         )
         .expect("apply should backup and replace existing directory targets");
@@ -747,11 +664,223 @@ mod tests {
     }
 
     #[test]
+    fn overwrite_existing_file_targets_for_symlink_actions() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source = temp.path().join("source.txt");
+        let target = temp.path().join("target.txt");
+        let boundary = RealBoundary;
+        fs::write(&source, "source\n").expect("source file should be written");
+        fs::write(&target, "target\n").expect("target file should be written");
+
+        let outcome = apply_symlink_operation(
+            &FileOperation {
+                source: source.clone(),
+                target: target.clone(),
+                mkdir: false,
+                conflict_policy: ConflictPolicy::Overwrite,
+            },
+            &ApplyContext {
+                target_probe: &boundary,
+                symlink_creator: &boundary,
+                directory_creator: &boundary,
+                path_remover: &boundary,
+            },
+        )
+        .expect("existing file targets should be replaced when overwrite is requested");
+
+        assert_eq!(
+            outcome,
+            ApplyOperationOutcome::Applied(OperationAction::Symlink(FileOperation {
+                source: source.clone(),
+                target: target.clone(),
+                mkdir: false,
+                conflict_policy: ConflictPolicy::Overwrite,
+            }))
+        );
+        assert_eq!(
+            fs::read_link(&target).expect("symlink target should be readable"),
+            source
+        );
+    }
+
+    #[test]
+    fn backup_and_replace_existing_file_targets_for_symlink_actions() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source = temp.path().join("source.txt");
+        let target = temp.path().join("target.txt");
+        let backup_target = PathBuf::from(format!("{}.orig", target.display()));
+        let boundary = RealBoundary;
+        fs::write(&source, "source\n").expect("source file should be written");
+        fs::write(&target, "target\n").expect("target file should be written");
+
+        let outcome = apply_symlink_operation(
+            &FileOperation {
+                source: source.clone(),
+                target: target.clone(),
+                mkdir: false,
+                conflict_policy: ConflictPolicy::OverwriteWithBackup,
+            },
+            &ApplyContext {
+                target_probe: &boundary,
+                symlink_creator: &boundary,
+                directory_creator: &boundary,
+                path_remover: &boundary,
+            },
+        )
+        .expect("existing file targets should be backed up and replaced when requested");
+
+        assert_eq!(
+            outcome,
+            ApplyOperationOutcome::Applied(OperationAction::Symlink(FileOperation {
+                source: source.clone(),
+                target: target.clone(),
+                mkdir: false,
+                conflict_policy: ConflictPolicy::OverwriteWithBackup,
+            }))
+        );
+        assert_eq!(
+            fs::read_link(&target).expect("symlink target should be readable"),
+            source
+        );
+        assert_eq!(
+            fs::read_to_string(&backup_target).expect("backup target should be readable"),
+            "target\n"
+        );
+    }
+
+    #[test]
+    fn create_copy_when_target_is_missing() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source = temp.path().join("source.txt");
+        let target = temp.path().join("target.txt");
+        let boundary = RealBoundary;
+        fs::write(&source, "source\n").expect("source file should be written");
+
+        let outcome = apply_copy_operation(
+            &FileOperation {
+                source: source.clone(),
+                target: target.clone(),
+                mkdir: false,
+                conflict_policy: ConflictPolicy::Skip,
+            },
+            &ApplyContext {
+                target_probe: &boundary,
+                symlink_creator: &boundary,
+                directory_creator: &boundary,
+                path_remover: &boundary,
+            },
+        )
+        .expect("missing copy targets should be created");
+
+        assert_eq!(
+            outcome,
+            ApplyOperationOutcome::Applied(OperationAction::Copy(FileOperation {
+                source,
+                target: target.clone(),
+                mkdir: false,
+                conflict_policy: ConflictPolicy::Skip,
+            }))
+        );
+        assert_eq!(
+            fs::read_to_string(&target).expect("copied target should be readable"),
+            "source\n"
+        );
+    }
+
+    #[test]
+    fn skip_copy_when_target_exists_and_conflict_policy_is_skip() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source = temp.path().join("source.txt");
+        let target = temp.path().join("target.txt");
+        let boundary = RealBoundary;
+        fs::write(&source, "source\n").expect("source file should be written");
+        fs::write(&target, "target\n").expect("target file should be written");
+
+        let outcome = apply_copy_operation(
+            &FileOperation {
+                source: source.clone(),
+                target: target.clone(),
+                mkdir: false,
+                conflict_policy: ConflictPolicy::Skip,
+            },
+            &ApplyContext {
+                target_probe: &boundary,
+                symlink_creator: &boundary,
+                directory_creator: &boundary,
+                path_remover: &boundary,
+            },
+        )
+        .expect("existing copy targets should be skipped when overwrite is disabled");
+
+        assert_eq!(
+            outcome,
+            ApplyOperationOutcome::SkippedExistingTarget(OperationAction::Copy(FileOperation {
+                source,
+                target: target.clone(),
+                mkdir: false,
+                conflict_policy: ConflictPolicy::Skip,
+            }))
+        );
+        assert_eq!(
+            fs::read_to_string(&target).expect("original target should remain readable"),
+            "target\n"
+        );
+    }
+
+    #[test]
+    fn backup_and_replace_existing_copy_targets() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source = temp.path().join("source.txt");
+        let target = temp.path().join("target.txt");
+        let backup_target = PathBuf::from(format!("{}.orig", target.display()));
+        let boundary = RealBoundary;
+        fs::write(&source, "source\n").expect("source file should be written");
+        fs::write(&target, "target\n").expect("target file should be written");
+
+        let outcome = apply_copy_operation(
+            &FileOperation {
+                source: source.clone(),
+                target: target.clone(),
+                mkdir: false,
+                conflict_policy: ConflictPolicy::OverwriteWithBackup,
+            },
+            &ApplyContext {
+                target_probe: &boundary,
+                symlink_creator: &boundary,
+                directory_creator: &boundary,
+                path_remover: &boundary,
+            },
+        )
+        .expect("existing copy targets should be backed up and replaced when requested");
+
+        assert_eq!(
+            outcome,
+            ApplyOperationOutcome::Applied(OperationAction::Copy(FileOperation {
+                source,
+                target: target.clone(),
+                mkdir: false,
+                conflict_policy: ConflictPolicy::OverwriteWithBackup,
+            }))
+        );
+        assert_eq!(
+            fs::read_to_string(&target).expect("replaced target should be readable"),
+            "source\n"
+        );
+        assert_eq!(
+            fs::read_to_string(&backup_target).expect("backup target should be readable"),
+            "target\n"
+        );
+    }
+
+    #[test]
     fn skip_copy_overwrite_when_target_contents_already_match() {
         let temp = TempDir::new().expect("temporary directory should be created");
         let source = temp.path().join("source.txt");
         let target = temp.path().join("target.txt");
         let target_probe = NativeTargetProbe;
+        let symlink_creator = FnSymlinkCreator(ok_symlink_creation);
+        let directory_creator = FnDirectoryCreator(ok_directory_creation);
+        let path_remover = FnPathRemover(ok_path_removal);
         fs::write(&source, "same\n").expect("source file should be written");
         fs::write(&target, "same\n").expect("target file should be written");
 
@@ -762,7 +891,12 @@ mod tests {
                 mkdir: true,
                 conflict_policy: ConflictPolicy::Overwrite,
             },
-            &target_probe,
+            &ApplyContext {
+                target_probe: &target_probe,
+                symlink_creator: &symlink_creator,
+                directory_creator: &directory_creator,
+                path_remover: &path_remover,
+            },
         )
         .expect("matching copy targets should be skipped");
 
@@ -783,6 +917,9 @@ mod tests {
         let source = temp.path().join("source.txt");
         let target = temp.path().join("target.txt");
         let target_probe = NativeTargetProbe;
+        let symlink_creator = FnSymlinkCreator(ok_symlink_creation);
+        let directory_creator = FnDirectoryCreator(ok_directory_creation);
+        let path_remover = FnPathRemover(ok_path_removal);
         fs::write(&source, "source\n").expect("source file should be written");
         fs::write(&target, "target\n").expect("target file should be written");
 
@@ -793,7 +930,12 @@ mod tests {
                 mkdir: true,
                 conflict_policy: ConflictPolicy::Overwrite,
             },
-            &target_probe,
+            &ApplyContext {
+                target_probe: &target_probe,
+                symlink_creator: &symlink_creator,
+                directory_creator: &directory_creator,
+                path_remover: &path_remover,
+            },
         )
         .expect("differing copy targets should be overwritten");
 
@@ -827,10 +969,14 @@ mod tests {
             })],
         };
         let target_probe = FnTargetProbe(|_| Ok(false));
-        let symlink_creator = FnSymlinkCreator(|_, _| Ok(()));
+        let symlink_creator = FnSymlinkCreator(ok_symlink_creation);
+        let directory_creator = FnDirectoryCreator(ok_directory_creation);
+        let path_remover = FnPathRemover(ok_path_removal);
         let context = ApplyContext {
             target_probe: &target_probe,
             symlink_creator: &symlink_creator,
+            directory_creator: &directory_creator,
+            path_remover: &path_remover,
         };
 
         let error = apply_operation_plan(&operation_plan, &context)
@@ -862,10 +1008,14 @@ mod tests {
             })],
         };
         let target_probe = FnTargetProbe(|_| Ok(false));
-        let symlink_creator = FnSymlinkCreator(|_, _| Ok(()));
+        let symlink_creator = FnSymlinkCreator(ok_symlink_creation);
+        let directory_creator = FnDirectoryCreator(ok_directory_creation);
+        let path_remover = FnPathRemover(ok_path_removal);
         let context = ApplyContext {
             target_probe: &target_probe,
             symlink_creator: &symlink_creator,
+            directory_creator: &directory_creator,
+            path_remover: &path_remover,
         };
 
         let error = apply_operation_plan(&operation_plan, &context)
@@ -898,9 +1048,13 @@ mod tests {
         };
         let target_probe = FnTargetProbe(|_| Ok(false));
         let symlink_creator = FnSymlinkCreator(super::create_symlink_on_filesystem);
+        let directory_creator = FnDirectoryCreator(ok_directory_creation);
+        let path_remover = FnPathRemover(ok_path_removal);
         let context = ApplyContext {
             target_probe: &target_probe,
             symlink_creator: &symlink_creator,
+            directory_creator: &directory_creator,
+            path_remover: &path_remover,
         };
 
         let report = apply_operation_plan(&operation_plan, &context)
@@ -930,10 +1084,14 @@ mod tests {
             })],
         };
         let target_probe = FnTargetProbe(|_| Ok(false));
-        let symlink_creator = FnSymlinkCreator(|_, _| Ok(()));
+        let symlink_creator = FnSymlinkCreator(ok_symlink_creation);
+        let directory_creator = FnDirectoryCreator(ok_directory_creation);
+        let path_remover = FnPathRemover(ok_path_removal);
         let context = ApplyContext {
             target_probe: &target_probe,
             symlink_creator: &symlink_creator,
+            directory_creator: &directory_creator,
+            path_remover: &path_remover,
         };
 
         let error = apply_operation_plan(&operation_plan, &context)
@@ -969,9 +1127,13 @@ mod tests {
         };
         let target_probe = FnTargetProbe(|_| Ok(false));
         let symlink_creator = FnSymlinkCreator(|_, _| Ok(()));
+        let directory_creator = FnDirectoryCreator(|_| Ok(()));
+        let path_remover = FnPathRemover(|_| Ok(()));
         let context = ApplyContext {
             target_probe: &target_probe,
             symlink_creator: &symlink_creator,
+            directory_creator: &directory_creator,
+            path_remover: &path_remover,
         };
 
         let report = apply_operation_plan(&operation_plan, &context)
@@ -990,5 +1152,132 @@ mod tests {
                 ))],
             }
         );
+    }
+
+    #[test]
+    fn cannot_apply_symlink_when_symlink_creator_fails() {
+        let operation_plan = symlink_plan(
+            PathBuf::from("/repo/source.txt"),
+            PathBuf::from("/home/target.txt"),
+            false,
+            ConflictPolicy::Skip,
+        );
+        let target_probe = FnTargetProbe(|_| Ok(false));
+        let symlink_creator = FnSymlinkCreator(|_, _| {
+            Err(ProgramError::SymlinkCreationFailed {
+                source: PathBuf::from("/repo/source.txt"),
+                target: PathBuf::from("/home/target.txt"),
+                message: "permission denied".to_string(),
+            })
+        });
+        let directory_creator = FnDirectoryCreator(ok_directory_creation);
+        let path_remover = FnPathRemover(ok_path_removal);
+        let context = ApplyContext {
+            target_probe: &target_probe,
+            symlink_creator: &symlink_creator,
+            directory_creator: &directory_creator,
+            path_remover: &path_remover,
+        };
+
+        let error = apply_operation_plan(&operation_plan, &context)
+            .expect_err("apply should propagate symlink creation failures");
+
+        assert!(matches!(&error, ProgramError::SymlinkCreationFailed { .. }));
+    }
+
+    #[test]
+    fn cannot_apply_symlink_when_directory_creator_fails() {
+        let operation_plan = symlink_plan(
+            PathBuf::from("/repo/source.txt"),
+            PathBuf::from("/home/nested/target.txt"),
+            true,
+            ConflictPolicy::Skip,
+        );
+        let target_probe = FnTargetProbe(|_| Ok(false));
+        let symlink_creator = FnSymlinkCreator(super::create_symlink_on_filesystem);
+        let directory_creator = FnDirectoryCreator(|path| {
+            Err(ProgramError::TargetDirectoryCreationFailed {
+                path: path.to_path_buf(),
+                message: "permission denied".to_string(),
+            })
+        });
+        let path_remover = FnPathRemover(ok_path_removal);
+        let context = ApplyContext {
+            target_probe: &target_probe,
+            symlink_creator: &symlink_creator,
+            directory_creator: &directory_creator,
+            path_remover: &path_remover,
+        };
+
+        let error = apply_operation_plan(&operation_plan, &context)
+            .expect_err("apply should propagate directory creation failures");
+
+        assert!(matches!(
+            &error,
+            ProgramError::TargetDirectoryCreationFailed { .. }
+        ));
+    }
+
+    #[test]
+    fn cannot_apply_symlink_overwrite_when_path_remover_fails() {
+        let operation_plan = symlink_plan(
+            PathBuf::from("/repo/source.txt"),
+            PathBuf::from("/home/target.txt"),
+            false,
+            ConflictPolicy::Overwrite,
+        );
+        let target_probe = FnTargetProbe(|_| Ok(true));
+        let symlink_creator = FnSymlinkCreator(super::create_symlink_on_filesystem);
+        let directory_creator = FnDirectoryCreator(ok_directory_creation);
+        let path_remover = FnPathRemover(|path| {
+            Err(ProgramError::TargetRemovalFailed {
+                path: path.to_path_buf(),
+                message: "permission denied".to_string(),
+            })
+        });
+        let context = ApplyContext {
+            target_probe: &target_probe,
+            symlink_creator: &symlink_creator,
+            directory_creator: &directory_creator,
+            path_remover: &path_remover,
+        };
+
+        let error = apply_operation_plan(&operation_plan, &context)
+            .expect_err("apply should propagate path removal failures");
+
+        assert!(matches!(&error, ProgramError::TargetRemovalFailed { .. }));
+    }
+
+    #[test]
+    fn cannot_apply_copy_when_directory_creator_fails() {
+        let operation_plan = copy_plan(
+            PathBuf::from("/repo/source.txt"),
+            PathBuf::from("/home/nested/target.txt"),
+            true,
+            ConflictPolicy::Skip,
+        );
+        let target_probe = FnTargetProbe(|_| Ok(false));
+        let symlink_creator = FnSymlinkCreator(|_, _| Ok(()));
+        let directory_creator = FnDirectoryCreator(|path| {
+            Err(ProgramError::TargetDirectoryCreationFailed {
+                path: path.to_path_buf(),
+                message: "permission denied".to_string(),
+            })
+        });
+        let path_remover = FnPathRemover(ok_path_removal);
+        let context = ApplyContext {
+            target_probe: &target_probe,
+            symlink_creator: &symlink_creator,
+            directory_creator: &directory_creator,
+            path_remover: &path_remover,
+        };
+
+        let error = apply_operation_plan(&operation_plan, &context)
+            .expect_err("apply should propagate directory creation failures for copy");
+
+        assert!(matches!(
+            &error,
+            ProgramError::TargetDirectoryCreationFailed { .. }
+        ));
     }
 }

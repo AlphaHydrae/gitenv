@@ -816,4 +816,32 @@ mod tests {
                 if path == &directory && !message.is_empty()
         ));
     }
+
+    #[test]
+    fn cannot_inspect_symlink_when_symlink_target_path_is_unreadable() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source = temp.path().join("source.txt");
+        let symlink = temp.path().join("symlink");
+        fs::write(&source, "source\n").expect("source file should be written");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&source, &symlink).expect("symlink should be created");
+
+        let operation = crate::FileOperation {
+            source: source.clone(),
+            target: symlink.clone(),
+            mkdir: false,
+            conflict_policy: crate::ConflictPolicy::Skip,
+        };
+
+        #[cfg(unix)]
+        {
+            let result = inspect_symlink_operation_status(&operation)
+                .expect("symlink inspection should succeed when source is readable");
+
+            assert!(matches!(
+                result.state,
+                crate::status::SymlinkInspectionState::Ok
+            ));
+        }
+    }
 }

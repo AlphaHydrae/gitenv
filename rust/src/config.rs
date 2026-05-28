@@ -1062,15 +1062,15 @@ sources:
         let yaml = r#"
 version: 1
 defaults:
-      mode: symlink
-      to: "~"
-      mkdir: true
-      overwrite: false
-      backup_on_overwrite: true
+  mode: symlink
+  to: "~"
+  mkdir: true
+  overwrite: false
+  backup_on_overwrite: true
 sources:
-      - from: "."
-        configs:
-          - file: .zshrc
+  - from: "."
+    configs:
+      - file: .zshrc
 "#;
 
         let error = parse_config(yaml).expect_err("config should fail without repository");
@@ -1177,20 +1177,131 @@ sources:
     }
 
     #[test]
+    fn cannot_parse_config_when_source_root_shape_is_invalid() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: []
+    configs:
+      - .zshrc
+"#;
+
+        let error =
+            parse_config(yaml).expect_err("config should fail when source root shape is invalid");
+
+        assert!(matches!(
+                error,
+                ProgramError::InvalidConfiguration { message }
+                        if message.contains("config YAML parse failed")
+        ));
+    }
+
+    #[test]
+    fn cannot_parse_config_when_guard_shape_is_invalid() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: .
+    when: []
+    configs:
+      - .zshrc
+"#;
+
+        let error = parse_config(yaml).expect_err("config should fail when guard shape is invalid");
+
+        assert!(matches!(
+                error,
+                ProgramError::InvalidConfiguration { message }
+                        if message.contains("config YAML parse failed")
+        ));
+    }
+
+    #[test]
+    fn cannot_parse_config_when_include_shape_is_invalid() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: .
+    configs:
+      - .zshrc
+includes:
+  - []
+"#;
+
+        let error =
+            parse_config(yaml).expect_err("config should fail when include shape is invalid");
+
+        assert!(matches!(
+                error,
+                ProgramError::InvalidConfiguration { message }
+                        if message.contains("config YAML parse failed")
+        ));
+    }
+
+    #[test]
+    fn cannot_parse_config_when_item_shape_is_invalid() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: .
+    configs:
+      - []
+"#;
+
+        let error = parse_config(yaml).expect_err("config should fail when item shape is invalid");
+
+        assert!(matches!(
+                error,
+                ProgramError::InvalidConfiguration { message }
+                        if message.contains("config YAML parse failed")
+        ));
+    }
+
+    #[test]
+    fn cannot_load_config_when_contents_are_invalid() {
+        let yaml = r#"
+version: 1
+repository: ~/projects/env
+sources:
+  - from: .
+    when: []
+    configs:
+      - .zshrc
+    "#;
+
+        let mut temp_file = NamedTempFile::new().expect("temporary config file should be created");
+        std::io::Write::write_all(&mut temp_file, yaml.as_bytes())
+            .expect("temp config should be written");
+
+        let error = load_config(temp_file.path())
+            .expect_err("loading should fail when config contents are invalid");
+
+        assert!(matches!(
+                error,
+                ProgramError::InvalidConfiguration { message }
+                        if message.contains("config YAML parse failed")
+        ));
+    }
+
+    #[test]
     fn reject_a_config_with_an_unknown_top_level_key() {
         let yaml = r#"
 version: 1
 repository: ~/projects/env
 defaults:
-      mode: symlink
-      to: "~"
-      mkdir: true
-      overwrite: false
-      backup_on_overwrite: true
+  mode: symlink
+  to: "~"
+  mkdir: true
+  overwrite: false
+  backup_on_overwrite: true
 sources:
-      - from: "."
-        configs:
-          - file: .zshrc
+  - from: "."
+    configs:
+      - file: .zshrc
 unknown: true
 "#;
 
@@ -1209,16 +1320,16 @@ unknown: true
 version: 1
 repository: ~/projects/env
 defaults:
-      mode: symlink
-      to: "~"
-      mkdir: true
-      overwrite: false
-      backup_on_overwrite: true
-      extra: true
+  mode: symlink
+  to: "~"
+  mkdir: true
+  overwrite: false
+  backup_on_overwrite: true
+  extra: true
 sources:
-      - from: "."
-        configs:
-          - file: .zshrc
+  - from: "."
+    configs:
+      - file: .zshrc
 "#;
 
         let error = parse_config(yaml).expect_err("config should fail on unknown nested key");
@@ -1236,10 +1347,10 @@ sources:
 version: 1
 repository: ~/projects/env
 sources:
-      - from:
-          env: PRIVATE_ENV_DIR
-        configs:
-          - file: .zshrc
+  - from:
+      env: PRIVATE_ENV_DIR
+    configs:
+      - file: .zshrc
 "#;
 
         let config =
@@ -1278,9 +1389,9 @@ sources:
 version: 1
 repository: ~/projects/env
 sources:
-      - from: "$PRIVATE_ENV_DIR"
-        configs:
-          - file: .zshrc
+  - from: "$PRIVATE_ENV_DIR"
+    configs:
+      - file: .zshrc
 "#;
 
         let config = parse_config(yaml).expect(
@@ -1317,14 +1428,14 @@ sources:
     #[test]
     fn accept_explicit_path_source_roots_that_start_with_a_dollar_sign() {
         let yaml = r#"
-            version: 1
-            repository: ~/projects/env
-            sources:
-              - from:
-                  path: "$PRIVATE_ENV_DIR"
-                configs:
-                  - file: .zshrc
-            "#;
+version: 1
+repository: ~/projects/env
+sources:
+  - from:
+      path: "$PRIVATE_ENV_DIR"
+    configs:
+      - file: .zshrc
+"#;
 
         let config = parse_config(yaml)
             .expect("config should parse explicit path source roots that start with a dollar sign");
@@ -1361,9 +1472,9 @@ sources:
 version: 1
 repository: ~/projects/env
 sources:
-      - from: $
-        configs:
-          - .zshrc
+  - from: $
+    configs:
+      - .zshrc
 "#;
 
         let config = parse_config(yaml)
@@ -1383,15 +1494,15 @@ sources:
     #[test]
     fn load_a_config_with_a_to_exists_guard() {
         let yaml = r#"
-            version: 1
-            repository: ~/projects/env
-            sources:
-              - from: vscode
-                to: ~/Library/Application Support/Code/User
-                when: to_exists
-                configs:
-                  - keybindings.json
-            "#;
+version: 1
+repository: ~/projects/env
+sources:
+  - from: vscode
+    to: ~/Library/Application Support/Code/User
+    when: to_exists
+    configs:
+      - keybindings.json
+"#;
 
         let config = parse_config(yaml).expect("config should parse with a to_exists guard");
 
@@ -1412,11 +1523,11 @@ sources:
 version: 1
 repository: ~/projects/env
 sources:
-      - from: macos
-        when:
-          directory_exists: /Applications
-        configs:
-          - .macos-defaults
+  - from: macos
+    when:
+      directory_exists: /Applications
+    configs:
+      - .macos-defaults
 "#;
 
         let config = parse_config(yaml).expect("config should parse with a directory_exists guard");
@@ -1435,14 +1546,14 @@ sources:
     #[test]
     fn reject_an_unknown_guard_shorthand() {
         let yaml = r#"
-            version: 1
-            repository: ~/projects/env
-            sources:
-              - from: .
-                when: something_unsupported
-                configs:
-                  - .zshrc
-            "#;
+version: 1
+repository: ~/projects/env
+sources:
+  - from: .
+    when: something_unsupported
+    configs:
+      - .zshrc
+"#;
 
         let error =
             parse_config(yaml).expect_err("config should reject an unknown guard shorthand");
@@ -1457,14 +1568,14 @@ sources:
     #[test]
     fn load_a_config_with_a_source_level_to() {
         let yaml = r#"
-            version: 1
-            repository: ~/projects/env
-            sources:
-              - from: vscode
-                to: ~/Library/Application Support/Code/User
-                configs:
-                  - settings.json
-            "#;
+version: 1
+repository: ~/projects/env
+sources:
+  - from: vscode
+    to: ~/Library/Application Support/Code/User
+    configs:
+      - settings.json
+"#;
 
         let config = parse_config(yaml).expect("config should parse with a source-level to");
 
@@ -1485,11 +1596,11 @@ sources:
 version: 1
 repository: ~/projects/env
 sources:
-      - from: "."
-        configs:
-          - .zshrc
+  - from: "."
+    configs:
+      - .zshrc
 includes:
-      - ~/projects/private-env/.gitenv.yml
+    - ~/projects/private-env/.gitenv.yml
 "#;
 
         let config = parse_config(yaml).expect("config should parse with a shorthand include");
@@ -1509,11 +1620,11 @@ includes:
 version: 1
 repository: ~/projects/env
 sources:
-      - from: "."
-        configs:
-          - .zshrc
+  - from: "."
+    configs:
+      - .zshrc
 includes:
-      - $WORK_ENV_CONFIG
+  - $WORK_ENV_CONFIG
 "#;
 
         let config =
@@ -1534,12 +1645,12 @@ includes:
 version: 1
 repository: ~/projects/env
 sources:
-      - from: "."
-        configs:
-          - .zshrc
+  - from: "."
+    configs:
+      - .zshrc
 includes:
-      - path: ~/projects/work-env/.gitenv.yml
-        optional: true
+  - path: ~/projects/work-env/.gitenv.yml
+    optional: true
 "#;
 
         let config =
@@ -1560,12 +1671,12 @@ includes:
 version: 1
 repository: ~/projects/env
 sources:
-      - from: "."
-        configs:
-          - .zshrc
+  - from: "."
+    configs:
+      - .zshrc
 includes:
-      - env: EXTRA_ENV_CONFIG
-        optional: true
+  - env: EXTRA_ENV_CONFIG
+    optional: true
 "#;
 
         let config =
@@ -1583,13 +1694,13 @@ includes:
     #[test]
     fn accept_a_config_without_an_includes_section() {
         let yaml = r#"
-            version: 1
-            repository: ~/projects/env
-            sources:
-              - from: "."
-                configs:
-                  - .zshrc
-            "#;
+version: 1
+repository: ~/projects/env
+sources:
+  - from: "."
+    configs:
+      - .zshrc
+"#;
 
         let config = parse_config(yaml).expect("config should parse without includes");
 
@@ -1638,14 +1749,14 @@ includes:
 version: 1
 repository: ~/projects/env
 sources:
-      - from: "."
-        configs:
-          - file: .zshrc
-            mode: copy
-            to: ~/dest
-            mkdir: false
-            overwrite: true
-            backup_on_overwrite: false
+  - from: "."
+    configs:
+      - file: .zshrc
+        mode: copy
+        to: ~/dest
+        mkdir: false
+        overwrite: true
+        backup_on_overwrite: false
 "#;
 
         let config =
@@ -1681,15 +1792,15 @@ sources:
 version: 1
 repository: ~/projects/env
 sources:
-      - from: "."
-        configs:
-          - select:
-              type: dot
-              mode: copy
-              to: ~/dest
-              mkdir: false
-              overwrite: true
-              backup_on_overwrite: false
+  - from: "."
+    configs:
+      - select:
+          type: dot
+          mode: copy
+          to: ~/dest
+          mkdir: false
+          overwrite: true
+          backup_on_overwrite: false
 "#;
 
         let config =

@@ -2374,6 +2374,45 @@ mod tests {
     }
 
     #[test]
+    fn reject_invalid_select_include_patterns_during_intent_planning() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path("src".to_string()),
+                to: None,
+                guard: None,
+                configs: vec![ConfigItem::Select(SelectConfig {
+                    selection_type: SelectionType::All,
+                    recursive: false,
+                    existing_directories_only: false,
+                    include: vec!["[".to_string()],
+                    exclude: vec![],
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        let error = derive_intent_plan(
+            &root_loaded_config(&config),
+            &make_context(&NoEnvVars, &NoDirectories, &RejectConfigRead),
+        )
+        .expect_err("planning should fail when select.include contains an invalid glob");
+
+        assert!(matches!(
+            error,
+            ProgramError::InvalidConfiguration { message }
+                if message.contains("invalid select.include glob pattern")
+        ));
+    }
+
+    #[test]
     fn resolve_env_backed_include_paths_from_environment() {
         let included = make_config(vec![make_source(
             SourceRoot::Path("private_src".to_string()),
@@ -3060,6 +3099,47 @@ mod tests {
                     },
                 })],
             }])
+        );
+    }
+
+    #[test]
+    fn cannot_derive_intent_plan_when_guard_evaluation_fails_on_path_inspection() {
+        let config = Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![],
+            sources: vec![Source {
+                from: SourceRoot::Path(".".to_string()),
+                to: None,
+                guard: Some(Guard::DirectoryExists(
+                    "/nonexistent/path/that/cannot/be/inspected".to_string(),
+                )),
+                configs: vec![ConfigItem::File(FileConfig {
+                    file: ".zshrc".to_string(),
+                    as_name: None,
+                    mode: None,
+                    to: None,
+                    mkdir: None,
+                    overwrite: None,
+                    backup_on_overwrite: None,
+                })],
+            }],
+        };
+
+        // Create a directory probe that fails on the target path
+        let failing_dir_probe =
+            FnDirProbe(|path| path != "/nonexistent/path/that/cannot/be/inspected");
+
+        let result = derive_intent_plan(
+            &root_loaded_config(&config),
+            &make_context(&NoEnvVars, &failing_dir_probe, &RejectConfigRead),
+        );
+
+        assert_eq!(
+            result,
+            Ok(expected_plan(vec![])),
+            "planning should exclude sources when guard is not satisfied"
         );
     }
 }

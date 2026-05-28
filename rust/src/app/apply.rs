@@ -245,6 +245,74 @@ mod tests {
     }
 
     #[test]
+    fn cannot_run_apply_when_operation_planning_fails() {
+        let home_path = PathBuf::from("/tmp/home");
+
+        let error = run_apply_with(
+            home_path,
+            make_loaded_config(Config {
+                version: 1,
+                repository: "/repo".to_string(),
+                defaults: Defaults::default(),
+                includes: vec![],
+                sources: vec![],
+            }),
+            RuntimeConfig::new(ColorMode::Auto, false, false),
+            Ok(IntentPlan {
+                repository: "/repo".to_string(),
+                sources: vec![],
+            }),
+            Err(ProgramError::SourceDirectoryReadFailed {
+                path: PathBuf::from("missing-operation-source"),
+                message: "cannot read source".to_string(),
+            }),
+            Ok(ApplyOperationReport { outcomes: vec![] }),
+        )
+        .expect_err("error from operation planner should propagate");
+
+        assert_eq!(
+            error,
+            ProgramError::SourceDirectoryReadFailed {
+                path: PathBuf::from("missing-operation-source"),
+                message: "cannot read source".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn cannot_run_apply_when_apply_execution_fails() {
+        let home_path = PathBuf::from("/tmp/home");
+
+        let error = run_apply_with(
+            home_path,
+            make_loaded_config(Config {
+                version: 1,
+                repository: "/repo".to_string(),
+                defaults: Defaults::default(),
+                includes: vec![],
+                sources: vec![],
+            }),
+            RuntimeConfig::new(ColorMode::Auto, false, false),
+            Ok(IntentPlan {
+                repository: "/repo".to_string(),
+                sources: vec![],
+            }),
+            Ok(available_operation_plan(vec![])),
+            Err(ProgramError::OperationPlanBlocked {
+                diagnostics: vec!["blocked by test".to_string()],
+            }),
+        )
+        .expect_err("error from apply execution should propagate");
+
+        assert_eq!(
+            error,
+            ProgramError::OperationPlanBlocked {
+                diagnostics: vec!["blocked by test".to_string()],
+            }
+        );
+    }
+
+    #[test]
     fn show_apply_output_for_a_missing_symlink() {
         let home_path = PathBuf::from("/tmp/home");
 

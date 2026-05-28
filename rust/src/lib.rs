@@ -209,6 +209,8 @@ pub fn apply_operation_plan(
     let context = actions::ApplyContext {
         target_probe: &boundary,
         symlink_creator: &boundary,
+        directory_creator: &boundary,
+        path_remover: &boundary,
     };
     actions::apply_operation_plan(operation_plan, &context)
 }
