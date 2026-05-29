@@ -723,6 +723,46 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn report_blocking_diagnostics_for_unreadable_actions_and_unavailable_sources() {
+        let operation_plan = OperationPlan {
+            entries: vec![
+                OperationEntry::Action(PlannedOperationAction {
+                    action: expected_symlink(
+                        PathBuf::from("/repo/.zshrc"),
+                        PathBuf::from("/home/.zshrc"),
+                    ),
+                    source_availability: SourceAvailability::Available,
+                    skip_reason: None,
+                }),
+                OperationEntry::Action(PlannedOperationAction {
+                    action: expected_copy(
+                        PathBuf::from("/repo/private/.secret"),
+                        PathBuf::from("/home/.secret"),
+                    ),
+                    source_availability: SourceAvailability::Unreadable {
+                        kind: SourceUnreadableKind::PermissionDenied,
+                        message: "permission denied".to_string(),
+                    },
+                    skip_reason: None,
+                }),
+                OperationEntry::Issue(OperationPlanningIssue {
+                    path: PathBuf::from("/repo/profiles"),
+                    source_availability: SourceAvailability::Missing,
+                }),
+            ],
+        };
+
+        assert_eq!(
+            operation_plan.apply_blocking_diagnostics(),
+            vec![
+                "source /repo/private/.secret for /home/.secret is unreadable (permission denied)"
+                    .to_string(),
+                "source root /repo/profiles is missing".to_string(),
+            ]
+        );
+    }
+
     // ---------------------------------------------------------------------------
     // Tests
     // ---------------------------------------------------------------------------
@@ -1474,6 +1514,39 @@ mod tests {
         assert_eq!(error.path, directory);
         assert_eq!(error.kind, SourceReadErrorKind::UnexpectedIo);
         assert_eq!(error.message, "file type is unavailable");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn list_directory_children_treats_symlink_entries_as_files() {
+        let root = TempDir::new().expect("temporary root should be created");
+        let directory = root.path().join("configs");
+        fs::create_dir_all(directory.join("nested")).expect("nested directory should be created");
+        fs::write(directory.join("target.txt"), "target\n").expect("target file should be written");
+        symlink(directory.join("nested"), directory.join("nested-link"))
+            .expect("symlink entry should be created");
+
+        let mut children = super::list_directory_children(&directory)
+            .expect("directory children should be listed successfully");
+        children.sort_by(|left, right| left.0.cmp(&right.0));
+
+        assert_eq!(
+            children,
+            vec![
+                (
+                    "nested".to_string(),
+                    super::RecursiveDirectoryEntryKind::Directory,
+                ),
+                (
+                    "nested-link".to_string(),
+                    super::RecursiveDirectoryEntryKind::File,
+                ),
+                (
+                    "target.txt".to_string(),
+                    super::RecursiveDirectoryEntryKind::File,
+                ),
+            ]
+        );
     }
 
     #[test]

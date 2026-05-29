@@ -247,9 +247,10 @@ fn default_config_path_from_env(
     home_directory: &Path,
     xdg_config_home: Option<PathBuf>,
 ) -> PathBuf {
-    let config_home = xdg_config_home
-        .filter(|path| path.is_absolute())
-        .unwrap_or_else(|| home_directory.join(DEFAULT_CONFIG_HOME_SUFFIX));
+    let config_home = match xdg_config_home {
+        Some(path) if path.is_absolute() => path,
+        _ => home_directory.join(DEFAULT_CONFIG_HOME_SUFFIX),
+    };
 
     config_home
         .join(DEFAULT_CONFIG_DIRECTORY_NAME)
@@ -257,15 +258,21 @@ fn default_config_path_from_env(
 }
 
 fn default_global_selection_excludes(os_name: &str) -> Vec<ValidatedGlobPattern> {
-    let mut patterns = Vec::new();
+    default_global_selection_excludes_with_pattern(
+        os_name,
+        ValidatedGlobPattern::parse_global_select_exclude("**/.DS_Store").ok(),
+    )
+}
 
-    if os_name == "macos"
-        && let Ok(pattern) = ValidatedGlobPattern::parse_global_select_exclude("**/.DS_Store")
-    {
-        patterns.push(pattern);
+fn default_global_selection_excludes_with_pattern(
+    os_name: &str,
+    pattern: Option<ValidatedGlobPattern>,
+) -> Vec<ValidatedGlobPattern> {
+    if os_name == "macos" {
+        return pattern.into_iter().collect();
     }
 
-    patterns
+    Vec::new()
 }
 
 fn resolve_runtime_repository_root(
@@ -309,6 +316,7 @@ mod tests {
     use super::*;
     use crate::boundary::test_doubles::MapEnvReader;
     use clap::Parser;
+    use std::ffi::OsString;
     use std::fs;
     use std::path::{Path, PathBuf};
     use tempfile::TempDir;
@@ -321,6 +329,17 @@ mod tests {
         );
 
         assert_eq!(path, PathBuf::from("/tmp/runtime-config/gitenv/config.yml"));
+    }
+
+    #[test]
+    fn support_program_output_trait_derives() {
+        let output = ProgramOutput {
+            message: "hello".to_string(),
+        };
+
+        let cloned = output.clone();
+        assert_eq!(output, cloned);
+        assert!(format!("{output:?}").contains("ProgramOutput"));
     }
 
     #[test]
@@ -352,6 +371,18 @@ mod tests {
         );
 
         assert_eq!(path, PathBuf::from("/tmp/custom-config.yml"));
+    }
+
+    #[test]
+    fn fall_back_to_the_default_config_path_when_no_explicit_path_is_given() {
+        // Exercises the default-resolution branch of config path precedence:
+        // with no explicit `-c/--config`, the path comes from the default
+        // location derived from the home directory.
+        let boundary = MapEnvReader::empty();
+
+        let path = determine_config_path(None, Path::new("/home/alex"), &boundary);
+
+        assert_eq!(path, PathBuf::from("/home/alex/.config/gitenv/config.yml"));
     }
 
     #[test]
@@ -442,6 +473,14 @@ mod tests {
     }
 
     #[test]
+    fn keep_global_selection_excludes_empty_when_the_macos_pattern_cannot_be_parsed() {
+        // Exercise the fallback used when the built-in macOS exclude cannot be parsed.
+        let excludes = default_global_selection_excludes_with_pattern("macos", None);
+
+        assert_eq!(excludes, Vec::<ValidatedGlobPattern>::new());
+    }
+
+    #[test]
     fn use_flag_repository_when_flag_and_env_are_both_set() {
         let (repository, source) = resolve_runtime_repository_root(
             Some(Path::new("/tmp/flag-repo")),
@@ -475,6 +514,7 @@ mod tests {
 
         assert_eq!(repository, "/tmp/config-repo");
         assert_eq!(source, RepositorySource::Config);
+        assert_eq!(source.label(), "config");
     }
 
     #[test]
@@ -636,6 +676,112 @@ mod tests {
     }
 
     #[test]
+    fn show_the_apply_summary_when_run_cli_uses_an_explicit_config_and_flag_repository() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = home.path().join("repository");
+        fs::create_dir_all(&repository).expect("temporary repository should be created");
+        fs::write(repository.join(".gitconfig"), "[user]\n")
+            .expect("source file should be written");
+        let apply_target_directory = home.path().join("applied-config");
+        fs::create_dir_all(&apply_target_directory)
+            .expect("apply target directory should be created");
+
+        let config = format!(
+            concat!(
+                "version: 1\n",
+                "repository: \"/path/that/does/not/exist\"\n",
+                "sources:\n",
+                "  - from: \".\"\n",
+                "    to: \"{}\"\n",
+                "    configs:\n",
+                "      - file: .gitconfig\n",
+                "        mode: copy\n"
+            ),
+            apply_target_directory.display()
+        );
+        let config_path = home.path().join("config.yml");
+        fs::write(&config_path, config).expect("config file should be written");
+
+        let cli = Cli {
+            command: Some(Command::Apply),
+            config_path: Some(config_path),
+            repo_path: Some(repository.clone()),
+            repo_value_source: Some(ValueSource::CommandLine),
+            log_level: LogLevel::Debug,
+            color: ColorMode::No,
+        };
+
+        let output = run_cli(cli).expect("apply command should succeed with an explicit config");
+        let expected_message = format!(
+            "copied {} to {}",
+            repository.join(".").join(".gitconfig").display(),
+            apply_target_directory.join(".gitconfig").display()
+        );
+
+        assert_eq!(output.message, expected_message);
+    }
+
+    #[test]
+    fn show_the_apply_summary_when_run_entrypoint_uses_an_explicit_config_and_flag_repository() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let repository = home.path().join("repository");
+        fs::create_dir_all(&repository).expect("temporary repository should be created");
+        fs::write(repository.join(".gitconfig"), "[user]\n")
+            .expect("source file should be written");
+        let apply_target_directory = home.path().join("applied-config");
+        fs::create_dir_all(&apply_target_directory)
+            .expect("apply target directory should be created");
+
+        let config = format!(
+            concat!(
+                "version: 1\n",
+                "repository: \"/path/that/does/not/exist\"\n",
+                "sources:\n",
+                "  - from: \".\"\n",
+                "    to: \"{}\"\n",
+                "    configs:\n",
+                "      - file: .gitconfig\n",
+                "        mode: copy\n"
+            ),
+            apply_target_directory.display()
+        );
+        let config_path = home.path().join("config.yml");
+        fs::write(&config_path, &config).expect("config file should be written");
+
+        let output = run([
+            "gitenv",
+            "--color",
+            "no",
+            "--config",
+            config_path
+                .to_str()
+                .expect("test config path should be valid UTF-8"),
+            "--repo",
+            repository
+                .to_str()
+                .expect("test repository path should be valid UTF-8"),
+            "apply",
+        ])
+        .expect("run entrypoint should apply a configured copy");
+
+        assert_eq!(
+            output,
+            ProgramOutput {
+                message: format!(
+                    "copied {} to {}",
+                    repository.join(".").join(".gitconfig").display(),
+                    apply_target_directory.join(".gitconfig").display()
+                ),
+            }
+        );
+        assert_eq!(
+            fs::read_to_string(apply_target_directory.join(".gitconfig"))
+                .expect("applied copy target should be readable"),
+            "[user]\n"
+        );
+    }
+
+    #[test]
     fn map_clap_value_sources_to_repository_sources() {
         assert_eq!(
             repository_source_from_value_source(Some(ValueSource::CommandLine)),
@@ -650,5 +796,82 @@ mod tests {
             None
         );
         assert_eq!(repository_source_from_value_source(None), None);
+    }
+
+    #[test]
+    fn parse_and_dispatch_cli_args_through_run_entrypoint() {
+        let missing_path = PathBuf::from("/path/that/does/not/exist/config.yml");
+
+        let result = run([
+            "gitenv",
+            "--config",
+            missing_path
+                .to_str()
+                .expect("test path should be valid UTF-8"),
+        ]);
+
+        assert!(matches!(
+            result,
+            Err(ProgramError::ConfigurationReadFailed { path, .. }) if path == missing_path
+        ));
+    }
+
+    #[test]
+    fn parse_and_dispatch_os_string_cli_args_through_run_entrypoint() {
+        let missing_path = PathBuf::from("/path/that/does/not/exist/config.yml");
+
+        let result = run(vec![
+            OsString::from("gitenv"),
+            OsString::from("--config"),
+            missing_path.as_os_str().to_os_string(),
+        ]);
+
+        assert!(matches!(
+            result,
+            Err(ProgramError::ConfigurationReadFailed { path, .. }) if path == missing_path
+        ));
+    }
+
+    #[test]
+    fn parse_and_dispatch_apply_subcommand_through_run_entrypoint() {
+        let missing_path = PathBuf::from("/path/that/does/not/exist/config.yml");
+
+        let result = run([
+            "gitenv",
+            "--config",
+            missing_path
+                .to_str()
+                .expect("test path should be valid UTF-8"),
+            "apply",
+        ]);
+
+        assert!(matches!(
+            result,
+            Err(ProgramError::ConfigurationReadFailed { path, .. }) if path == missing_path
+        ));
+    }
+
+    #[test]
+    fn show_no_operations_message_when_run_apply_has_no_actions() {
+        let home = TempDir::new().expect("temporary home directory should be created");
+        let loaded_config = LoadedConfig {
+            path: home.path().join("config.yml"),
+            config: Config {
+                version: 1,
+                repository: "/repo".to_string(),
+                defaults: Defaults::default(),
+                includes: vec![],
+                sources: vec![],
+            },
+        };
+
+        let output = run_apply(
+            loaded_config,
+            home.path().to_path_buf(),
+            RuntimeConfig::new(ColorMode::Auto, false, false),
+        )
+        .expect("apply wrapper should render output for empty operation plans");
+
+        assert_eq!(output.message, "No operations to apply.");
     }
 }

@@ -68,53 +68,27 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-### Increment 69: Continue coverage recovery after apply-path branch tests
+No agreed active increments remain.
+
+Suggested next increment pending approval:
+
+### Increment 70: Decide whether to pursue remaining region-only coverage gaps
 
 Why this increment exists:
 
-- Follow-up coverage work has raised total line coverage to 99.93%, but a few
-  live-path and assertion regions in `rust/src/lib.rs`, `rust/src/actions.rs`,
-  `rust/src/status.rs`, and `rust/src/app/apply.rs` still keep the broader
-  recovery work open.
+- Increment 69 reaches 100.00% total line coverage, but `cargo llvm-cov`
+  still reports a small number of missed regions in `rust/src/lib.rs`,
+  `rust/src/status.rs`, `rust/src/operation.rs`, and
+  `rust/src/core_plan_snapshots_test.rs`.
+- Recent artifact inspection shows those misses do not correspond to literal
+  zero-hit source lines, so the next step should decide whether they represent
+  worthwhile behavior gaps or only region-accounting noise.
 
 Review target:
 
-- Improve total line coverage above the current 99.93% baseline without
-  changing delivered runtime behavior.
-- Prefer unit tests over integration tests while closing the remaining
-  uncovered regions that the fresh JSON report still shows in the following
-  hotspots:
-  - `rust/src/actions.rs`:
-    - `overwrite_copy_when_target_contents_differ` still leaves uncovered
-      assertion regions around the expected `ApplyOperationOutcome::Applied`
-      value for the overwrite-copy success path.
-    - `report_copy_failures` still leaves uncovered assertion regions around
-      the `ProgramError::FileCopyFailed` propagation check when copy creation
-      cannot run.
-    - `cannot_apply_symlink_when_directory_creator_fails` still leaves
-      uncovered error-propagation regions around the `TargetDirectoryCreationFailed`
-      path when parent-directory creation fails.
-    - These misses are in test macro expansions and assertion regions, not new
-      production branches.
-  - `rust/src/lib.rs`:
-    - `resolve_default_config_path_without_overrides` still leaves uncovered
-      fallback-path regions for the home-directory default when no config
-      overrides are present.
-    - `cannot_run_with_a_whitespace_only_env_repository_override` still leaves
-      uncovered validation regions around the whitespace-only repository
-      override rejection.
-  - `rust/src/status.rs`:
-    - `report_missing_when_copy_target_is_absent` still leaves uncovered
-      regions for the `CopyInspectionState::Missing` branch.
-    - `report_not_a_file_when_copy_target_path_is_a_directory` still leaves
-      uncovered regions for the `CopyInspectionState::NotAFile` branch.
-    - The unix-gated symlink inspection test still leaves an uncovered
-      metadata-success assertion region under `#[cfg(unix)]`.
-  - `rust/src/app/apply.rs`:
-    - `cannot_run_apply_when_apply_execution_fails` still leaves an uncovered
-      orchestration region where planning succeeds but apply execution returns
-      `OperationPlanBlocked`.
-- Keep parsing concerns in `rust/src/cli.rs` and composition-root wiring in
-  `rust/src/lib.rs`.
-- Run required wrappers (`tests`, `lint`, `build`, `format`, `coverage`, and
-  `lint-md` when docs change) and report fresh timestamp evidence.
+- Inspect the remaining region-only misses with fresh JSON and HTML coverage
+  artifacts.
+- Add targeted assertions only when a missed region maps to an observable
+  behavior gap.
+- If the remaining regions are only accounting artifacts, document that result
+  and close the coverage-recovery track.

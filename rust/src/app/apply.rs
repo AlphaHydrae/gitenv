@@ -433,8 +433,7 @@ mod tests {
         )
         .expect("orchestration should run with empty operations");
 
-        // With empty operations, message should say no operations
-        assert!(output.message.contains("operation") || output.message.contains("No "));
+        assert_eq!(output.message, "No operations to apply.");
     }
 
     #[test]

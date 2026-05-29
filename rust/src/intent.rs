@@ -605,6 +605,10 @@ mod tests {
         }
     }
 
+    fn load_config_from_path(path: &Path) -> Result<LoadedConfig, ProgramError> {
+        crate::load_config(path)
+    }
+
     /// Constructs an `IntentContext` from three boundary doubles using the
     /// standard test home directory.
     fn make_context<'a>(
@@ -636,7 +640,7 @@ mod tests {
 
     #[test]
     fn fn_config_reader_forwards_to_the_wrapped_closure() {
-        let reader = FnConfigReader(|path: &Path| crate::load_config(path));
+        let reader = FnConfigReader(load_config_from_path);
 
         assert!(
             reader
@@ -2354,7 +2358,7 @@ mod tests {
                 vec![make_file_config_item(".zshrc")],
             )])
         };
-        let config_reader = FnConfigReader(|path: &Path| crate::load_config(path));
+        let config_reader = FnConfigReader(load_config_from_path);
 
         let error = derive_intent_plan(
             &loaded_config_for_path(&root, Some(root_path)),

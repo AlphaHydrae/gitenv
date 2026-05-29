@@ -95,6 +95,50 @@ tests` within source files) are faster, more precise, and easier to maintain.
   running the compiled binary as a subprocess — exit codes, the stderr/stdout
   boundary, and binary linking. Output content and command dispatch logic belong
   in unit tests.
+- For filesystem-backed tests, create one temporary root directory per test and
+  create all needed subdirectories/files under that root. Avoid creating
+  multiple independent temporary directories in a single test unless isolation
+  between roots is itself the behavior under test.
+- Avoid coverage-only test contortions (for example, adding assertions that do
+  not strengthen behavior guarantees just to tick a region counter). When
+  coverage gaps appear in test code or macro expansion regions, prefer
+  improving test structure and assertion quality first, then add behavior-driven
+  scenarios only when they cover a real missing outcome.
+- When closing uncovered paths, add a short comment in the test body if the
+  chosen scenario maps to a specific branch/precedence rule. This keeps the
+  intent reviewable and reduces future coverage-chasing rewrites.
+
+### Diagnosing coverage gaps
+
+`coverage.sh` runs `cargo llvm-cov --summary-only`, and the goal that gates the
+script is **100% total line coverage** (`--fail-under-lines`).
+
+When the summary reports a missed line, beware this trap that has cost real time:
+
+- **The `--summary-only` table aggregates coverage per code-generation
+  instantiation, not as a merged whole.** A line exercised only through the
+  compiled binary (the `cfg(not(test))` build used by subprocess integration
+  tests) but never by a unit test is still counted as missed, because the
+  `#[cfg(test)]` unit-test binary's instantiation of that function leaves it
+  uncovered. The merged `--text`, `--html`, `--lcov`, and JSON `segments`
+  reports will all show that same line as covered. **Do not diagnose summary
+  gaps with the merged reports — they disagree with the summary by design and
+  will send you in circles.**
+- **The fix is almost always an in-process unit test** that exercises the exact
+  branch, so the unit-test binary's own instantiation covers it. Adding another
+  subprocess test does not help (it only touches the binary's instantiation,
+  which already covered the line).
+- **To locate the real gap**, run the suite once with
+  `cargo llvm-cov --workspace --all-targets --no-report`, then
+  `cargo llvm-cov report --json --output-path <file>`, and inspect the
+  per-function records (`data[0].functions[]`). Group records by mangled name
+  with the crate disambiguator (`Cs<hash>_`) stripped — each group is one
+  function across instantiations — and look for a zero-count region
+  (`region[4] == 0`) present in only one instantiation. That region's line is
+  the gap.
+- **An error-propagation `?` produces a region, not a separate line.** Its
+  source line still executes on the success path, so an untaken error branch
+  lowers _region_ coverage only and never blocks _line_ coverage.
 
 ### Test naming style
 

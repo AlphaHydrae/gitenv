@@ -11,6 +11,11 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-29: Cover public entrypoints for final line-coverage gaps - Add
+  composition-root tests for explicit-config apply dispatch and subprocess
+  integration coverage for the public run/apply entrypoints, including the
+  default `XDG_CONFIG_HOME` config path with flag-based repository override
+  precedence.
 - 2026-05-28: Cover apply success paths and planning helper gaps - Add
   apply-stage tests for symlink overwrite, symlink overwrite-with-backup,
   missing-copy creation, copy skip, and copy overwrite-with-backup success

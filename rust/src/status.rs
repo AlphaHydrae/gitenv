@@ -317,8 +317,9 @@ mod tests {
     use crate::{
         ConflictPolicy, FileOperation, OperationAction, OperationEntry, OperationPlan,
         OperationPlanningIssue, PlannedOperationAction, ProgramError, SourceAvailability,
-        SourceUnreadableKind,
+        SourceUnreadableKind, operation::OperationSkipReason,
     };
+    use std::cell::Cell;
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
@@ -592,6 +593,107 @@ mod tests {
     }
 
     #[test]
+    fn inspect_symlink_status_through_the_injectable_success_path() {
+        let operation =
+            make_operation(PathBuf::from("/repo/.zshrc"), PathBuf::from("/home/.zshrc"));
+
+        let status = inspect_symlink_operation_status_with_injectables(
+            &operation,
+            &|_| Ok(TargetKind::Symlink),
+            &|_| Ok(PathBuf::from("/repo/.zshrc")),
+        )
+        .expect("injectable symlink inspection should work");
+
+        assert_eq!(
+            status,
+            SymlinkInspection {
+                source: PathBuf::from("/repo/.zshrc"),
+                target: PathBuf::from("/home/.zshrc"),
+                state: SymlinkInspectionState::Ok,
+            }
+        );
+    }
+
+    #[test]
+    fn inspect_copy_status_through_the_injectable_success_path() {
+        let operation =
+            make_operation(PathBuf::from("/repo/.zshrc"), PathBuf::from("/home/.zshrc"));
+
+        let status = inspect_copy_operation_status_with_injectables(
+            &operation,
+            &|_| Ok(CopyTargetKind::File),
+            &|_| Ok(0x00AB_CDEF),
+        )
+        .expect("injectable copy inspection should work");
+
+        assert_eq!(
+            status,
+            CopyInspection {
+                source: PathBuf::from("/repo/.zshrc"),
+                target: PathBuf::from("/home/.zshrc"),
+                state: CopyInspectionState::Ok,
+            }
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn inspect_a_plan_with_distinct_symlink_and_copy_outcomes() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source = temp.path().join("source.txt");
+        let other = temp.path().join("other.txt");
+        let symlink_target = temp.path().join("symlink.txt");
+        let copy_target = temp.path().join("copy.txt");
+
+        fs::write(&source, "source\n").expect("source file should be written");
+        fs::write(&other, "other\n").expect("alternate file should be written");
+        fs::write(&copy_target, "copy-target\n").expect("copy target should be written");
+        symlink(&other, &symlink_target).expect("target symlink should be created");
+
+        let report = inspect_operation_plan_status(&OperationPlan {
+            entries: vec![
+                OperationEntry::Action(PlannedOperationAction {
+                    action: OperationAction::Symlink(make_operation(
+                        source.clone(),
+                        symlink_target.clone(),
+                    )),
+                    source_availability: SourceAvailability::Available,
+                    skip_reason: None,
+                }),
+                OperationEntry::Action(PlannedOperationAction {
+                    action: OperationAction::Copy(make_operation(
+                        source.clone(),
+                        copy_target.clone(),
+                    )),
+                    source_availability: SourceAvailability::Available,
+                    skip_reason: None,
+                }),
+            ],
+        })
+        .expect("status inspection should work");
+
+        assert_eq!(
+            report,
+            OperationInspectionReport {
+                outcomes: vec![
+                    OperationInspectionOutcome::Symlink(SymlinkInspection {
+                        source: source.clone(),
+                        target: symlink_target,
+                        state: SymlinkInspectionState::PointsElsewhere {
+                            current_target: other,
+                        },
+                    }),
+                    OperationInspectionOutcome::Copy(CopyInspection {
+                        source,
+                        target: copy_target,
+                        state: CopyInspectionState::Differs,
+                    }),
+                ],
+            }
+        );
+    }
+
+    #[test]
     fn inspect_both_symlink_and_copy_operations_in_a_single_operation_plan() {
         let operation_plan = make_operation_plan(vec![
             OperationAction::Symlink(make_operation(
@@ -681,6 +783,48 @@ mod tests {
     }
 
     #[test]
+    fn report_available_entries_with_skip_reasons_as_unavailable() {
+        let source = PathBuf::from("/repo/source.txt");
+        let target = PathBuf::from("/home/target.txt");
+        let available_without_skip =
+            make_operation(PathBuf::from("/repo/.zshrc"), PathBuf::from("/home/.zshrc"));
+
+        let report = inspect_operation_plan_status(&OperationPlan {
+            entries: vec![
+                OperationEntry::Action(PlannedOperationAction {
+                    action: OperationAction::Copy(make_operation(source.clone(), target.clone())),
+                    source_availability: SourceAvailability::Available,
+                    skip_reason: Some(OperationSkipReason::MissingTargetDirectory),
+                }),
+                OperationEntry::Action(PlannedOperationAction {
+                    action: OperationAction::Copy(available_without_skip.clone()),
+                    source_availability: SourceAvailability::Available,
+                    skip_reason: None,
+                }),
+            ],
+        })
+        .expect("available entries with skip reasons should be reported as unavailable");
+
+        assert_eq!(
+            report,
+            OperationInspectionReport {
+                outcomes: vec![
+                    OperationInspectionOutcome::Unavailable(PlannedOperationAction {
+                        action: OperationAction::Copy(make_operation(source, target)),
+                        source_availability: SourceAvailability::Available,
+                        skip_reason: Some(OperationSkipReason::MissingTargetDirectory),
+                    }),
+                    OperationInspectionOutcome::Copy(CopyInspection {
+                        source: available_without_skip.source,
+                        target: available_without_skip.target,
+                        state: CopyInspectionState::Missing,
+                    }),
+                ],
+            }
+        );
+    }
+
+    #[test]
     fn cannot_inspect_copy_status_when_read_fails() {
         let temp = TempDir::new().expect("temporary directory should be created");
         let source = temp.path().join("source.txt");
@@ -704,6 +848,42 @@ mod tests {
             ProgramError::PathInspectionFailed {
                 path: source,
                 message: "permission denied".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn cannot_inspect_copy_status_when_target_hash_read_fails() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source = temp.path().join("source.txt");
+        let target = temp.path().join("target.txt");
+        let operation = make_operation(source.clone(), target.clone());
+        let call_count = Cell::new(0_u8);
+
+        let error = inspect_copy_operation_status_with_injectables(
+            &operation,
+            &|_| Ok(CopyTargetKind::File),
+            &|path| {
+                let call = call_count.get();
+                call_count.set(call.saturating_add(1));
+
+                if call == 0 {
+                    Ok(0x00AB_CDEF)
+                } else {
+                    Err(ProgramError::PathInspectionFailed {
+                        path: path.to_path_buf(),
+                        message: "target hash failed".to_string(),
+                    })
+                }
+            },
+        )
+        .expect_err("target hash failures should be propagated");
+
+        assert_eq!(
+            error,
+            ProgramError::PathInspectionFailed {
+                path: target,
+                message: "target hash failed".to_string(),
             }
         );
     }
@@ -838,10 +1018,7 @@ mod tests {
             let result = inspect_symlink_operation_status(&operation)
                 .expect("symlink inspection should succeed when source is readable");
 
-            assert!(matches!(
-                result.state,
-                crate::status::SymlinkInspectionState::Ok
-            ));
+            assert_eq!(result.state, crate::status::SymlinkInspectionState::Ok);
         }
     }
 }

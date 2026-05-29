@@ -37,6 +37,73 @@ fn replace_home_prefix_with_tilde(output: String, home: &Path) -> String {
 // with real config loading, planning, rendering, and filesystem wiring in a
 // few readable end-to-end scenarios.
 
+#[test]
+fn apply_the_default_xdg_config_when_the_binary_uses_a_flag_repository() {
+    let home = TempDir::new().expect("temporary home directory should be created");
+    let xdg_config_home = home.path().join("xdg-config-home");
+    let repository = home.path().join("repository");
+    fs::create_dir_all(&xdg_config_home).expect("temporary XDG config home should be created");
+    fs::create_dir_all(&repository).expect("temporary repository should be created");
+    let apply_target_directory = home.path().join("xdg-applied-config");
+    fs::create_dir_all(&apply_target_directory).expect("apply target directory should be created");
+    write_file(&repository.join(".gitconfig"), "[user]\n");
+
+    let config = format!(
+        concat!(
+            "version: 1\n",
+            "repository: \"/path/that/does/not/exist\"\n",
+            "sources:\n",
+            "  - from: \".\"\n",
+            "    to: \"{}\"\n",
+            "    configs:\n",
+            "      - file: .gitconfig\n",
+            "        mode: copy\n"
+        ),
+        apply_target_directory.display()
+    );
+    let config_path = xdg_config_home.join("gitenv").join("config.yml");
+    write_file(&config_path, &config);
+
+    let output = gitenv_command_for_home(&home)
+        .env("XDG_CONFIG_HOME", &xdg_config_home)
+        .args([
+            "--color",
+            "no",
+            "--log-level",
+            "debug",
+            "--repo",
+            repository
+                .to_str()
+                .expect("test repository path should be valid UTF-8"),
+            "apply",
+        ])
+        .output()
+        .expect("binary should run");
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        replace_home_prefix_with_tilde(
+            format!(
+                "copied {} to {}\n",
+                repository.join(".").join(".gitconfig").display(),
+                apply_target_directory.join(".gitconfig").display()
+            ),
+            home.path(),
+        )
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("resolved repository root from flag precedence source"),
+        "stderr should include the selected flag repository source at debug level"
+    );
+    assert_eq!(
+        fs::read_to_string(apply_target_directory.join(".gitconfig"))
+            .expect("applied copy target should be readable"),
+        "[user]\n"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn invoke_the_info_command() {

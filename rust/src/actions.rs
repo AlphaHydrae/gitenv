@@ -1127,8 +1127,8 @@ mod tests {
         };
         let target_probe = FnTargetProbe(|_| Ok(false));
         let symlink_creator = FnSymlinkCreator(|_, _| Ok(()));
-        let directory_creator = FnDirectoryCreator(|_| Ok(()));
-        let path_remover = FnPathRemover(|_| Ok(()));
+        let directory_creator = FnDirectoryCreator(ok_directory_creation);
+        let path_remover = FnPathRemover(ok_path_removal);
         let context = ApplyContext {
             target_probe: &target_probe,
             symlink_creator: &symlink_creator,
@@ -1182,7 +1182,14 @@ mod tests {
         let error = apply_operation_plan(&operation_plan, &context)
             .expect_err("apply should propagate symlink creation failures");
 
-        assert!(matches!(&error, ProgramError::SymlinkCreationFailed { .. }));
+        assert_eq!(
+            error,
+            ProgramError::SymlinkCreationFailed {
+                source: PathBuf::from("/repo/source.txt"),
+                target: PathBuf::from("/home/target.txt"),
+                message: "permission denied".to_string(),
+            }
+        );
     }
 
     #[test]
@@ -1212,10 +1219,13 @@ mod tests {
         let error = apply_operation_plan(&operation_plan, &context)
             .expect_err("apply should propagate directory creation failures");
 
-        assert!(matches!(
-            &error,
-            ProgramError::TargetDirectoryCreationFailed { .. }
-        ));
+        assert_eq!(
+            error,
+            ProgramError::TargetDirectoryCreationFailed {
+                path: PathBuf::from("/home/nested/target.txt"),
+                message: "permission denied".to_string(),
+            }
+        );
     }
 
     #[test]
@@ -1245,7 +1255,13 @@ mod tests {
         let error = apply_operation_plan(&operation_plan, &context)
             .expect_err("apply should propagate path removal failures");
 
-        assert!(matches!(&error, ProgramError::TargetRemovalFailed { .. }));
+        assert_eq!(
+            error,
+            ProgramError::TargetRemovalFailed {
+                path: PathBuf::from("/home/target.txt"),
+                message: "permission denied".to_string(),
+            }
+        );
     }
 
     #[test]
@@ -1257,7 +1273,7 @@ mod tests {
             ConflictPolicy::Skip,
         );
         let target_probe = FnTargetProbe(|_| Ok(false));
-        let symlink_creator = FnSymlinkCreator(|_, _| Ok(()));
+        let symlink_creator = FnSymlinkCreator(ok_symlink_creation);
         let directory_creator = FnDirectoryCreator(|path| {
             Err(ProgramError::TargetDirectoryCreationFailed {
                 path: path.to_path_buf(),
@@ -1275,9 +1291,12 @@ mod tests {
         let error = apply_operation_plan(&operation_plan, &context)
             .expect_err("apply should propagate directory creation failures for copy");
 
-        assert!(matches!(
-            &error,
-            ProgramError::TargetDirectoryCreationFailed { .. }
-        ));
+        assert_eq!(
+            error,
+            ProgramError::TargetDirectoryCreationFailed {
+                path: PathBuf::from("/home/nested/target.txt"),
+                message: "permission denied".to_string(),
+            }
+        );
     }
 }
