@@ -1265,6 +1265,235 @@ mod tests {
     }
 
     #[test]
+    fn cannot_apply_symlink_overwrite_when_replacement_creation_fails() {
+        let operation_plan = symlink_plan(
+            PathBuf::from("/repo/source.txt"),
+            PathBuf::from("/home/target.txt"),
+            false,
+            ConflictPolicy::Overwrite,
+        );
+        let target_probe = FnTargetProbe(|_| Ok(true));
+        let symlink_creator = FnSymlinkCreator(|source, target| {
+            Err(ProgramError::SymlinkCreationFailed {
+                source: source.to_path_buf(),
+                target: target.to_path_buf(),
+                message: "permission denied".to_string(),
+            })
+        });
+        let directory_creator = FnDirectoryCreator(ok_directory_creation);
+        let path_remover = FnPathRemover(ok_path_removal);
+        let context = ApplyContext {
+            target_probe: &target_probe,
+            symlink_creator: &symlink_creator,
+            directory_creator: &directory_creator,
+            path_remover: &path_remover,
+        };
+
+        let error = apply_operation_plan(&operation_plan, &context)
+            .expect_err("apply should propagate symlink creation failures after overwrite");
+
+        assert_eq!(
+            error,
+            ProgramError::SymlinkCreationFailed {
+                source: PathBuf::from("/repo/source.txt"),
+                target: PathBuf::from("/home/target.txt"),
+                message: "permission denied".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn cannot_apply_symlink_backup_overwrite_when_replacement_creation_fails() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source = temp.path().join("source.txt");
+        let target = temp.path().join("target.txt");
+        let backup = PathBuf::from(format!("{}.orig", target.display()));
+        fs::write(&target, "target\n").expect("target file should be written");
+
+        let operation_plan = symlink_plan(
+            source.clone(),
+            target.clone(),
+            false,
+            ConflictPolicy::OverwriteWithBackup,
+        );
+        let target_for_probe = target.clone();
+        let backup_for_probe = backup.clone();
+        let target_probe = FnTargetProbe(move |path| {
+            if path == backup_for_probe {
+                Ok(false)
+            } else {
+                Ok(path == target_for_probe)
+            }
+        });
+        let symlink_creator = FnSymlinkCreator(|source, target| {
+            Err(ProgramError::SymlinkCreationFailed {
+                source: source.to_path_buf(),
+                target: target.to_path_buf(),
+                message: "permission denied".to_string(),
+            })
+        });
+        let directory_creator = FnDirectoryCreator(ok_directory_creation);
+        let path_remover = FnPathRemover(ok_path_removal);
+        let context = ApplyContext {
+            target_probe: &target_probe,
+            symlink_creator: &symlink_creator,
+            directory_creator: &directory_creator,
+            path_remover: &path_remover,
+        };
+
+        let error = apply_operation_plan(&operation_plan, &context)
+            .expect_err("apply should propagate replacement failures after backup move");
+
+        assert_eq!(
+            error,
+            ProgramError::SymlinkCreationFailed {
+                source,
+                target: target.clone(),
+                message: "permission denied".to_string(),
+            }
+        );
+        assert!(
+            !target.exists(),
+            "target should be moved away before replacement creation fails"
+        );
+        assert!(
+            backup.is_file(),
+            "backup should retain the original target file"
+        );
+    }
+
+    #[test]
+    fn cannot_apply_copy_when_status_inspection_fails() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source = temp.path().join("missing-source.txt");
+        let target = temp.path().join("target.txt");
+        fs::write(&target, "target\n").expect("target file should be written");
+
+        let operation_plan = copy_plan(source.clone(), target, false, ConflictPolicy::Overwrite);
+        let target_probe = FnTargetProbe(|_| Ok(true));
+        let symlink_creator = FnSymlinkCreator(ok_symlink_creation);
+        let directory_creator = FnDirectoryCreator(ok_directory_creation);
+        let path_remover = FnPathRemover(ok_path_removal);
+        let context = ApplyContext {
+            target_probe: &target_probe,
+            symlink_creator: &symlink_creator,
+            directory_creator: &directory_creator,
+            path_remover: &path_remover,
+        };
+
+        let error = apply_operation_plan(&operation_plan, &context)
+            .expect_err("apply should propagate copy status inspection failures");
+
+        assert!(matches!(
+            &error,
+            ProgramError::PathInspectionFailed { path, .. } if path == &source
+        ));
+    }
+
+    #[test]
+    fn cannot_apply_copy_overwrite_when_replacement_copy_fails() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source = temp.path().join("source.txt");
+        let target = temp.path().join("target.txt");
+        fs::write(&source, "source\n").expect("source file should be written");
+        fs::write(&target, "target\n").expect("target file should be written");
+
+        let operation_plan = copy_plan(
+            source.clone(),
+            target.clone(),
+            false,
+            ConflictPolicy::Overwrite,
+        );
+        let target_probe = FnTargetProbe(|_| Ok(true));
+        let symlink_creator = FnSymlinkCreator(ok_symlink_creation);
+        let directory_creator = FnDirectoryCreator(ok_directory_creation);
+        // Keep this branch-focused: remove both paths so overwrite reaches copy and then fails.
+        let source_for_removal = source.clone();
+        let path_remover = FnPathRemover(move |path| {
+            fs::remove_file(path).expect("target should be removable before overwrite copy");
+            fs::remove_file(&source_for_removal)
+                .expect("source should be removable to force overwrite copy failure");
+            Ok(())
+        });
+        let context = ApplyContext {
+            target_probe: &target_probe,
+            symlink_creator: &symlink_creator,
+            directory_creator: &directory_creator,
+            path_remover: &path_remover,
+        };
+
+        let error = apply_operation_plan(&operation_plan, &context)
+            .expect_err("apply should propagate copy failures after overwrite removal");
+
+        assert!(matches!(
+            &error,
+            ProgramError::FileCopyFailed {
+                source: source_path,
+                target: target_path,
+                ..
+            } if source_path == &source && target_path == &target
+        ));
+    }
+
+    #[test]
+    fn cannot_apply_copy_backup_overwrite_when_replacement_copy_fails() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source = temp.path().join("source.txt");
+        let target = temp.path().join("target.txt");
+        let backup = PathBuf::from(format!("{}.orig", target.display()));
+        fs::write(&source, "source\n").expect("source file should be written");
+        fs::write(&target, "target\n").expect("target file should be written");
+
+        let operation_plan = copy_plan(
+            source.clone(),
+            target.clone(),
+            false,
+            ConflictPolicy::OverwriteWithBackup,
+        );
+        let target_for_probe = target.clone();
+        let backup_for_probe = backup.clone();
+        let source_for_backup_probe = source.clone();
+        let target_probe = FnTargetProbe(move |path| {
+            if path == backup_for_probe {
+                fs::remove_file(&source_for_backup_probe)
+                    .expect("source should be removable to force backup replacement copy failure");
+                Ok(false)
+            } else {
+                Ok(path == target_for_probe)
+            }
+        });
+        let symlink_creator = FnSymlinkCreator(ok_symlink_creation);
+        let directory_creator = FnDirectoryCreator(ok_directory_creation);
+        let path_remover = FnPathRemover(ok_path_removal);
+        let context = ApplyContext {
+            target_probe: &target_probe,
+            symlink_creator: &symlink_creator,
+            directory_creator: &directory_creator,
+            path_remover: &path_remover,
+        };
+
+        let error = apply_operation_plan(&operation_plan, &context)
+            .expect_err("apply should propagate copy failures after backup move");
+
+        assert!(matches!(
+            &error,
+            ProgramError::FileCopyFailed {
+                source: source_path,
+                target: target_path,
+                ..
+            } if source_path == &source && target_path == &target
+        ));
+        assert!(
+            !target.exists(),
+            "target should be moved away before replacement copy fails"
+        );
+        assert!(
+            backup.is_file(),
+            "backup should retain the original target file"
+        );
+    }
+
+    #[test]
     fn cannot_apply_copy_when_directory_creator_fails() {
         let operation_plan = copy_plan(
             PathBuf::from("/repo/source.txt"),

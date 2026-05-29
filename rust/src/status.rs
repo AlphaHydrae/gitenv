@@ -593,6 +593,56 @@ mod tests {
     }
 
     #[test]
+    fn cannot_inspect_copy_status_when_source_file_is_missing() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source = temp.path().join("missing-source.txt");
+        let target = temp.path().join("target.txt");
+        fs::write(&target, "target\n").expect("target file should be written");
+
+        let operation = make_operation(source.clone(), target);
+        let error = inspect_copy_operation_status(&operation)
+            .expect_err("copy status inspection should fail when source file is missing");
+
+        assert!(matches!(
+            &error,
+            ProgramError::PathInspectionFailed { path, .. } if path == &source
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cannot_inspect_copy_status_when_target_file_is_unreadable() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source = temp.path().join("source.txt");
+        let target = temp.path().join("target.txt");
+        fs::write(&source, "source\n").expect("source file should be written");
+        fs::write(&target, "target\n").expect("target file should be written");
+
+        let mut locked_permissions = fs::metadata(&target)
+            .expect("target metadata should be readable")
+            .permissions();
+        locked_permissions.set_mode(0o000);
+        fs::set_permissions(&target, locked_permissions)
+            .expect("target file should be set to unreadable");
+
+        let operation = make_operation(source, target.clone());
+        let error = inspect_copy_operation_status(&operation)
+            .expect_err("copy status inspection should fail when target file cannot be read");
+
+        let mut restore_permissions = fs::metadata(&target)
+            .expect("target metadata should be readable")
+            .permissions();
+        restore_permissions.set_mode(0o600);
+        fs::set_permissions(&target, restore_permissions)
+            .expect("target file permissions should be restored");
+
+        assert!(matches!(
+            &error,
+            ProgramError::PathInspectionFailed { path, .. } if path == &target
+        ));
+    }
+
+    #[test]
     fn inspect_symlink_status_through_the_injectable_success_path() {
         let operation =
             make_operation(PathBuf::from("/repo/.zshrc"), PathBuf::from("/home/.zshrc"));
@@ -726,6 +776,64 @@ mod tests {
                 ],
             }
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cannot_inspect_operation_plan_when_symlink_target_metadata_is_unreadable() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source = temp.path().join("source.txt");
+        let locked_directory = temp.path().join("locked");
+        let target = locked_directory.join("target-link");
+
+        fs::write(&source, "source\n").expect("source file should be written");
+        fs::create_dir_all(&locked_directory).expect("locked directory should be created");
+
+        let mut locked_permissions = fs::metadata(&locked_directory)
+            .expect("locked directory metadata should be readable")
+            .permissions();
+        locked_permissions.set_mode(0o000);
+        fs::set_permissions(&locked_directory, locked_permissions)
+            .expect("locked directory should be set to inaccessible");
+
+        // Cover the plan-level symlink branch that propagates inspection failures.
+        let error =
+            inspect_operation_plan_status(&make_operation_plan(vec![OperationAction::Symlink(
+                make_operation(source, target.clone()),
+            )]))
+            .expect_err("plan inspection should fail when target metadata is unreadable");
+
+        let mut restore_permissions = fs::metadata(&locked_directory)
+            .expect("locked directory metadata should be readable")
+            .permissions();
+        restore_permissions.set_mode(0o700);
+        fs::set_permissions(&locked_directory, restore_permissions)
+            .expect("locked directory permissions should be restored");
+
+        assert!(matches!(
+            &error,
+            ProgramError::PathInspectionFailed { path, .. } if path == &target
+        ));
+    }
+
+    #[test]
+    fn cannot_inspect_operation_plan_when_copy_source_is_unreadable() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source = temp.path().join("missing-source.txt");
+        let target = temp.path().join("target.txt");
+        fs::write(&target, "target\n").expect("copy target file should be written");
+
+        // Cover plan-level copy propagation when source hashing fails.
+        let error =
+            inspect_operation_plan_status(&make_operation_plan(vec![OperationAction::Copy(
+                make_operation(source.clone(), target),
+            )]))
+            .expect_err("plan inspection should fail when copy source cannot be read");
+
+        assert!(matches!(
+            &error,
+            ProgramError::PathInspectionFailed { path, .. } if path == &source
+        ));
     }
 
     #[test]
@@ -982,6 +1090,42 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn cannot_inspect_copy_status_when_target_metadata_is_unreadable() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source = temp.path().join("source.txt");
+        fs::write(&source, "source\n").expect("source file should be written");
+
+        let locked_directory = temp.path().join("locked");
+        fs::create_dir_all(&locked_directory).expect("locked directory should be created");
+        let target = locked_directory.join("target.txt");
+
+        let mut permissions = fs::metadata(&locked_directory)
+            .expect("locked directory metadata should be readable")
+            .permissions();
+        permissions.set_mode(0o000);
+        fs::set_permissions(&locked_directory, permissions)
+            .expect("locked directory should be set to inaccessible");
+
+        let operation = make_operation(source, target.clone());
+
+        let error = inspect_copy_operation_status(&operation)
+            .expect_err("copy status inspection should fail for unreadable targets");
+
+        let mut restore_permissions = fs::metadata(&locked_directory)
+            .expect("locked directory metadata should be readable")
+            .permissions();
+        restore_permissions.set_mode(0o700);
+        fs::set_permissions(&locked_directory, restore_permissions)
+            .expect("locked directory permissions should be restored");
+
+        assert!(matches!(
+            &error,
+            ProgramError::PathInspectionFailed { path, .. } if path == &target
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn report_hash_read_errors_for_directory_paths() {
         let temp = TempDir::new().expect("temporary directory should be created");
         let directory = temp.path().join("a-directory");
@@ -1020,5 +1164,33 @@ mod tests {
 
             assert_eq!(result.state, crate::status::SymlinkInspectionState::Ok);
         }
+    }
+
+    #[test]
+    fn cannot_inspect_copy_status_when_target_kind_probe_fails() {
+        let temp = TempDir::new().expect("temporary directory should be created");
+        let source = temp.path().join("source.txt");
+        let target = temp.path().join("target.txt");
+        let operation = make_operation(source.clone(), target.clone());
+
+        let error = inspect_copy_operation_status_with_injectables(
+            &operation,
+            &|_| {
+                Err(ProgramError::PathInspectionFailed {
+                    path: target.clone(),
+                    message: "cannot determine target kind".to_string(),
+                })
+            },
+            &hash_file_contents_from_filesystem,
+        )
+        .expect_err("target kind probe failures should be propagated");
+
+        assert_eq!(
+            error,
+            ProgramError::PathInspectionFailed {
+                path: target,
+                message: "cannot determine target kind".to_string(),
+            }
+        );
     }
 }

@@ -398,3 +398,32 @@ fn shorthand_and_canonical_plans_are_identical() {
 
     assert_eq!(shorthand, canonical);
 }
+
+#[test]
+fn cannot_derive_representative_plans_when_root_config_is_invalid() {
+    let dots_root = TempDir::new().expect("temporary dots repository should be created");
+
+    let error = derive_representative_plans(
+        "version: nope\nrepository: /repo\nsources: []\n",
+        canonical_include_config(),
+        dots_root.path(),
+    )
+    .expect_err("invalid root config should fail before planning");
+
+    assert!(matches!(error, ProgramError::InvalidConfiguration { .. }));
+}
+
+#[test]
+fn cannot_derive_representative_plans_when_include_config_is_invalid() {
+    let dots_root = TempDir::new().expect("temporary dots repository should be created");
+
+    // This targets the include parse branch after a valid root parse succeeds.
+    let error = derive_representative_plans(
+        canonical_root_config(),
+        "version: nope\nrepository: /repo\nsources: []\n",
+        dots_root.path(),
+    )
+    .expect_err("invalid include config should fail before intent derivation");
+
+    assert!(matches!(error, ProgramError::InvalidConfiguration { .. }));
+}

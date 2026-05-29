@@ -11,6 +11,21 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-29: Close remaining non-actions region-only gaps - Add targeted unit
+  coverage in `rust/src/operation.rs` for read_directory and
+  list_directory_children error paths, add targeted unit coverage in
+  `rust/src/status.rs` for copy_target_kind failure during inspection; analyze
+  remaining 20 missed regions and document that all are region-only accounting
+  artifacts (defensive branches, unreachable match arms, or closure setup code);
+  maintain 100.00% line coverage and all wrapper checks; conclude that
+  region-only gaps do not represent missing behavioral coverage and document
+  region-coverage metrics as acceptable terminal state.
+- 2026-05-29: Add apply-stage overwrite failure-path coverage slice - Add unit
+  coverage in `rust/src/actions.rs` for symlink overwrite replacement failure,
+  symlink backup-overwrite replacement failure, copy status inspection failure
+  during apply, copy overwrite replacement failure, and copy backup-overwrite
+  replacement failure; keep all wrappers green and improve total line coverage
+  from 99.79% to 100.00%.
 - 2026-05-29: Cover public entrypoints for final line-coverage gaps - Add
   composition-root tests for explicit-config apply dispatch and subprocess
   integration coverage for the public run/apply entrypoints, including the

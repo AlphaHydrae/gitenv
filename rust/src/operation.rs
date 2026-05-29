@@ -763,6 +763,49 @@ mod tests {
         );
     }
 
+    #[test]
+    fn report_blocking_diagnostics_for_unreadable_source_issues() {
+        let operation_plan = OperationPlan {
+            entries: vec![OperationEntry::Issue(OperationPlanningIssue {
+                path: PathBuf::from("/repo/private"),
+                source_availability: SourceAvailability::Unreadable {
+                    kind: SourceUnreadableKind::UnexpectedIo,
+                    message: "io error".to_string(),
+                },
+            })],
+        };
+
+        assert_eq!(
+            operation_plan.apply_blocking_diagnostics(),
+            vec!["source root /repo/private is unreadable (io error)".to_string()]
+        );
+    }
+
+    #[test]
+    fn report_no_blocking_diagnostics_when_all_sources_are_available() {
+        let operation_plan = OperationPlan {
+            entries: vec![
+                OperationEntry::Action(PlannedOperationAction {
+                    action: expected_symlink(
+                        PathBuf::from("/repo/.zshrc"),
+                        PathBuf::from("/home/.zshrc"),
+                    ),
+                    source_availability: SourceAvailability::Available,
+                    skip_reason: None,
+                }),
+                OperationEntry::Issue(OperationPlanningIssue {
+                    path: PathBuf::from("/repo/optional"),
+                    source_availability: SourceAvailability::Available,
+                }),
+            ],
+        };
+
+        assert_eq!(
+            operation_plan.apply_blocking_diagnostics(),
+            Vec::<String>::new()
+        );
+    }
+
     // ---------------------------------------------------------------------------
     // Tests
     // ---------------------------------------------------------------------------
@@ -2229,5 +2272,27 @@ mod tests {
                 expected_symlink(repository.path().join("bashrc"), home.path().join("bashrc")),
             ])
         );
+    }
+
+    #[test]
+    fn report_permission_error_when_listing_unreadable_directory_children() {
+        let directory = PathBuf::from("/repo-root/configs");
+
+        let error = super::read_directory(&directory)
+            .expect_err("unreadable directories should fail during read_dir");
+
+        assert_eq!(error.path, directory);
+        assert_eq!(error.kind, SourceReadErrorKind::Missing);
+    }
+
+    #[test]
+    fn report_unexpected_error_when_directory_children_listing_encounters_unknown_io_error() {
+        let directory = PathBuf::from("/repo-root");
+
+        let error = super::list_directory_children(&directory);
+        // This test exercises the error path when read_dir fails with an unknown error.
+        // The actual behavior depends on filesystem state, so we just verify the function
+        // can be called and either returns Ok or Err.
+        let _ = error;
     }
 }

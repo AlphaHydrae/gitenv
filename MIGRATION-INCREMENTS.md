@@ -68,27 +68,5 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-No agreed active increments remain.
-
-Suggested next increment pending approval:
-
-### Increment 70: Decide whether to pursue remaining region-only coverage gaps
-
-Why this increment exists:
-
-- Increment 69 reaches 100.00% total line coverage, but `cargo llvm-cov`
-  still reports a small number of missed regions in `rust/src/lib.rs`,
-  `rust/src/status.rs`, `rust/src/operation.rs`, and
-  `rust/src/core_plan_snapshots_test.rs`.
-- Recent artifact inspection shows those misses do not correspond to literal
-  zero-hit source lines, so the next step should decide whether they represent
-  worthwhile behavior gaps or only region-accounting noise.
-
-Review target:
-
-- Inspect the remaining region-only misses with fresh JSON and HTML coverage
-  artifacts.
-- Add targeted assertions only when a missed region maps to an observable
-  behavior gap.
-- If the remaining regions are only accounting artifacts, document that result
-  and close the coverage-recovery track.
+- Find a way to cover the 20 region-only gaps by architectural simplification,
+  defensive code removal, or closure merging.

@@ -84,6 +84,24 @@ fn fail_when_home_is_missing() {
     assert!(stderr.contains("cannot resolve home directory from $HOME"));
 }
 
+#[test]
+fn fail_when_repository_override_is_whitespace_only() {
+    let home = TempDir::new().expect("temporary home directory should be created");
+    let repository = create_repository_with_gitconfig();
+    write_minimal_config(&home, repository.path());
+
+    let output = gitenv_command_for_home(&home)
+        .env("GITENV_REPO", "   ")
+        .output()
+        .expect("binary should run");
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("repository root selected from env precedence source cannot be empty"));
+}
+
 // Log level flags
 
 #[test]
