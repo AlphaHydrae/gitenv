@@ -20,7 +20,7 @@ copied ~/projects/dotfiles/.gitconfig to ~/projects/dotfiles/.gitconfig
 ## Table of contents
 
 - [Installation](#installation)
-- [Configuration](#configuration)
+- [Configuration file](#configuration-file)
   - [Repository](#repository)
   - [Defaults](#defaults)
   - [Change the destination](#change-the-destination)
@@ -36,7 +36,7 @@ copied ~/projects/dotfiles/.gitconfig to ~/projects/dotfiles/.gitconfig
   - [Select item-level overrides](#select-item-level-overrides)
   - [Composition with includes](#composition-with-includes)
   - [Optional includes](#optional-includes)
-- [Command-line flags](#command-line-flags)
+- [Command-line configuration](#command-line-configuration)
   - [--config PATH / -c PATH](#--config-path---c-path)
   - [--repo PATH](#--repo-path)
   - [--log-level LEVEL](#--log-level-level)
@@ -52,13 +52,14 @@ Placeholder:
 <installation instructions will be added here>
 ```
 
-## Configuration
+## Configuration file
 
 gitenv reads YAML configuration from one of the following locations:
 
-1. `$GITENV_CONFIG` (if set)
-2. `$XDG_CONFIG_HOME/gitenv/config.yml` (if set)
-3. `$HOME/.config/gitenv/config.yml` (fallback)
+1. `--config PATH` or `-c PATH` (if set)
+2. `$GITENV_CONFIG` (if set)
+3. `$XDG_CONFIG_HOME/gitenv/config.yml` (if set)
+4. `$HOME/.config/gitenv/config.yml` (fallback)
 
 Start with a minimal configuration:
 
@@ -438,9 +439,11 @@ sources:
 Use `optional: true` on `path` and `env` includes to silently skip missing files
 or environment variables. When `optional` is not specified, includes are required.
 
-## Command-line flags
+## Command-line configuration
 
-gitenv can be configured at runtime with the following flags and environment variables that override YAML values.
+gitenv can be configured at runtime with the following flags and environment
+variables that override YAML values. When both are present, command-line flags
+take precedence over environment variables.
 
 ### `--config PATH` / `-c PATH`
 
@@ -464,7 +467,6 @@ GITENV_REPO=~/projects/other-env gitenv apply
 ### `--log-level LEVEL`
 
 Set log output level: `debug`, `info`, `warn` (default), `error`.
-The command-line flag takes precedence over `GITENV_LOG_LEVEL`.
 
 ```sh
 gitenv --log-level debug info
@@ -475,7 +477,6 @@ GITENV_LOG_LEVEL=debug gitenv info
 ### `--color MODE`
 
 Control color output mode: `auto` (default), `yes`, `no`.
-The command-line flag takes precedence over `GITENV_COLOR`.
 
 ```sh
 gitenv --color=no info
