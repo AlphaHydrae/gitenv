@@ -11,6 +11,10 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-30: Align coverage policy with enforced 100% checks - Update the
+  direct Rust CI coverage command to enforce 100% function, line, and region
+  coverage, mark the coverage target as reached and maintained in migration and
+  contributor docs, and clear the stale coverage-gap backlog entry.
 - 2026-05-29: Close remaining non-actions region-only gaps - Add targeted unit
   coverage in `rust/src/operation.rs` for read_directory and
   list_directory_children error paths, add targeted unit coverage in

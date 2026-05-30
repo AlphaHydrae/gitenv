@@ -135,6 +135,8 @@ Run these checks from the repository root (in order):
 4. **Coverage** — `./.agent/scripts/coverage.sh`
    - Run once before implementation for baseline, and once after changes.
    - Reports total line coverage for baseline and current state.
+   - Enforces the repository standard of 100% function, line, and region
+     coverage.
    - Output captured in `tmp/agent/coverage_output.log`.
      - Default runs also write line-by-line annotated coverage to
        `tmp/agent/coverage_annotated.log`.
@@ -152,7 +154,9 @@ Run these checks from the repository root (in order):
      markers (`Run started at (UTC)` / `Run completed at (UTC)`) and exit code.
      Treat previous-run logs as invalid evidence.
    - If coverage decreases, restore coverage in the same increment **BEFORE**
-     claiming completion.
+     claiming completion. A change is not complete while coverage is below the
+     repository's 100% enforced baseline unless the human explicitly approves a
+     temporary exception.
    - Do not add new uncovered code, or cause a coverage drop in code modified
      by the current increment, without explicit human approval.
    - Deferring coverage recovery is acceptable only for intentionally
@@ -180,8 +184,8 @@ without showing actual output.
 - If output is missing or timestamp markers indicate a prior run, treat the
   evidence as stale and rerun before claiming results.
 - Keep human-facing summaries concise: confirm freshness checks were completed,
-   but include only one brief freshness detail unless the human asks for full
-   timestamp output.
+  but include only one brief freshness detail unless the human asks for full
+  timestamp output.
 
 ## Commit message format
 

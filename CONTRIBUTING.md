@@ -81,7 +81,10 @@ Business modules must not print directly to terminal output.
 - Avoid duplicate behavior coverage across layers when a lower-layer test
   already proves the behavior and the higher layer adds no new transformation
   or decision logic.
-- Coverage target is 100%; if lower, document uncovered paths and rationale.
+- Maintain 100% function, line, and region coverage in repository checks.
+- Treat any coverage regression as blocking work: restore it in the same change
+  before considering the work complete unless the project owner explicitly
+  approves a temporary drop.
 - Treat coverage as a signal, not a substitute for assertion quality.
 - Include parity tests for equivalent library and CLI workflows.
 - Include logging tests for level filtering and expected diagnostic visibility.
@@ -111,7 +114,8 @@ tests` within source files) are faster, more precise, and easier to maintain.
 ### Diagnosing coverage gaps
 
 `coverage.sh` runs `cargo llvm-cov --summary-only`, and the goal that gates the
-script is **100% total line coverage** (`--fail-under-lines`).
+script and repository checks is **100% function, line, and region coverage**
+(`--fail-under-functions 100 --fail-under-lines 100 --fail-under-regions 100`).
 
 When the summary reports a missed line, beware this trap that has cost real time:
 
@@ -194,6 +198,8 @@ Apply checks that match your change scope.
 5. Run documentation lint checks when Markdown files changed.
 6. Run formatting.
 7. Run coverage for code changes. Avoid significant coverage drops.
+7. Run coverage for code changes. Restore any drop before considering the
+  change complete.
 
 ## Setup
 
@@ -246,7 +252,7 @@ is complete.
 - Run coverage summary:
 
   ```sh
-  cd rust && cargo llvm-cov --workspace --all-targets --summary-only
+  cd rust && cargo llvm-cov --workspace --all-targets --summary-only --fail-under-functions 100 --fail-under-lines 100 --fail-under-regions 100
   ```
 
 - Run lint checks:

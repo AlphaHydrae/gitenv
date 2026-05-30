@@ -151,6 +151,8 @@ After updating any core documentation file, verify:
 6. **Verification policy alignment is preserved** — When verification guidance
    changes, confirm these policies remain aligned between `AGENTS.md`,
    `CONTRIBUTING.md`, and `migration-workflow-rust`:
+   - The repository standard is maintained 100% function, line, and region
+     coverage, enforced by repository checks.
    - Migration increments capture pre-change coverage baseline so coverage drops
      can be detected with evidence.
    - If baseline recovery is needed, use a detached temporary worktree under

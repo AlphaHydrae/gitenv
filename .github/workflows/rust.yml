@@ -38,7 +38,7 @@ jobs:
       - name: Run cargo llvm-cov summary
         run: |
           cd rust
-          cargo llvm-cov --workspace --all-targets --summary-only --fail-under-lines 90
+          cargo llvm-cov --workspace --all-targets --summary-only --fail-under-functions 100 --fail-under-lines 100 --fail-under-regions 100
 
       - name: Run cargo clippy
         run: |

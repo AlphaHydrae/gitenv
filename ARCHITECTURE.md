@@ -225,7 +225,8 @@ centralized.
 - Unit tests for parser, schema validation, normalization, and planners.
 - Integration tests for filesystem behavior on Unix temporary directories.
 - End-to-end tests for CLI workflows and output contracts.
-- Coverage goal: 100% (or documented justified gap).
+- Repository checks maintain 100% function, line, and region coverage.
+- Any change that lowers coverage is incomplete until coverage is restored.
 
 ## Future Considerations
 

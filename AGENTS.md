@@ -113,9 +113,11 @@ them to EVERY task, EVERY time.**
     - **🔴 NEVER use `git stash` or any in-place branch/worktree mutation in the
       active working tree to reconstruct baseline coverage.** This can disrupt
       human review context and changed-file visibility.
-  - If coverage decreases, **do not consider the increment complete.** Restore
-    coverage before claiming completion. Do not add any new uncovered code, or
-    cause a coverage drop in code you modified, without explicit human approval.
+  - If coverage decreases, **do not consider the increment complete.** The
+    current repository standard is 100% function, line, and region coverage;
+    restore coverage before claiming completion. Do not add any new uncovered
+    code, or cause a coverage drop in code you modified, without explicit human
+    approval.
     After implementing a feature, analyze any drop: if it is trivially coverable
     with unit tests, add them; if the code can be restructured for better
     testability without excess complexity, do so and explain; only ask for
@@ -414,8 +416,8 @@ These wrappers run the commands documented in
 
 - Use `./.agent/scripts/coverage.sh` from the repository root for test coverage.
 - The script captures full output to `tmp/agent/coverage_output.log`, prints the
-  exit code, prints UTC start/end run markers, and prints the total line
-  coverage when available.
+  exit code, prints UTC start/end run markers, and enforces 100% function,
+  line, and region coverage.
 - On a default run the script also writes a line-by-line annotated source report
   to `tmp/agent/coverage_annotated.log`. To list every uncovered line quickly:
   ```sh

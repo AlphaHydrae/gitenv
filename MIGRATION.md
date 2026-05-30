@@ -36,7 +36,7 @@ strategy, and quality gates.
 - Use a two-stage planning model: intent plan first, then operation plan.
 - Require feature parity between library and CLI surfaces.
 - Require configurable logging from both CLI and library.
-- Aim for 100% test coverage (slightly under is acceptable if justified).
+- Maintain 100% function, line, and region coverage in repository checks.
 
 ## Implementation Cadence And Review Workflow
 
@@ -62,10 +62,10 @@ strategy, and quality gates.
   removal/closure condition.
 - Add increment-level regression tests whenever bugs or edge cases are found.
 - For every increment, report test coverage before and after the change. If
-  coverage decreases, restore it in the same increment unless the project owner
-  explicitly approves a temporary drop; if a drop is approved, explain why and
-  document follow-up work in the living increments backlog and/or inline TODO
-  comments.
+  coverage decreases, restore it in the same increment before considering the
+  work complete unless the project owner explicitly approves a temporary drop;
+  if a drop is approved, explain why and document follow-up work in the living
+  increments backlog and/or inline TODO comments.
 - Avoid mixing architectural refactors and feature delivery in the same
   increment unless explicitly approved.
 - As increments are completed, keep phase exit-criteria checkboxes in this file
@@ -374,13 +374,13 @@ Exit criteria:
 
 ### Phase 4: Hardening and release readiness
 
-- [x] Add coverage reporting and enforce threshold (90% floor active; goal is
-      100%).
+- [x] Add coverage reporting and enforce 100% function, line, and region
+  thresholds in repository checks.
 - Add CI matrix and release workflow.
 
 Exit criteria:
 
-- [ ] Coverage target reached (goal: 100%).
+- [x] Coverage target reached and maintained at 100%.
 - [ ] CI green for required checks.
 - [ ] Release checklist documented.
 
@@ -465,8 +465,10 @@ not planned for the current migration scope.
 
 Coverage target:
 
-- Goal: 100% line and branch coverage.
-- If coverage is below 100%, document precise uncovered paths and rationale.
+- Maintain 100% function, line, and region coverage in repository checks.
+- If a change causes a drop, restore coverage in the same increment before the
+  work is considered complete unless the project owner explicitly approves a
+  temporary exception.
 
 ## Rollout Strategy
 

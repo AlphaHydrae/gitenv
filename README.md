@@ -29,6 +29,7 @@ Read on for <a href="#configuration">more advanced options</a>.
     gem install gitenv
 
 <a name="configuration"></a>
+
 ## Configuration
 
 If your repository is more complex than a bunch of dot files or you want to put the links somewhere other than in your home folder, you will have to customize your configuration file. Gitenv prompts you to create one the first time you run it. It looks for `~/.gitenv.rb` by default. You can override this with the `-c, --config` option or by setting the `GITENV_CONFIG` environment variable.
