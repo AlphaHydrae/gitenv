@@ -6,8 +6,8 @@
 //! here.
 //!
 //! The composition root in `lib.rs` wires a real source-availability boundary
-//! into an [`OperationContext`]. Directory traversal stays in this module so
-//! operation planning owns selection expansion semantics.
+//! into an [`OperationContext`]. Directory traversal lives in a private sibling
+//! module so operation planning still owns selection expansion semantics.
 
 use crate::config::SelectionType;
 use crate::{
@@ -21,11 +21,7 @@ use crate::{
 use log::Level;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RecursiveDirectoryEntryKind {
-    File,
-    Directory,
-}
+mod directory_listing;
 
 /// Concrete, execution-shaped planning output.
 ///
@@ -278,7 +274,7 @@ fn expand_select_action(
     } else {
         Some(0)
     };
-    let entries = match list_directory_entries(source_root, max_depth) {
+    let entries = match directory_listing::list_directory_entries(source_root, max_depth) {
         Ok(entries) => entries,
         Err(error) => {
             let source_availability = source_availability_from_error(&error);
@@ -372,115 +368,6 @@ fn target_directory_exists(path: &Path) -> bool {
     path.parent().is_none_or(|parent| parent.is_dir())
 }
 
-fn list_directory_entries(
-    path: &Path,
-    max_depth: Option<usize>,
-) -> Result<Vec<String>, SourceReadError> {
-    let mut entries = Vec::new();
-    collect_directory_entries(path, Path::new(""), max_depth, &mut entries)?;
-    Ok(entries)
-}
-
-fn collect_directory_entries(
-    directory: &Path,
-    relative_prefix: &Path,
-    remaining_depth: Option<usize>,
-    entries: &mut Vec<String>,
-) -> Result<(), SourceReadError> {
-    let mut children = list_directory_children(directory)?;
-    children.sort_by(|left, right| left.0.cmp(&right.0));
-
-    for (name, kind) in children {
-        let relative_path = relative_prefix.join(&name);
-        let child_path = directory.join(&name);
-
-        match kind {
-            RecursiveDirectoryEntryKind::File => {
-                entries.push(relative_path.to_string_lossy().into_owned());
-            }
-            RecursiveDirectoryEntryKind::Directory => {
-                if can_descend(remaining_depth) {
-                    let next_depth = decrement_depth(remaining_depth);
-                    collect_directory_entries(&child_path, &relative_path, next_depth, entries)?;
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn list_directory_children(
-    path: &Path,
-) -> Result<Vec<(String, RecursiveDirectoryEntryKind)>, SourceReadError> {
-    let read_dir = read_directory(path)?;
-
-    let mut entries = Vec::new();
-    for entry in read_dir {
-        let entry = read_dir_entry(path, entry)?;
-        let file_type = read_entry_type(path, &entry)?;
-        let kind = if file_type.is_dir() {
-            RecursiveDirectoryEntryKind::Directory
-        } else {
-            RecursiveDirectoryEntryKind::File
-        };
-
-        entries.push((entry.file_name().to_string_lossy().into_owned(), kind));
-    }
-
-    Ok(entries)
-}
-
-fn can_descend(remaining_depth: Option<usize>) -> bool {
-    match remaining_depth {
-        None => true,
-        Some(depth) => depth > 0,
-    }
-}
-
-fn decrement_depth(remaining_depth: Option<usize>) -> Option<usize> {
-    remaining_depth.map(|depth| depth.saturating_sub(1))
-}
-
-fn read_dir_entry(
-    path: &Path,
-    entry: Result<std::fs::DirEntry, std::io::Error>,
-) -> Result<std::fs::DirEntry, SourceReadError> {
-    entry.map_err(|error| source_read_error(path, error))
-}
-
-fn read_directory(path: &Path) -> Result<std::fs::ReadDir, SourceReadError> {
-    std::fs::read_dir(path).map_err(|error| source_read_error(path, error))
-}
-
-fn read_entry_type(
-    path: &Path,
-    entry: &std::fs::DirEntry,
-) -> Result<std::fs::FileType, SourceReadError> {
-    map_entry_type_result(path, entry.file_type())
-}
-
-fn map_entry_type_result(
-    path: &Path,
-    file_type: Result<std::fs::FileType, std::io::Error>,
-) -> Result<std::fs::FileType, SourceReadError> {
-    file_type.map_err(|error| source_read_error(path, error))
-}
-
-fn source_read_error(path: &Path, error: std::io::Error) -> SourceReadError {
-    let kind = match error.kind() {
-        std::io::ErrorKind::NotFound => SourceReadErrorKind::Missing,
-        std::io::ErrorKind::PermissionDenied => SourceReadErrorKind::PermissionDenied,
-        _ => SourceReadErrorKind::UnexpectedIo,
-    };
-
-    SourceReadError {
-        path: path.to_path_buf(),
-        kind,
-        message: error.to_string(),
-    }
-}
-
 impl SourceAvailability {
     pub(crate) fn diagnostic_suffix(&self) -> Option<String> {
         match self {
@@ -559,7 +446,6 @@ mod tests {
         intent::validated_test_globs,
     };
     use std::fs;
-    use std::io::ErrorKind;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     #[cfg(unix)]
@@ -1466,147 +1352,6 @@ mod tests {
     }
 
     #[test]
-    fn map_recursive_source_read_errors_to_the_expected_availability_kinds() {
-        let path = PathBuf::from("/repo-root/nested");
-
-        let missing = super::source_read_error(
-            &path,
-            std::io::Error::new(ErrorKind::NotFound, "missing directory"),
-        );
-        let unexpected = super::source_read_error(&path, std::io::Error::other("boom"));
-
-        assert_eq!(missing.path, path);
-        assert_eq!(missing.kind, SourceReadErrorKind::Missing);
-        assert_eq!(unexpected.path, path);
-        assert_eq!(unexpected.kind, SourceReadErrorKind::UnexpectedIo);
-    }
-
-    #[test]
-    fn preserve_directory_open_errors_as_source_read_errors() {
-        let root = TempDir::new().expect("temporary root should be created");
-        let missing_directory = root.path().join("missing");
-
-        let error = super::read_directory(&missing_directory)
-            .expect_err("missing directory reads should be reported as errors");
-
-        assert_eq!(error.path, missing_directory);
-        assert_eq!(error.kind, SourceReadErrorKind::Missing);
-    }
-
-    #[test]
-    fn preserve_directory_iteration_errors_as_source_read_errors() {
-        let directory = PathBuf::from("/repo-root/configs");
-
-        let error = super::read_dir_entry(
-            &directory,
-            Err(std::io::Error::new(
-                ErrorKind::PermissionDenied,
-                "cannot iterate",
-            )),
-        )
-        .expect_err("directory iteration failures should be preserved");
-
-        assert_eq!(error.path, directory);
-        assert_eq!(error.kind, SourceReadErrorKind::PermissionDenied);
-        assert_eq!(error.message, "cannot iterate");
-    }
-
-    #[test]
-    fn list_directory_children_reports_files_and_directories() {
-        let root = TempDir::new().expect("temporary root should be created");
-        let directory = root.path().join("configs");
-        fs::create_dir_all(directory.join("nested")).expect("nested directory should be created");
-        fs::write(directory.join("tool.conf"), "tool\n").expect("file should be written");
-
-        let mut children = super::list_directory_children(&directory)
-            .expect("directory children should be listed successfully");
-        children.sort_by(|left, right| left.0.cmp(&right.0));
-
-        assert_eq!(
-            children,
-            vec![
-                (
-                    "nested".to_string(),
-                    super::RecursiveDirectoryEntryKind::Directory,
-                ),
-                (
-                    "tool.conf".to_string(),
-                    super::RecursiveDirectoryEntryKind::File,
-                ),
-            ]
-        );
-    }
-
-    #[test]
-    fn decrement_depth_saturates_at_zero() {
-        assert_eq!(super::decrement_depth(None), None);
-        assert_eq!(super::decrement_depth(Some(2)), Some(1));
-        assert_eq!(super::decrement_depth(Some(0)), Some(0));
-    }
-
-    #[test]
-    fn preserve_directory_entry_type_errors_as_source_read_errors() {
-        let directory = PathBuf::from("/repo-root/configs");
-
-        let error = super::map_entry_type_result(
-            &directory,
-            Err(std::io::Error::other("file type is unavailable")),
-        )
-        .expect_err("entry type failures should be preserved");
-
-        assert_eq!(error.path, directory);
-        assert_eq!(error.kind, SourceReadErrorKind::UnexpectedIo);
-        assert_eq!(error.message, "file type is unavailable");
-    }
-
-    #[test]
-    fn preserve_directory_entry_read_errors_as_source_read_errors() {
-        let directory = PathBuf::from("/repo-root/configs");
-        let entry_error =
-            std::io::Error::new(std::io::ErrorKind::PermissionDenied, "entry read failed");
-
-        let error = super::read_dir_entry(&directory, Err(entry_error))
-            .expect_err("directory entry read failures should be preserved");
-
-        assert_eq!(error.path, directory);
-        assert_eq!(error.kind, SourceReadErrorKind::PermissionDenied);
-        assert_eq!(error.message, "entry read failed");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn list_directory_children_treats_symlink_entries_as_files() {
-        let root = TempDir::new().expect("temporary root should be created");
-        let directory = root.path().join("configs");
-        fs::create_dir_all(directory.join("nested")).expect("nested directory should be created");
-        fs::write(directory.join("target.txt"), "target\n").expect("target file should be written");
-        symlink(directory.join("nested"), directory.join("nested-link"))
-            .expect("symlink entry should be created");
-
-        let mut children = super::list_directory_children(&directory)
-            .expect("directory children should be listed successfully");
-        children.sort_by(|left, right| left.0.cmp(&right.0));
-
-        assert_eq!(
-            children,
-            vec![
-                (
-                    "nested".to_string(),
-                    super::RecursiveDirectoryEntryKind::Directory,
-                ),
-                (
-                    "nested-link".to_string(),
-                    super::RecursiveDirectoryEntryKind::File,
-                ),
-                (
-                    "target.txt".to_string(),
-                    super::RecursiveDirectoryEntryKind::File,
-                ),
-            ]
-        );
-    }
-
-    #[test]
     fn preserve_a_missing_directory_listing_as_a_planning_issue() {
         let home = TempDir::new().expect("temporary home directory should be created");
         let repository = TempDir::new().expect("temporary repository should be created");
@@ -2286,27 +2031,5 @@ mod tests {
                 expected_symlink(repository.path().join("bashrc"), home.path().join("bashrc")),
             ])
         );
-    }
-
-    #[test]
-    fn report_permission_error_when_listing_unreadable_directory_children() {
-        let directory = PathBuf::from("/repo-root/configs");
-
-        let error = super::read_directory(&directory)
-            .expect_err("unreadable directories should fail during read_dir");
-
-        assert_eq!(error.path, directory);
-        assert_eq!(error.kind, SourceReadErrorKind::Missing);
-    }
-
-    #[test]
-    fn report_unexpected_error_when_directory_children_listing_encounters_unknown_io_error() {
-        let directory = PathBuf::from("/repo-root");
-
-        let error = super::list_directory_children(&directory);
-        // This test exercises the error path when read_dir fails with an unknown error.
-        // The actual behavior depends on filesystem state, so we just verify the function
-        // can be called and either returns Ok or Err.
-        let _ = error;
     }
 }

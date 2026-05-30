@@ -70,3 +70,23 @@ Architectural and design decisions referenced by active increments:
 
 - Find a way to cover the 20 region-only gaps by architectural simplification,
   defensive code removal, or closure merging.
+
+- Close the 3 remaining missed regions (as of 2026-05-30):
+
+  - **`operation.rs` — 2 gaps** at lines 420–421 inside
+    `list_directory_children`, on the `?` operator error branches for
+    `read_dir_entry` and `read_entry_type` within the `for entry in read_dir`
+    loop. These require a directory iterator that succeeds initially then fails
+    mid-iteration, which requires filesystem failure injection not currently
+    supported by the test structure. The `^0` column markers appear in the
+    coverage text report at those lines.
+
+  - **`status.rs` — 1 gap** at line 146 inside
+    `inspect_symlink_operation_status_with_injectables`, on the `?` operator
+    error branch of `let current_target = read_symlink_target(&operation.target)?;`.
+    This is a monomorphization gap: the test `cannot_inspect_symlink_status_when_readlink_fails`
+    already covers the error path for the test-double instantiation, but the
+    real-filesystem instantiation (`read_symlink_target_from_filesystem`) has
+    its error branch uncovered. To close it, add a test that exercises the
+    injectable variant directly with a failing `read_symlink_target` closure
+    when the target kind is `TargetKind::Symlink`.
