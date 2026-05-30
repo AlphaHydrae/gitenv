@@ -120,8 +120,8 @@ pub fn inspect_symlink_operation_status(
 ) -> Result<SymlinkInspection, ProgramError> {
     inspect_symlink_operation_status_with_injectables(
         operation,
-        &target_kind_from_filesystem,
-        &read_symlink_target_from_filesystem,
+        target_kind_from_filesystem,
+        read_symlink_target_from_filesystem,
     )
 }
 
@@ -138,8 +138,8 @@ pub fn inspect_copy_operation_status(
 
 fn inspect_symlink_operation_status_with_injectables(
     operation: &FileOperation,
-    target_kind: &impl Fn(&std::path::Path) -> Result<TargetKind, ProgramError>,
-    read_symlink_target: &impl Fn(&std::path::Path) -> Result<PathBuf, ProgramError>,
+    target_kind: fn(&std::path::Path) -> Result<TargetKind, ProgramError>,
+    read_symlink_target: fn(&std::path::Path) -> Result<PathBuf, ProgramError>,
 ) -> Result<SymlinkInspection, ProgramError> {
     let state = match target_kind(&operation.target)? {
         TargetKind::Symlink => {
@@ -457,13 +457,13 @@ mod tests {
 
         let error = inspect_symlink_operation_status_with_injectables(
             &operation,
-            &|path| {
+            |path: &std::path::Path| {
                 Err(ProgramError::PathInspectionFailed {
                     path: path.to_path_buf(),
                     message: "permission denied".to_string(),
                 })
             },
-            &read_symlink_target_from_filesystem,
+            read_symlink_target_from_filesystem,
         )
         .expect_err("metadata failures should be propagated");
 
@@ -485,8 +485,8 @@ mod tests {
 
         let error = inspect_symlink_operation_status_with_injectables(
             &operation,
-            &|_| Ok(TargetKind::Symlink),
-            &|path| {
+            |_| Ok(TargetKind::Symlink),
+            |path: &std::path::Path| {
                 Err(ProgramError::SymlinkTargetReadFailed {
                     path: path.to_path_buf(),
                     message: "broken link".to_string(),
@@ -649,8 +649,8 @@ mod tests {
 
         let status = inspect_symlink_operation_status_with_injectables(
             &operation,
-            &|_| Ok(TargetKind::Symlink),
-            &|_| Ok(PathBuf::from("/repo/.zshrc")),
+            |_| Ok(TargetKind::Symlink),
+            |_| Ok(PathBuf::from("/repo/.zshrc")),
         )
         .expect("injectable symlink inspection should work");
 
