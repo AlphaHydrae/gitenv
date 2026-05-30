@@ -1559,6 +1559,20 @@ mod tests {
         assert_eq!(error.message, "file type is unavailable");
     }
 
+    #[test]
+    fn preserve_directory_entry_read_errors_as_source_read_errors() {
+        let directory = PathBuf::from("/repo-root/configs");
+        let entry_error =
+            std::io::Error::new(std::io::ErrorKind::PermissionDenied, "entry read failed");
+
+        let error = super::read_dir_entry(&directory, Err(entry_error))
+            .expect_err("directory entry read failures should be preserved");
+
+        assert_eq!(error.path, directory);
+        assert_eq!(error.kind, SourceReadErrorKind::PermissionDenied);
+        assert_eq!(error.message, "entry read failed");
+    }
+
     #[cfg(unix)]
     #[test]
     fn list_directory_children_treats_symlink_entries_as_files() {

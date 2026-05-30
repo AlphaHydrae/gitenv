@@ -84,9 +84,9 @@ fn derive_representative_plans(
     root_yaml: &str,
     include_yaml: &str,
     dots_root: &Path,
-) -> Result<(IntentPlan, OperationPlan), ProgramError> {
-    let root = parse_config(root_yaml)?;
-    let include = parse_config(include_yaml)?;
+) -> (IntentPlan, OperationPlan) {
+    let root = parse_config(root_yaml).expect("root config should be valid");
+    let include = parse_config(include_yaml).expect("include config should be valid");
     let loaded_root = LoadedConfig {
         path: PathBuf::from("/root.yml"),
         config: root,
@@ -119,7 +119,8 @@ fn derive_representative_plans(
         config_reader: &config_reader,
     };
 
-    let intent_plan = derive_intent_plan(&loaded_root, &context)?;
+    let intent_plan = derive_intent_plan(&loaded_root, &context)
+        .expect("intent plan derivation should succeed with valid config");
 
     let source_reader = FnSourceAvailabilityReader(readable_source_path);
     let operation_context = OperationContext {
@@ -127,9 +128,10 @@ fn derive_representative_plans(
         source_reader: &source_reader,
         global_selection_excludes: vec![],
     };
-    let operation_plan = derive_operation_plan(&intent_plan, &operation_context)?;
+    let operation_plan = derive_operation_plan(&intent_plan, &operation_context)
+        .expect("operation plan derivation should succeed with valid config");
 
-    Ok((intent_plan, operation_plan))
+    (intent_plan, operation_plan)
 }
 
 fn seed_dots_repository(dots_root: &Path) {
@@ -280,8 +282,7 @@ fn create_rich_intent_and_operation_plans() {
         canonical_root_config(),
         canonical_include_config(),
         dots_root.path(),
-    )
-    .expect("representative config should derive both plans");
+    );
 
     let expected_intent_plan = IntentPlan {
         repository: "/repo".to_string(),
@@ -387,43 +388,12 @@ fn shorthand_and_canonical_plans_are_identical() {
         shorthand_root_config(),
         shorthand_include_config(),
         dots_root.path(),
-    )
-    .expect("shorthand representative config should derive both plans");
+    );
     let canonical = derive_representative_plans(
         canonical_root_config(),
         canonical_include_config(),
         dots_root.path(),
-    )
-    .expect("canonical representative config should derive both plans");
+    );
 
     assert_eq!(shorthand, canonical);
-}
-
-#[test]
-fn cannot_derive_representative_plans_when_root_config_is_invalid() {
-    let dots_root = TempDir::new().expect("temporary dots repository should be created");
-
-    let error = derive_representative_plans(
-        "version: nope\nrepository: /repo\nsources: []\n",
-        canonical_include_config(),
-        dots_root.path(),
-    )
-    .expect_err("invalid root config should fail before planning");
-
-    assert!(matches!(error, ProgramError::InvalidConfiguration { .. }));
-}
-
-#[test]
-fn cannot_derive_representative_plans_when_include_config_is_invalid() {
-    let dots_root = TempDir::new().expect("temporary dots repository should be created");
-
-    // This targets the include parse branch after a valid root parse succeeds.
-    let error = derive_representative_plans(
-        canonical_root_config(),
-        "version: nope\nrepository: /repo\nsources: []\n",
-        dots_root.path(),
-    )
-    .expect_err("invalid include config should fail before intent derivation");
-
-    assert!(matches!(error, ProgramError::InvalidConfiguration { .. }));
 }
