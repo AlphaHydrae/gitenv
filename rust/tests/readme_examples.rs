@@ -1,6 +1,6 @@
 use gitenv::{
-    ActionMode, Config, ConfigItem, Defaults, FileConfig, Include, SelectConfig, SelectionType,
-    Source, SourceRoot, parse_config,
+    ActionMode, Config, ConfigItem, Defaults, FileConfig, Guard, Include, SelectConfig,
+    SelectionType, Source, SourceRoot, parse_config,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -169,10 +169,19 @@ fn readme_text() -> String {
 }
 
 fn source(from: &str, to: Option<&str>, configs: Vec<ConfigItem>) -> Source {
+    source_with_root(SourceRoot::Path(from.to_string()), to, None, configs)
+}
+
+fn source_with_root(
+    from: SourceRoot,
+    to: Option<&str>,
+    guard: Option<Guard>,
+    configs: Vec<ConfigItem>,
+) -> Source {
     Source {
-        from: SourceRoot::Path(from.to_string()),
+        from,
         to: to.map(ToString::to_string),
-        guard: None,
+        guard,
         configs,
     }
 }
@@ -215,17 +224,44 @@ fn select_item(
     exclude: &[&str],
     mode: Option<ActionMode>,
 ) -> ConfigItem {
+    select_item_with_options(
+        selection_type,
+        false,
+        false,
+        include,
+        exclude,
+        mode,
+        None,
+        None,
+        None,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn select_item_with_options(
+    selection_type: SelectionType,
+    recursive: bool,
+    existing_directories_only: bool,
+    include: &[&str],
+    exclude: &[&str],
+    mode: Option<ActionMode>,
+    to: Option<&str>,
+    mkdir: Option<bool>,
+    overwrite: Option<bool>,
+    backup_on_overwrite: Option<bool>,
+) -> ConfigItem {
     ConfigItem::Select(SelectConfig {
         selection_type,
-        recursive: false,
-        existing_directories_only: false,
+        recursive,
+        existing_directories_only,
         include: include.iter().map(ToString::to_string).collect(),
         exclude: exclude.iter().map(ToString::to_string).collect(),
         mode,
-        to: None,
-        mkdir: None,
-        overwrite: None,
-        backup_on_overwrite: None,
+        to: to.map(ToString::to_string),
+        mkdir,
+        overwrite,
+        backup_on_overwrite,
     })
 }
 
@@ -377,6 +413,86 @@ fn expected_readme_configs() -> BTreeMap<String, Config> {
     );
 
     expected.insert(
+        "file-item-mkdir".to_string(),
+        Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            sources: vec![source(
+                ".",
+                None,
+                vec![
+                    file_item(
+                        ".config/tool/config.toml",
+                        None,
+                        None,
+                        Some(".config/tool"),
+                        Some(true),
+                        None,
+                        None,
+                    ),
+                    shorthand_file_item(".zshrc"),
+                ],
+            )],
+            includes: vec![],
+        },
+    );
+
+    expected.insert(
+        "environment-backed-source-roots".to_string(),
+        Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            sources: vec![
+                source_with_root(
+                    SourceRoot::Environment {
+                        env: "DOTFILES_ROOT".to_string(),
+                        optional: false,
+                    },
+                    None,
+                    None,
+                    vec![shorthand_file_item(".zshrc")],
+                ),
+                source_with_root(
+                    SourceRoot::Environment {
+                        env: "TOOL_CONFIG_ROOT".to_string(),
+                        optional: true,
+                    },
+                    Some(".config/tool"),
+                    None,
+                    vec![shorthand_file_item("config.toml")],
+                ),
+            ],
+            includes: vec![],
+        },
+    );
+
+    expected.insert(
+        "source-level-guards".to_string(),
+        Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            sources: vec![
+                source_with_root(
+                    SourceRoot::Path(".".to_string()),
+                    Some(".config/gitenv-demo"),
+                    Some(Guard::ToExists),
+                    vec![shorthand_file_item(".zshrc")],
+                ),
+                source_with_root(
+                    SourceRoot::Path("macos".to_string()),
+                    None,
+                    Some(Guard::DirectoryExists("/Applications".to_string())),
+                    vec![shorthand_file_item("karabiner.json")],
+                ),
+            ],
+            includes: vec![],
+        },
+    );
+
+    expected.insert(
         "select-multiple-files".to_string(),
         Config {
             version: 1,
@@ -390,6 +506,58 @@ fn expected_readme_configs() -> BTreeMap<String, Config> {
                     &["dotfiles/**"],
                     &["**/*.tmp", "private/**"],
                     None,
+                )],
+            )],
+            includes: vec![],
+        },
+    );
+
+    expected.insert(
+        "recursive-select-existing-directories-only".to_string(),
+        Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            sources: vec![source(
+                "profiles",
+                Some(".local/share/profiles"),
+                vec![select_item_with_options(
+                    SelectionType::All,
+                    true,
+                    true,
+                    &["**/*.profile"],
+                    &[],
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )],
+            )],
+            includes: vec![],
+        },
+    );
+
+    expected.insert(
+        "select-item-overrides".to_string(),
+        Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            sources: vec![source(
+                "profiles",
+                None,
+                vec![select_item_with_options(
+                    SelectionType::NonDot,
+                    false,
+                    false,
+                    &["**/*.json"],
+                    &[],
+                    Some(ActionMode::Copy),
+                    Some(".config/profiles"),
+                    Some(true),
+                    Some(true),
+                    Some(true),
                 )],
             )],
             includes: vec![],
@@ -442,6 +610,30 @@ fn expected_readme_configs() -> BTreeMap<String, Config> {
                 Include::Path {
                     path: "~/.gitenv-private.yml".to_string(),
                     optional: false,
+                },
+            ],
+            sources: vec![source(".", None, vec![shorthand_file_item(".zshrc")])],
+        },
+    );
+
+    expected.insert(
+        "optional-includes".to_string(),
+        Config {
+            version: 1,
+            repository: "~/projects/env".to_string(),
+            defaults: Defaults::default(),
+            includes: vec![
+                Include::Path {
+                    path: "shared-config.yml".to_string(),
+                    optional: false,
+                },
+                Include::Path {
+                    path: "~/.local/gitenv-private.yml".to_string(),
+                    optional: true,
+                },
+                Include::Environment {
+                    env: "CUSTOM_GITENV_CONFIG".to_string(),
+                    optional: true,
                 },
             ],
             sources: vec![source(".", None, vec![shorthand_file_item(".zshrc")])],
@@ -710,6 +902,16 @@ fn create_stub_includes(home: &TempDir, config: &Config) {
     }
 }
 
+fn set_source_root_environment(command: &mut Command, repo: &TempDir, config: &Config) {
+    for source in &config.sources {
+        if let SourceRoot::Environment { env, .. } = &source.from {
+            let source_dir = repo.path().join(format!("source-{env}"));
+            fs::create_dir_all(&source_dir).expect("environment source directory should exist");
+            command.env(env, source_dir);
+        }
+    }
+}
+
 #[test]
 fn readme_examples_execute_without_error_in_temporary_directories() {
     let readme = readme_text();
@@ -750,14 +952,15 @@ fn readme_examples_execute_without_error_in_temporary_directories() {
         create_stub_includes(&home, &config);
 
         // Run `gitenv info` with the example config and verify it succeeds.
-        let output = create_gitenv_command_for_home(&home, &repo)
-            .output()
-            .unwrap_or_else(|error| {
-                panic!(
-                    "gitenv info should execute for example '{}': {}",
-                    example.id, error
-                )
-            });
+        let mut command = create_gitenv_command_for_home(&home, &repo);
+        set_source_root_environment(&mut command, &repo, &config);
+
+        let output = command.output().unwrap_or_else(|error| {
+            panic!(
+                "gitenv info should execute for example '{}': {}",
+                example.id, error
+            )
+        });
 
         assert!(
             output.status.success(),

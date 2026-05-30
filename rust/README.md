@@ -105,46 +105,6 @@ sources:
 `defaults` sets the shared behavior for all config items unless a source or an
 individual item overrides it.
 
-### Rename targets
-
-<!-- readme-config-id: rename-targets -->
-
-```yaml
-version: 1
-repository: "~/projects/env"
-sources:
-  - from: "."
-    configs:
-      - zshrc.local
-      - file: zshrc.shared
-        as: .zshrc.local
-```
-
-Use `as` with the `file:` form to give the target a different name from the
-source file. This is useful when the installed name must differ from the name
-in the repository. The shorthand `- filename` form uses the same name for
-source and target.
-
-### Sub-folders in the repository
-
-<!-- readme-config-id: sub-folders -->
-
-```yaml
-version: 1
-repository: "~/projects/env"
-sources:
-  - from: zsh
-    configs:
-      - .zshrc
-  - from: editor
-    configs:
-      - settings.json
-      - keybindings.json
-```
-
-Each `from` value is a source root inside the repository. This is the YAML
-equivalent of grouping entries under a repository sub-directory.
-
 ### Change the destination
 
 <!-- readme-config-id: destination -->
@@ -180,6 +140,132 @@ sources:
 ```
 
 Set `mode: copy` when a target should be copied instead of symlinked.
+
+### Sub-folders in the repository
+
+<!-- readme-config-id: sub-folders -->
+
+```yaml
+version: 1
+repository: "~/projects/env"
+sources:
+  - from: zsh
+    configs:
+      - .zshrc
+  - from: editor
+    configs:
+      - settings.json
+      - keybindings.json
+```
+
+Each `from` value is a source root inside the repository. This is the YAML
+equivalent of grouping entries under a repository sub-directory.
+
+### Rename targets
+
+<!-- readme-config-id: rename-targets -->
+
+```yaml
+version: 1
+repository: "~/projects/env"
+sources:
+  - from: "."
+    configs:
+      - zshrc.local
+      - file: zshrc.shared
+        as: .zshrc.local
+```
+
+Use `as` with the `file:` form to give the target a different name from the
+source file. This is useful when the installed name must differ from the name
+in the repository. The shorthand `- filename` form uses the same name for
+source and target.
+
+### Overwrite and backup
+
+<!-- readme-config-id: overwrite-and-backup -->
+
+```yaml
+version: 1
+repository: "~/projects/env"
+sources:
+  - from: "."
+    configs:
+      - file: .zshrc
+        overwrite: true
+      - file: .gitconfig
+        mode: copy
+        overwrite: true
+        backup_on_overwrite: true
+```
+
+`overwrite: true` replaces existing targets. `backup_on_overwrite: true` keeps
+the previous target as a sibling `.orig` path before replacement.
+
+### File-level mkdir override
+
+<!-- readme-config-id: file-item-mkdir -->
+
+```yaml
+version: 1
+repository: "~/projects/env"
+sources:
+  - from: "."
+    configs:
+      - file: .config/tool/config.toml
+        to: .config/tool
+        mkdir: true
+      - file: .zshrc
+```
+
+Use `mkdir` on an individual `file` item to override directory-creation
+behavior without changing defaults for all other items.
+
+### Environment-backed source roots
+
+<!-- readme-config-id: environment-backed-source-roots -->
+
+```yaml
+version: 1
+repository: "~/projects/env"
+sources:
+  - from: $DOTFILES_ROOT
+    configs:
+      - .zshrc
+  - from:
+      env: TOOL_CONFIG_ROOT
+      optional: true
+    to: .config/tool
+    configs:
+      - config.toml
+```
+
+`from: $VAR` is shorthand for an environment-backed source. Use the canonical
+object form when you need `optional: true`.
+
+### Source-level guards
+
+<!-- readme-config-id: source-level-guards -->
+
+```yaml
+version: 1
+repository: "~/projects/env"
+sources:
+  - from: "."
+    to: .config/gitenv-demo
+    when: to_exists
+    configs:
+      - .zshrc
+  - from: macos
+    when:
+      directory_exists: /Applications
+    configs:
+      - karabiner.json
+```
+
+Use `when` to include a source only when a condition is satisfied. `to_exists`
+checks the resolved destination directory for that source, and
+`directory_exists` checks an explicit path.
 
 ### Select multiple files
 
@@ -225,26 +311,53 @@ remaining matches.
 On macOS, `.DS_Store` is excluded automatically during selector expansion.
 Add it to `exclude` if you want to make the rule explicit for a source.
 
-### Overwrite and backup
+### Recursive select for existing target directories
 
-<!-- readme-config-id: overwrite-and-backup -->
+<!-- readme-config-id: recursive-select-existing-directories-only -->
 
 ```yaml
 version: 1
 repository: "~/projects/env"
 sources:
-  - from: "."
+  - from: profiles
+    to: .local/share/profiles
     configs:
-      - file: .zshrc
-        overwrite: true
-      - file: .gitconfig
-        mode: copy
-        overwrite: true
-        backup_on_overwrite: true
+      - select:
+          type: all
+          recursive: true
+          existing_directories_only: true
+          include:
+            - "**/*.profile"
 ```
 
-`overwrite: true` replaces existing targets. `backup_on_overwrite: true` keeps
-the previous target as a sibling `.orig` path before replacement.
+Use `existing_directories_only: true` with `recursive: true` to avoid creating
+new target directory chains during recursive selection. The selector still
+plans entries, but apply only touches targets whose parent directory chain
+already exists.
+
+### Select item-level overrides
+
+<!-- readme-config-id: select-item-overrides -->
+
+```yaml
+version: 1
+repository: "~/projects/env"
+sources:
+  - from: profiles
+    configs:
+      - select:
+          type: non-dot
+          include:
+            - "**/*.json"
+          mode: copy
+          to: .config/profiles
+          mkdir: true
+          overwrite: true
+          backup_on_overwrite: true
+```
+
+Use per-select overrides when one selector needs different behavior from
+defaults or source-level options.
 
 ### Composition with includes
 
@@ -274,3 +387,59 @@ Absolute paths and paths starting with `~` are used as-is. Environment
 variable references like `$GITENV_PRIVATE` resolve to the path stored in that
 variable. The `includes` list is processed in order; an including file's own
 sources always appear before the included file's sources.
+
+### Optional includes
+
+<!-- readme-config-id: optional-includes -->
+
+```yaml
+version: 1
+repository: "~/projects/env"
+
+includes:
+  - path: shared-config.yml
+    optional: false
+  - path: ~/.local/gitenv-private.yml
+    optional: true
+  - env: CUSTOM_GITENV_CONFIG
+    optional: true
+
+sources:
+  - from: "."
+    configs:
+      - .zshrc
+```
+
+Use `optional: true` on `path` and `env` includes to silently skip missing files
+or environment variables. When `optional` is not specified, includes are required.
+
+### Command-line and runtime configuration
+
+```sh
+# Display the info command explicitly (same as default gitenv with no args)
+gitenv info
+
+# Override config path at runtime
+gitenv --config ~/.gitenv-custom.yml info
+gitenv -c ~/.gitenv-custom.yml apply
+
+# Set log level for verbose output
+gitenv --log-level debug info
+
+# Control color output (auto, yes, no)
+gitenv --color=no info
+GITENV_COLOR=yes gitenv apply
+
+# Override repository at runtime
+gitenv --repo ~/projects/other-env info
+GITENV_REPO=~/projects/other-env gitenv apply
+```
+
+The `gitenv` command accepts these flags when present:
+
+- `info` — Display planned symlinks and copies (default when no command specified)
+- `apply` — Create or update the planned links and copies
+- `--config PATH` or `-c PATH` — Override config file path (also via `$GITENV_CONFIG`)
+- `--repo PATH` — Override repository root path (also via `$GITENV_REPO`)
+- `--log-level LEVEL` — Set log output level: `debug`, `info`, `warn` (default), `error`
+- `--color MODE` — Color output mode: `auto` (default), `yes`, `no`

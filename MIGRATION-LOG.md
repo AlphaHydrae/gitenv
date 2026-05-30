@@ -11,6 +11,36 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-30: Add optional includes and CLI examples - Add README examples for
+  optional includes with both `path` and `env` forms supporting
+  `optional: true`, and add command-line usage documentation for the `info`
+  subcommand, `--config` flag, `--log-level` flag, and `--color` flag.
+  Synchronize `rust/tests/readme_examples.rs` expected config mappings to
+  include optional-includes scenario validation. Runtime scenario tests
+  validate the new optional-includes YAML config parsing and execution via
+  `gitenv info`. Maintain 100.00% line/function/region coverage.
+  All wrapper checks pass (build, lint, tests, format, lint-md, coverage).
+  This completes the README documentation parity increment series.
+
+- 2026-05-30: Add select recursion and override README examples - Add
+  README examples for recursive select with `existing_directories_only` and
+  select item-level overrides (`mode`, `to`, `mkdir`, `overwrite`,
+  `backup_on_overwrite`), then synchronize
+  `rust/tests/readme_examples.rs` expected config mappings with the new
+  `readme-config-id` entries so parser-shape and runtime `gitenv info`
+  validation continue to execute all documented scenarios in temporary
+  directories.
+
+- 2026-05-30: Reorder README examples and add first missing-feature chunk -
+  Reorder Rust README configuration examples from basic to advanced flow,
+  add explicit examples for file-level `mkdir` overrides,
+  environment-backed source roots, and source-level guards, and synchronize
+  `rust/tests/readme_examples.rs` expected config mappings with new
+  `readme-config-id` examples. Keep runtime README scenario validation at
+  `gitenv info` and seed environment-backed source-root variables in the test
+  harness so all documented examples execute successfully in temporary
+  directories.
+
 - 2026-05-30: Enrich README examples test suite with runtime scenario tests -
   Add scenario test infrastructure in `rust/tests/readme_examples.rs` to execute
   `gitenv info` against all 10 documented README YAML examples in temporary
