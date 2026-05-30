@@ -413,33 +413,44 @@ sources:
 Use `optional: true` on `path` and `env` includes to silently skip missing files
 or environment variables. When `optional` is not specified, includes are required.
 
-### Command-line and runtime configuration
+### Command-line flags
+
+gitenv can be configured at runtime with the following flags and environment variables that override YAML values.
+
+#### `--config PATH` / `-c PATH`
+
+Override the config file path for the current command.
 
 ```sh
-# Display the info command explicitly (same as default gitenv with no args)
-gitenv info
-
-# Override config path at runtime
 gitenv --config ~/.gitenv-custom.yml info
 gitenv -c ~/.gitenv-custom.yml apply
+GITENV_CONFIG=~/.gitenv-custom.yml gitenv info
+```
 
-# Set log level for verbose output
-gitenv --log-level debug info
+#### `--repo PATH`
 
-# Control color output (auto, yes, no)
-gitenv --color=no info
-GITENV_COLOR=yes gitenv apply
+Override the repository root path for the current command.
 
-# Override repository at runtime
+```sh
 gitenv --repo ~/projects/other-env info
 GITENV_REPO=~/projects/other-env gitenv apply
 ```
 
-The `gitenv` command accepts these flags when present:
+#### `--log-level LEVEL`
 
-- `info` — Display planned symlinks and copies (default when no command specified)
-- `apply` — Create or update the planned links and copies
-- `--config PATH` or `-c PATH` — Override config file path (also via `$GITENV_CONFIG`)
-- `--repo PATH` — Override repository root path (also via `$GITENV_REPO`)
-- `--log-level LEVEL` — Set log output level: `debug`, `info`, `warn` (default), `error`
-- `--color MODE` — Color output mode: `auto` (default), `yes`, `no`
+Set log output level: `debug`, `info`, `warn` (default), `error`.
+
+```sh
+gitenv --log-level debug info
+gitenv --log-level error apply
+```
+
+#### `--color MODE`
+
+Control color output mode: `auto` (default), `yes`, `no`.
+
+```sh
+gitenv --color=no info
+gitenv --color=yes apply
+GITENV_COLOR=yes gitenv info
+```
