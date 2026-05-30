@@ -4,6 +4,8 @@ use gitenv::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::process::Command;
+use tempfile::TempDir;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ReadmeExample {
@@ -637,4 +639,133 @@ fn cannot_extract_examples_when_a_fence_is_not_closed() {
         extract_readme_yaml_examples(markdown),
         Err(ExtractError::UnclosedFence { line: 2 })
     );
+}
+
+// Scenario tests: validate that README examples execute correctly in temporary
+// directories. These tests verify that each documented configuration can be
+// parsed, loaded, and executed via the CLI.
+
+fn create_gitenv_command_for_home(home: &TempDir, repo: &TempDir) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_gitenv"));
+    command
+        .env("HOME", home.path())
+        .env("GITENV_REPO", repo.path())
+        // Keep tests deterministic when CI sets global config path variables.
+        .env_remove("XDG_CONFIG_HOME")
+        .env_remove("GITENV_CONFIG");
+    command
+}
+
+fn write_readme_example_config(home: &TempDir, yaml: &str) {
+    let config_path = home
+        .path()
+        .join(".config")
+        .join("gitenv")
+        .join("config.yml");
+    fs::create_dir_all(
+        config_path
+            .parent()
+            .expect("config directory should have a parent"),
+    )
+    .expect("config directory should be created");
+    fs::write(config_path, yaml).expect("config file should be written");
+}
+
+fn create_stub_includes(home: &TempDir, config: &Config) {
+    // For each include in the config, create a stub file if it's a path-based
+    // include. This ensures that `gitenv info` can load the config without
+    // failing on missing include files. Stub includes must have at least one
+    // valid source (even if the source path doesn't exist).
+    for include in &config.includes {
+        match include {
+            Include::Path { path, .. } => {
+                let include_path = if path.starts_with('~') {
+                    home.path().join(path.trim_start_matches("~/"))
+                } else {
+                    // For relative paths, resolve relative to the config directory
+                    home.path().join(".config").join("gitenv").join(path)
+                };
+
+                // Create parent directories if needed
+                if let Some(parent) = include_path.parent() {
+                    fs::create_dir_all(parent).ok();
+                }
+
+                // Write a minimal stub config with one source (even if path doesn't exist).
+                // This allows includes to parse successfully during info/apply.
+                let stub_config = concat!(
+                    "version: 1\n",
+                    "repository: \"~/tmp\"\n",
+                    "sources:\n",
+                    "  - from: \".\"\n",
+                    "    configs:\n",
+                    "      - stub.txt\n"
+                );
+                fs::write(include_path, stub_config).ok();
+            }
+            Include::Environment { .. } => {
+                // Environment-backed includes are resolved at runtime; no file creation needed
+            }
+        }
+    }
+}
+
+#[test]
+fn readme_examples_execute_without_error_in_temporary_directories() {
+    let readme = readme_text();
+    let examples = extract_readme_yaml_examples(&readme).expect("README examples must be valid");
+
+    // Verify that each README example can be executed via the CLI without error.
+    for example in examples {
+        // Parse the example to get the Config structure so we can create stub
+        // include files.
+        let config = match parse_config(&example.yaml) {
+            Ok(config) => config,
+            Err(error) => {
+                panic!(
+                    "README example '{}' should parse as valid config, but failed: {}",
+                    example.id, error
+                );
+            }
+        };
+
+        // Create temporary home and repository directories.
+        let home = TempDir::new().unwrap_or_else(|_| {
+            panic!(
+                "temporary home directory for '{}' should be created",
+                example.id
+            )
+        });
+        let repo = TempDir::new().unwrap_or_else(|_| {
+            panic!(
+                "temporary repository for '{}' should be created",
+                example.id
+            )
+        });
+
+        // Write the example config to the temporary home.
+        write_readme_example_config(&home, &example.yaml);
+
+        // Create stub files for any includes referenced in the config.
+        create_stub_includes(&home, &config);
+
+        // Run `gitenv info` with the example config and verify it succeeds.
+        let output = create_gitenv_command_for_home(&home, &repo)
+            .output()
+            .unwrap_or_else(|error| {
+                panic!(
+                    "gitenv info should execute for example '{}': {}",
+                    example.id, error
+                )
+            });
+
+        assert!(
+            output.status.success(),
+            "gitenv info should succeed for example '{}', but exited with code {:?}. \
+             stderr: {}",
+            example.id,
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }

@@ -68,7 +68,51 @@ Architectural and design decisions referenced by active increments:
 
 ## Current Backlog
 
-- No active coverage-gap backlog remains. Maintain 100% function, line, and
-  region coverage in repository checks, and treat any change that lowers
-  coverage as incomplete until the regression is restored or the project owner
-  explicitly approves a temporary exception.
+### Add README examples for undocumented configuration and CLI features
+
+**Why this increment exists**
+
+Increments 1 and 2 identified and validated existing 10 README examples. Seven
+categories of fully implemented configuration and CLI features remain
+undocumented in the README. This increment adds YAML example blocks and
+corresponding test scenario expectations for each feature gap to close the
+documentation-to-implementation parity gap.
+
+**What is completed**
+
+1. **Environment-backed source roots** (`from: $VAR` shorthand and canonical
+   object form `from: { env: VAR, optional: true }`) — Implemented in
+   `rust/src/config.rs` lines 91–112.
+
+2. **Source-level guards** (`when: to_exists` and `when: { directory_exists: path }`)
+   — Implemented in `rust/src/config.rs` lines 149–172.
+
+3. **Recursive selector and existing_directories_only flag** — Implemented
+   in `rust/src/config.rs` lines 302–304, validated at line 388.
+
+4. **Select item-level execution overrides** (`to`, `mkdir`, `overwrite`,
+   `backup_on_overwrite` on individual select items) — Supported in
+   `rust/src/config.rs` lines 310–318.
+
+5. **File item-level mkdir override** (`mkdir: true` on individual file items)
+   — Supported in `rust/src/config.rs` line 288.
+
+6. **Optional includes and environment-backed include forms** (both `Path { path, optional: true }`
+   and `Environment { env, optional: true }`) — Implemented in
+   `rust/src/config.rs` lines 187–209.
+
+7. **CLI feature examples** (explicit `info` subcommand invocation, `--config` flag usage,
+   `--log-level` flag with examples, `--color` flag with examples) — Implemented in
+   `rust/src/cli.rs` lines 70–103.
+
+**Review target**
+
+- [ ] Add YAML example blocks to `rust/README.md` for each of the 7 feature gaps
+- [ ] Add corresponding test scenario IDs and expectations to
+      `rust/tests/readme_examples.rs` expected_configs function
+- [ ] Verify all scenario tests pass (`readme_examples_execute_without_error_in_temporary_directories`)
+- [ ] Coverage maintained at 100% line/function/region
+- [ ] All wrapper checks pass (build, lint, tests, format, lint-md, coverage)
+
+**Coverage impact:** New test expectations added to existing test infrastructure;
+coverage should remain at 100% function/line/region.

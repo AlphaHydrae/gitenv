@@ -11,6 +11,28 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-30: Enrich README examples test suite with runtime scenario tests -
+  Add scenario test infrastructure in `rust/tests/readme_examples.rs` to execute
+  `gitenv info` against all 10 documented README YAML examples in temporary
+  directories with isolated HOME and GITENV_REPO environment. Add helper
+  functions to create stub include files (with minimal valid source configs) to
+  allow composition-with-includes examples to execute without "not found" errors.
+  Verify all 10 README examples parse correctly, execute successfully with exit
+  code 0, and complete without errors. Maintain 100.00% line/function/region
+  coverage. All wrapper checks pass (build, lint, tests, format, lint-md,
+  coverage).
+
+- 2026-05-30: Document undocumented supported configuration and CLI features -
+  Identify 7 categories of fully implemented but undocumented Rust features with
+  precise implementation file:line anchors: environment-backed source roots,
+  source-level guards, recursive selectors with existing_directories_only flag,
+  select item-level overrides, file item-level mkdir, optional includes and
+  environment-backed include forms, and CLI feature flag usage. Record feature
+  gaps in migration backlog with context for future README example and test
+  increments. Confirm non-runnable documentation sections (installation) are
+  intentionally marked and reasoned. No code changes; coverage remains at
+  100% function/line/region.
+
 - 2026-05-30: Align coverage policy with enforced 100% checks - Update the
   direct Rust CI coverage command to enforce 100% function, line, and region
   coverage, mark the coverage target as reached and maintained in migration and
