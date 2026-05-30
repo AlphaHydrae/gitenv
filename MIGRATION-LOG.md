@@ -11,6 +11,12 @@ Suggested entry shape:
 
 ## Entries
 
+- 2026-05-30: Align CLI env override names for color and log level - Switch
+  Rust CLI color override env handling from `COLOR` to `GITENV_COLOR`, add
+  `GITENV_LOG_LEVEL` as an environment override for `--log-level`, and update
+  CLI/runtime tests and Rust README command-line flag documentation to reflect
+  the new env contracts and precedence.
+
 - 2026-05-30: Add optional includes and CLI examples - Add README examples for
   optional includes with both `path` and `env` forms supporting
   `optional: true`, and add command-line usage documentation for the `info`

@@ -464,15 +464,18 @@ GITENV_REPO=~/projects/other-env gitenv apply
 ### `--log-level LEVEL`
 
 Set log output level: `debug`, `info`, `warn` (default), `error`.
+The command-line flag takes precedence over `GITENV_LOG_LEVEL`.
 
 ```sh
 gitenv --log-level debug info
 gitenv --log-level error apply
+GITENV_LOG_LEVEL=debug gitenv info
 ```
 
 ### `--color MODE`
 
 Control color output mode: `auto` (default), `yes`, `no`.
+The command-line flag takes precedence over `GITENV_COLOR`.
 
 ```sh
 gitenv --color=no info

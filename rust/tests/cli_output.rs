@@ -10,7 +10,10 @@ fn gitenv_command_for_home(home: &TempDir) -> Command {
         // Keep tests deterministic when CI sets global config path variables.
         .env_remove("XDG_CONFIG_HOME")
         .env_remove("GITENV_CONFIG")
-        .env_remove("GITENV_REPO");
+        .env_remove("GITENV_REPO")
+        .env_remove("GITENV_COLOR")
+        .env_remove("GITENV_LOG_LEVEL")
+        .env_remove("COLOR");
     command
 }
 
@@ -164,5 +167,66 @@ fn show_the_repository_precedence_source_in_debug_logs() {
     assert!(
         stderr.contains("resolved repository root from env precedence source"),
         "stderr should include the selected repository precedence source at debug level; got: {stderr}"
+    );
+}
+
+#[test]
+fn emit_debug_log_lines_to_stderr_when_log_level_is_set_by_env() {
+    let home = TempDir::new().expect("temporary home directory should be created");
+    let repository = create_repository_with_gitconfig();
+    write_minimal_config(&home, repository.path());
+
+    let output = gitenv_command_for_home(&home)
+        .env("GITENV_LOG_LEVEL", "debug")
+        .output()
+        .expect("binary should run");
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.is_empty(),
+        "stderr should contain debug log lines when GITENV_LOG_LEVEL=debug"
+    );
+    assert!(
+        stderr.contains("[DEBUG]") || stderr.contains("[INFO]") || stderr.contains("[TRACE]"),
+        "stderr should contain bracketed log level labels; got: {stderr}"
+    );
+}
+
+#[test]
+fn force_colorized_output_when_gitenv_color_yes_is_set() {
+    let home = TempDir::new().expect("temporary home directory should be created");
+    let repository = create_repository_with_gitconfig();
+    write_minimal_config(&home, repository.path());
+
+    let output = gitenv_command_for_home(&home)
+        .env("GITENV_COLOR", "yes")
+        .output()
+        .expect("binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("\u{1b}["),
+        "stdout should include ANSI color escapes when GITENV_COLOR=yes; got: {stdout}"
+    );
+}
+
+#[test]
+fn ignore_the_legacy_color_environment_variable_name() {
+    let home = TempDir::new().expect("temporary home directory should be created");
+    let repository = create_repository_with_gitconfig();
+    write_minimal_config(&home, repository.path());
+
+    let output = gitenv_command_for_home(&home)
+        .env("COLOR", "yes")
+        .output()
+        .expect("binary should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("\u{1b}["),
+        "stdout should stay uncolored when only legacy COLOR is set; got: {stdout}"
     );
 }

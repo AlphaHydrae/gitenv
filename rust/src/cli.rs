@@ -94,12 +94,14 @@ pub struct Cli {
     #[arg(skip = None)]
     pub(crate) repo_value_source: Option<ValueSource>,
     /// Set the diagnostic log level. Log messages are written to stderr.
-    #[arg(long, default_value = "warn", value_enum)]
+    ///
+    /// CLI flag takes precedence over the `GITENV_LOG_LEVEL` environment variable.
+    #[arg(long, env = "GITENV_LOG_LEVEL", default_value = "warn", value_enum)]
     pub log_level: LogLevel,
     /// Control ANSI color output (`auto`, `yes`, `no`).
     ///
-    /// CLI flag takes precedence over the `COLOR` environment variable.
-    #[arg(long, env = "COLOR", default_value = "auto", value_enum)]
+    /// CLI flag takes precedence over the `GITENV_COLOR` environment variable.
+    #[arg(long, env = "GITENV_COLOR", default_value = "auto", value_enum)]
     pub color: ColorMode,
 }
 
@@ -1000,6 +1002,31 @@ mod tests {
         assert_eq!(
             config_path_argument.get_env(),
             Some(OsStr::new("GITENV_CONFIG"))
+        );
+    }
+
+    #[test]
+    fn register_gitenv_color_as_the_cli_color_environment_variable() {
+        let command = Cli::command();
+        let color_argument = command
+            .get_arguments()
+            .find(|arg| arg.get_id().as_str() == "color")
+            .expect("Cli should define a color argument");
+
+        assert_eq!(color_argument.get_env(), Some(OsStr::new("GITENV_COLOR")));
+    }
+
+    #[test]
+    fn register_gitenv_log_level_as_the_cli_log_level_environment_variable() {
+        let command = Cli::command();
+        let log_level_argument = command
+            .get_arguments()
+            .find(|arg| arg.get_id().as_str() == "log_level")
+            .expect("Cli should define a log_level argument");
+
+        assert_eq!(
+            log_level_argument.get_env(),
+            Some(OsStr::new("GITENV_LOG_LEVEL"))
         );
     }
 
