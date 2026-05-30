@@ -17,6 +17,31 @@ created symlink ~/.zshrc -> ~/projects/dotfiles/.zshrc
 copied ~/projects/dotfiles/.gitconfig to ~/projects/dotfiles/.gitconfig
 ```
 
+## Table of contents
+
+- [Installation](#installation)
+- [Configuration](#configuration)
+  - [Repository](#repository)
+  - [Defaults](#defaults)
+  - [Change the destination](#change-the-destination)
+  - [Copy files](#copy-files)
+  - [Sub-folders in the repository](#sub-folders-in-the-repository)
+  - [Rename targets](#rename-targets)
+  - [Overwrite and backup](#overwrite-and-backup)
+  - [File-level mkdir override](#file-level-mkdir-override)
+  - [Environment-backed source roots](#environment-backed-source-roots)
+  - [Source-level guards](#source-level-guards)
+  - [Select multiple files](#select-multiple-files)
+  - [Recursive select for existing target directories](#recursive-select-for-existing-target-directories)
+  - [Select item-level overrides](#select-item-level-overrides)
+  - [Composition with includes](#composition-with-includes)
+  - [Optional includes](#optional-includes)
+- [Command-line flags](#command-line-flags)
+  - [--config PATH / -c PATH](#--config-path---c-path)
+  - [--repo PATH](#--repo-path)
+  - [--log-level LEVEL](#--log-level-level)
+  - [--color MODE](#--color-mode)
+
 ## Installation
 
 Installation instructions are not finalized yet.
@@ -413,11 +438,11 @@ sources:
 Use `optional: true` on `path` and `env` includes to silently skip missing files
 or environment variables. When `optional` is not specified, includes are required.
 
-### Command-line flags
+## Command-line flags
 
 gitenv can be configured at runtime with the following flags and environment variables that override YAML values.
 
-#### `--config PATH` / `-c PATH`
+### `--config PATH` / `-c PATH`
 
 Override the config file path for the current command.
 
@@ -427,7 +452,7 @@ gitenv -c ~/.gitenv-custom.yml apply
 GITENV_CONFIG=~/.gitenv-custom.yml gitenv info
 ```
 
-#### `--repo PATH`
+### `--repo PATH`
 
 Override the repository root path for the current command.
 
@@ -436,7 +461,7 @@ gitenv --repo ~/projects/other-env info
 GITENV_REPO=~/projects/other-env gitenv apply
 ```
 
-#### `--log-level LEVEL`
+### `--log-level LEVEL`
 
 Set log output level: `debug`, `info`, `warn` (default), `error`.
 
@@ -445,7 +470,7 @@ gitenv --log-level debug info
 gitenv --log-level error apply
 ```
 
-#### `--color MODE`
+### `--color MODE`
 
 Control color output mode: `auto` (default), `yes`, `no`.
 
