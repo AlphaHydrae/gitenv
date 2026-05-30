@@ -8,20 +8,11 @@ pruned. The overall migration plan is located in
 
 ## Increment Workflow Rules
 
-### Coverage Baseline And Regression Rules
+### Coverage Regression Rules
 
-- For every increment, capture a coverage baseline **BEFORE** editing tracked
-  files.
-- If baseline capture is missed, recover it from a detached temporary worktree
-  at `HEAD` under `tmp/agent/` instead of using `git stash` in the active
-  working tree.
-- Treat the baseline as the value captured from the branch state at increment
-  start (or recovered from detached `HEAD` per policy), not from an earlier
-  conversation snapshot.
-- Do not infer or restate a baseline from memory; cite the exact command output
-  captured for the current increment.
-- If post-change coverage is lower than that baseline, keep the increment open
-  until coverage is restored or the project owner explicitly approves the drop.
+- Run coverage checks for increments that change code.
+- If post-change coverage is lower than 100%, keep the increment open until
+  coverage is restored or the project owner explicitly approves the drop.
 - Capture and report follow-up work for significant coverage decreases and other
   gaps in increment scope:
   1. if follow-up is a discrete task, create a new increment with clear scope
@@ -40,7 +31,7 @@ pruned. The overall migration plan is located in
   1. required wrapper checks executed (`tests`, `lint`, `build`, `format`,
      `coverage`, and `lint-md` when docs changed),
   2. command outputs show success exit codes,
-  3. coverage baseline and post-change values are both reported.
+  3. coverage output confirms the coverage target is still met.
 - If scope changes mid-increment, rewrite the increment entry before claiming
   completion so the backlog reflects the real agreed scope.
 

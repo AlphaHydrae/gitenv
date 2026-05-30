@@ -38,10 +38,6 @@ them to EVERY task, EVERY time.**
 - **🔴 GUIDELINES MUST BE APPLIED DURING CHANGES, NOT AFTER.** Keep the relevant
   contribution guideline section open while editing and review the exact rule
   before each change.
-- **🔴 PRE-CHANGE COVERAGE BASELINE GATE IS MANDATORY.** For migration
-  increments, do not edit any tracked repository file until you have captured a
-  coverage baseline from `./.agent/scripts/coverage.sh` and recorded the
-  baseline value in your working notes/output for later comparison.
 - **🔴 PROACTIVELY SURFACE MAINTAINABILITY DEBT.** Do not wait for a human to
   ask about readability issues. If a file grows large, mixes multiple concerns,
   or lacks required explanatory documentation, call it out immediately and
@@ -97,22 +93,11 @@ them to EVERY task, EVERY time.**
   - Always run `./.agent/scripts/lint-md.sh` for documentation changes.
   - Always run `./.agent/scripts/build.sh` to verify compilation.
   - Always run `./.agent/scripts/format.sh` for formatting verification.
-  - For migration increments, always run `./.agent/scripts/coverage.sh` again
-    after changes and report both previous and current coverage.
+  - For migration increments, always run `./.agent/scripts/coverage.sh` after
+    changes and report the resulting coverage.
   - **Coverage freshness gate:** after each coverage run, read
     `tmp/agent/coverage_output.log` and verify it contains the same current-run
     timestamp markers plus exit code before using it as evidence.
-  - If you realize baseline was missed after edits started, stop completion
-    reporting immediately and run a recovery baseline before proceeding.
-    - **Recovery baseline protocol (safe for review state):**
-      1. Create a detached temporary worktree at current `HEAD` under
-         `tmp/agent/`.
-      2. Run `./.agent/scripts/coverage.sh` inside that temporary worktree.
-      3. Capture the reported `Total line coverage` as the baseline.
-      4. Remove the temporary worktree after capture.
-    - **🔴 NEVER use `git stash` or any in-place branch/worktree mutation in the
-      active working tree to reconstruct baseline coverage.** This can disrupt
-      human review context and changed-file visibility.
   - If coverage decreases, **do not consider the increment complete.** The
     current repository standard is 100% function, line, and region coverage;
     restore coverage before claiming completion. Do not add any new uncovered

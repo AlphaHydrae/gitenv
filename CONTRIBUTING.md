@@ -189,15 +189,12 @@ When the summary reports a missed line, beware this trap that has cost real time
 
 Apply checks that match your change scope.
 
-0. For migration increments, run coverage before making code changes to capture
-   the baseline used to detect regressions.
 1. Ensure behavior is correct to the best of your ability.
 2. Run relevant tests.
 3. Run linting checks.
 4. Run build checks.
 5. Run documentation lint checks when Markdown files changed.
 6. Run formatting.
-7. Run coverage for code changes. Avoid significant coverage drops.
 7. Run coverage for code changes. Restore any drop before considering the
   change complete.
 

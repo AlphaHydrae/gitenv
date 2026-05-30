@@ -40,30 +40,7 @@ Before starting an increment:
    including the removal condition.
 
 5. **Never use stash to preserve work state** — Do not use `git stash` in the
-   active working tree. If baseline capture is missed and you need to preserve
-   changes, use a temporary worktree under `tmp/agent/` instead (see recovery
-   protocol below). Stash hides changes and complicates recovery; worktrees
-   preserve review context.
-
-6. **Capture baseline coverage first** — For migration increments, run
-   `./.agent/scripts/coverage.sh` before making code changes and record the
-   total line coverage as the baseline for drop detection.
-
-## ⚠️ BASELINE CAPTURE GATE (Mandatory before proceeding to Implementation)
-
-**🔴 STOP.** **DO NOT** read the next section or make **ANY** code changes until:
-
-- [ ] You have run `./.agent/scripts/coverage.sh` at current `HEAD`
-- [ ] You have captured the reported `Total line coverage: XX.XX%`
-- [ ] You have recorded this baseline value in your working notes or session
-      memory for later comparison
-
-If you cannot capture the baseline (e.g., the repository is in a broken state),
-stop and ask the human before proceeding.
-
-**Rationale:** Missing this baseline means you cannot detect coverage regressions
-in your implementation. Detecting the miss late forces a stash-based recovery,
-which corrupts the review context. Capture it now, before implementation starts.
+   active working tree. Stash hides changes and complicates recovery.
 
 ## ⚠️ SHELL COMMAND SAFETY PREFLIGHT (Mandatory before calling `run_in_terminal`)
 
@@ -133,11 +110,10 @@ Run these checks from the repository root (in order):
    - Output captured in `tmp/agent/lint_output.log`.
 
 4. **Coverage** — `./.agent/scripts/coverage.sh`
-   - Run once before implementation for baseline, and once after changes.
-   - Reports total line coverage for baseline and current state.
-   - Enforces the repository standard of 100% function, line, and region
-     coverage.
-   - Output captured in `tmp/agent/coverage_output.log`.
+    - Run after implementation changes.
+    - Enforces the repository standard of 100% function, line, and region
+       coverage.
+    - Output captured in `tmp/agent/coverage_output.log`.
      - Default runs also write line-by-line annotated coverage to
        `tmp/agent/coverage_annotated.log`.
    - If baseline was missed, recover it using a detached temporary worktree
