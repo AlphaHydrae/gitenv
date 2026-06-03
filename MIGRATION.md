@@ -152,6 +152,82 @@ the context fully represents stage runtime inputs.
 - Public entrypoints stay stable around the primary stage APIs unless an
   explicitly approved increment states otherwise.
 
+## Maintainability and Test Organization Refactor Target
+
+This section captures a post-implementation maintainability review performed
+during Phase 4 hardening (2026-06-03). It defines the intended end state for the
+test-organization and code-quality cleanup tracked by increments 71+ in
+[MIGRATION-INCREMENTS.md](./MIGRATION-INCREMENTS.md).
+
+### Assessment summary
+
+The Rust implementation is in good shape and broadly idiomatic. At review time
+it was `clippy`-clean across all targets, `rustfmt`-enforced, passing all tests
+(371), and built on a clean two-stage planner (`config` -> `intent` ->
+`operation` -> `actions`/`status`) layered over a trait-based dependency
+boundary. Production code is panic-free; all `unwrap`/`expect` calls live in
+tests.
+
+The dominant maintainability issue is test organization, not production logic:
+the test-to-production line ratio is roughly 4:1, and unit tests live in very
+large inline `#[cfg(test)] mod tests` blocks. For example, `src/intent.rs` is
+about 3,150 lines, of which roughly 2,600 are one inline test module.
+
+### Test organization problem and root cause
+
+The size of the source files is a symptom. The driver is the 100% function,
+line, and **region** coverage gate enforced by the `coverage` wrapper. Hitting
+full region coverage requires exercising every branch of private helpers, which
+forces white-box tests that need access to module internals. That access is the
+reason the tests are inline (a child module can see its parent's private items;
+the separate `tests/` crate cannot). The coverage policy therefore drives both
+the test volume and the inline placement.
+
+### Test organization end state
+
+- Move each inline `#[cfg(test)] mod tests` body into a sibling file declared as
+  `#[cfg(test)] mod tests;` and stored at `src/<module>/tests.rs`. The test
+  module remains a child of the production module in the same crate, so it keeps
+  full access to private items with no visibility widening. This is the same
+  file-plus-directory module layout already used by `src/operation.rs` and
+  `src/operation/directory_listing.rs`. Inline tests are not moved into the
+  `tests/` integration crate, because that crate only sees the public API and
+  would force internals to become `pub` purely for testing.
+- Split oversized test files into themed submodules (for example
+  `src/intent/tests/{defaults,includes,guards,selectors}.rs`) so each test file
+  stays readable on its own.
+- Centralize duplicated test fixtures and model builders into a crate-internal
+  `#[cfg(test)] mod test_support`, and route the integration tests through the
+  existing `tests/support.rs`, removing the repeated tempdir, command-builder,
+  and plan-builder boilerplate.
+- Revisit the 100% region-coverage threshold as an explicit, owner-approved
+  policy decision. Options range from keeping it as-is, to relaxing the region
+  dimension while keeping 100% line/function, to keeping 100% with targeted
+  exclusions on genuinely defensive code. This is the largest available lever on
+  test volume and must not be changed unilaterally under the coverage rules.
+- Migrate hand-written golden expectations toward `insta` snapshot tests and
+  collapse repetitive matrix tests with `rstest` parameterization to reduce the
+  volume of hand-maintained expected data.
+
+### Code-quality targets
+
+These are smaller, localized improvements identified by the review:
+
+- Replace the double argument parse in `cli.rs` (currently two full `clap`
+  parses to recover one `ValueSource`) with a single-pass
+  `from_arg_matches` approach.
+- Make the filesystem boundary trait surface consistent: `DirectoryProbe`
+  should take `&Path` like the other boundary traits instead of `&str`, and the
+  direct `is_dir` probe in operation planning should go through the boundary
+  rather than touching the real filesystem directly.
+- Adopt `thiserror` for `ProgramError` to remove the hand-written `Display`
+  boilerplate, and reconsider the `Eq` derive that currently forces stringly
+  typed I/O errors with no error source chaining.
+- Remove cross-module duplication (the ANSI escape constants defined in both
+  `cli.rs` and `logging.rs`, the `IntentPlanner`/`OperationPlanner` type aliases
+  duplicated across `app/apply.rs` and `app/info.rs`) and dead indirection (the
+  identity `encode_color_mode` helper).
+
 ## Configuration Migration
 
 ## New Format: Declarative YAML
@@ -394,29 +470,20 @@ implemented in a future increment.
 - [x] Do not copy files when the target file already matches (hash).
 - [x] Improve action tests by reading the whole temporary test directory state.
 
-## Config Parity Gaps
+The following refactorings come from the 2026-06-03 maintainability review and
+are detailed in the
+[Maintainability and Test Organization Refactor Target](#maintainability-and-test-organization-refactor-target)
+section above (tracked by increments 71+):
 
-These behaviors appear in real configurations and are not yet supported by the
-Rust implementation. Both are tracked as active increments in
-[`MIGRATION-INCREMENTS.md`](./MIGRATION-INCREMENTS.md).
-
-### Directory symlink support
-
-The Ruby DSL allows symlinking a directory, not only regular files. Some
-configurations use the same `symlink` call on directory sources to link
-versioned config directories into place. The Rust operation stage currently
-requires sources to be regular files or file symlinks; directory sources are
-rejected during source availability checks in `fs_adapter.rs`. Support requires
-changes to both the source readability check and the apply executor.
-
-### Repository binding from env or CLI flag
-
-The Ruby CLI exposes a `--repo PATH` flag and a `GITENV_REPO` environment
-variable that override the repository root at runtime without editing the config
-file. The Rust implementation has no equivalent; the repository path is always
-declared inside the YAML config. Users who rely on `--repo` or `GITENV_REPO` to
-switch between repositories will need to restructure their config or maintain
-multiple config files during migration.
+- [ ] Reorganize inline unit tests into sibling test files and themed
+  submodules.
+- [ ] Centralize duplicated test fixtures into shared test-support modules.
+- [ ] Revisit the 100% region-coverage threshold as an explicit policy
+  decision.
+- [ ] Adopt snapshot/parameterized test libraries (`insta`, `rstest`) to reduce
+  hand-written test volume.
+- [ ] Address code-quality targets: single-pass CLI parse, boundary trait
+  consistency, `thiserror` adoption, and cross-module deduplication.
 
 ## Future Work
 
